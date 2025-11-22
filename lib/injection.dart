@@ -30,8 +30,7 @@ Future<void> initializeDependencies() async {
 
   getIt.registerFactory<DiscoveryBloc>(
     () => DiscoveryBloc(
-      bleService: getIt<BleService>(),
-      databaseService: getIt<DatabaseService>(),
+      peerRepository: getIt<DatabaseService>().peerRepository,
     ),
   );
 

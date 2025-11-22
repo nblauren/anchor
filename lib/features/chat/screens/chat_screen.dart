@@ -9,7 +9,14 @@ import '../widgets/message_bubble_widget.dart';
 
 /// Screen for individual chat conversation
 class ChatScreen extends StatefulWidget {
-  const ChatScreen({super.key});
+  const ChatScreen({
+    super.key,
+    required this.peerId,
+    required this.peerName,
+  });
+
+  final String peerId;
+  final String peerName;
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -22,6 +29,11 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void initState() {
     super.initState();
+    // Open conversation for this peer
+    context.read<ChatBloc>().add(OpenConversation(
+          participantId: widget.peerId,
+          participantName: widget.peerName,
+        ));
     context.read<ChatBloc>().add(const MarkMessagesRead());
 
     _scrollController.addListener(() {

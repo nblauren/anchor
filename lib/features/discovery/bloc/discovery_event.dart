@@ -1,6 +1,6 @@
-import 'package:equatable/equatable.dart';
+import 'dart:typed_data';
 
-import '../../../data/models/discovered_user.dart';
+import 'package:equatable/equatable.dart';
 
 abstract class DiscoveryEvent extends Equatable {
   const DiscoveryEvent();
@@ -9,49 +9,93 @@ abstract class DiscoveryEvent extends Equatable {
   List<Object?> get props => [];
 }
 
-/// Start scanning for nearby users
-class StartDiscovery extends DiscoveryEvent {
-  const StartDiscovery();
+/// Load discovered peers from local database
+class LoadDiscoveredPeers extends DiscoveryEvent {
+  const LoadDiscoveredPeers();
 }
 
-/// Stop scanning
-class StopDiscovery extends DiscoveryEvent {
-  const StopDiscovery();
-}
+/// A new peer was discovered via BLE (called by BLE service later)
+class PeerDiscovered extends DiscoveryEvent {
+  const PeerDiscovered({
+    required this.peerId,
+    required this.name,
+    this.age,
+    this.bio,
+    this.thumbnailData,
+    this.rssi,
+  });
 
-/// A new user was discovered nearby
-class UserDiscovered extends DiscoveryEvent {
-  const UserDiscovered(this.user);
-  final DiscoveredUser user;
+  final String peerId;
+  final String name;
+  final int? age;
+  final String? bio;
+  final Uint8List? thumbnailData;
+  final int? rssi;
 
   @override
-  List<Object?> get props => [user];
+  List<Object?> get props => [peerId, name, age, bio, thumbnailData, rssi];
 }
 
-/// A user is no longer nearby
-class UserLost extends DiscoveryEvent {
-  const UserLost(this.userId);
-  final String userId;
+/// Peer data updated (signal strength, new info)
+class PeerUpdated extends DiscoveryEvent {
+  const PeerUpdated({
+    required this.peerId,
+    this.name,
+    this.age,
+    this.bio,
+    this.thumbnailData,
+    this.rssi,
+  });
+
+  final String peerId;
+  final String? name;
+  final int? age;
+  final String? bio;
+  final Uint8List? thumbnailData;
+  final int? rssi;
 
   @override
-  List<Object?> get props => [userId];
+  List<Object?> get props => [peerId, name, age, bio, thumbnailData, rssi];
 }
 
-/// Refresh discovered users from local storage
-class RefreshDiscoveredUsers extends DiscoveryEvent {
-  const RefreshDiscoveredUsers();
-}
-
-/// View a discovered user's profile
-class ViewUserProfile extends DiscoveryEvent {
-  const ViewUserProfile(this.userId);
-  final String userId;
+/// A peer hasn't been seen for a while
+class PeerLost extends DiscoveryEvent {
+  const PeerLost(this.peerId);
+  final String peerId;
 
   @override
-  List<Object?> get props => [userId];
+  List<Object?> get props => [peerId];
 }
 
-/// Clear all discovered users
-class ClearDiscoveredUsers extends DiscoveryEvent {
-  const ClearDiscoveredUsers();
+/// Block a peer
+class BlockPeer extends DiscoveryEvent {
+  const BlockPeer(this.peerId);
+  final String peerId;
+
+  @override
+  List<Object?> get props => [peerId];
+}
+
+/// Unblock a peer
+class UnblockPeer extends DiscoveryEvent {
+  const UnblockPeer(this.peerId);
+  final String peerId;
+
+  @override
+  List<Object?> get props => [peerId];
+}
+
+/// Refresh peers list (pull to refresh)
+class RefreshPeers extends DiscoveryEvent {
+  const RefreshPeers();
+}
+
+/// Load mock data for testing
+class LoadMockPeers extends DiscoveryEvent {
+  const LoadMockPeers();
+}
+
+/// Clear error state
+class ClearDiscoveryError extends DiscoveryEvent {
+  const ClearDiscoveryError();
 }

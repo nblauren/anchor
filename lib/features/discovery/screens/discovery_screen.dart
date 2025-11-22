@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
@@ -7,9 +5,10 @@ import '../../../core/theme/app_theme.dart';
 import '../bloc/discovery_bloc.dart';
 import '../bloc/discovery_event.dart';
 import '../bloc/discovery_state.dart';
-import '../widgets/user_card_widget.dart';
+import '../widgets/peer_grid_tile.dart';
+import 'peer_detail_screen.dart';
 
-/// Main discovery screen showing a grid of nearby users
+/// Discovery screen showing grid of nearby peers
 class DiscoveryScreen extends StatefulWidget {
   const DiscoveryScreen({super.key});
 
@@ -21,224 +20,246 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
   @override
   void initState() {
     super.initState();
-    context.read<DiscoveryBloc>().add(const StartDiscovery());
+    // Load peers on screen open
+    context.read<DiscoveryBloc>().add(const LoadDiscoveredPeers());
+  }
+
+  Future<void> _onRefresh() async {
+    context.read<DiscoveryBloc>().add(const RefreshPeers());
+    // Wait a bit for visual feedback
+    await Future.delayed(const Duration(milliseconds: 500));
+  }
+
+  void _loadMockData() {
+    context.read<DiscoveryBloc>().add(const LoadMockPeers());
+  }
+
+  void _openPeerDetail(DiscoveredPeer peer) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => BlocProvider.value(
+          value: context.read<DiscoveryBloc>(),
+          child: PeerDetailScreen(peer: peer),
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Discover'),
-        actions: [
-          BlocBuilder<DiscoveryBloc, DiscoveryState>(
-            builder: (context, state) {
-              return IconButton(
-                icon: Icon(
-                  state.status == DiscoveryStatus.scanning
-                      ? Icons.bluetooth_searching
-                      : Icons.bluetooth,
-                  color: state.status == DiscoveryStatus.scanning
-                      ? AppTheme.primaryColor
-                      : AppTheme.textSecondary,
+    return BlocConsumer<DiscoveryBloc, DiscoveryState>(
+      listener: (context, state) {
+        if (state.errorMessage != null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(state.errorMessage!)),
+          );
+          context.read<DiscoveryBloc>().add(const ClearDiscoveryError());
+        }
+      },
+      builder: (context, state) {
+        return Scaffold(
+          appBar: AppBar(
+            title: const Text('Discover'),
+            actions: [
+              // Peer count badge
+              if (state.hasPeers)
+                Container(
+                  margin: const EdgeInsets.only(right: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primaryColor.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.people,
+                        size: 16,
+                        color: AppTheme.primaryColor,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        '${state.peerCount}',
+                        style: TextStyle(
+                          color: AppTheme.primaryColor,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-                onPressed: () {
-                  if (state.status == DiscoveryStatus.scanning) {
-                    context.read<DiscoveryBloc>().add(const StopDiscovery());
-                  } else {
-                    context.read<DiscoveryBloc>().add(const StartDiscovery());
-                  }
-                },
+              // Debug: Load mock data
+              IconButton(
+                icon: const Icon(Icons.bug_report),
+                tooltip: 'Load mock data',
+                onPressed: _loadMockData,
+              ),
+            ],
+          ),
+          body: _buildBody(state),
+        );
+      },
+    );
+  }
+
+  Widget _buildBody(DiscoveryState state) {
+    if (state.status == DiscoveryStatus.loading) {
+      return const Center(
+        child: CircularProgressIndicator(),
+      );
+    }
+
+    if (state.status == DiscoveryStatus.error && !state.hasPeers) {
+      return _buildErrorState(state);
+    }
+
+    if (!state.hasPeers) {
+      return _buildEmptyState();
+    }
+
+    return RefreshIndicator(
+      onRefresh: _onRefresh,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          // Responsive column count: 2 for phones, 3 for tablets
+          final crossAxisCount = constraints.maxWidth > 600 ? 3 : 2;
+
+          return GridView.builder(
+            padding: const EdgeInsets.all(12),
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: crossAxisCount,
+              childAspectRatio: 0.75, // Taller cards
+              crossAxisSpacing: 12,
+              mainAxisSpacing: 12,
+            ),
+            itemCount: state.visiblePeers.length,
+            itemBuilder: (context, index) {
+              final peer = state.visiblePeers[index];
+              return PeerGridTile(
+                peer: peer,
+                onTap: () => _openPeerDetail(peer),
               );
             },
-          ),
-        ],
-      ),
-      body: BlocBuilder<DiscoveryBloc, DiscoveryState>(
-        builder: (context, state) {
-          if (state.status == DiscoveryStatus.loading) {
-            return const Center(child: CircularProgressIndicator());
-          }
-
-          if (state.status == DiscoveryStatus.error) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(
-                    Icons.bluetooth_disabled,
-                    size: 64,
-                    color: AppTheme.textSecondary,
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    state.errorMessage ?? 'An error occurred',
-                    style: const TextStyle(color: AppTheme.textSecondary),
-                  ),
-                  const SizedBox(height: 16),
-                  ElevatedButton(
-                    onPressed: () {
-                      context.read<DiscoveryBloc>().add(const StartDiscovery());
-                    },
-                    child: const Text('Retry'),
-                  ),
-                ],
-              ),
-            );
-          }
-
-          if (state.discoveredUsers.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    state.status == DiscoveryStatus.scanning
-                        ? Icons.radar
-                        : Icons.people_outline,
-                    size: 80,
-                    color: AppTheme.textSecondary,
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    state.status == DiscoveryStatus.scanning
-                        ? 'Scanning for people nearby...'
-                        : 'No one found yet',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          color: AppTheme.textSecondary,
-                        ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'People using Anchor nearby will appear here',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: AppTheme.textHint,
-                        ),
-                    textAlign: TextAlign.center,
-                  ),
-                  if (state.status != DiscoveryStatus.scanning) ...[
-                    const SizedBox(height: 24),
-                    ElevatedButton.icon(
-                      onPressed: () {
-                        context.read<DiscoveryBloc>().add(const StartDiscovery());
-                      },
-                      icon: const Icon(Icons.search),
-                      label: const Text('Start Scanning'),
-                    ),
-                  ],
-                ],
-              ),
-            );
-          }
-
-          return RefreshIndicator(
-            onRefresh: () async {
-              context.read<DiscoveryBloc>().add(const RefreshDiscoveredUsers());
-            },
-            child: CustomScrollView(
-              slivers: [
-                // Scanning indicator
-                if (state.status == DiscoveryStatus.scanning)
-                  SliverToBoxAdapter(
-                    child: Container(
-                      padding: const EdgeInsets.all(12),
-                      color: AppTheme.primaryColor.withOpacity(0.1),
-                      child: const Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: AppTheme.primaryColor,
-                            ),
-                          ),
-                          SizedBox(width: 12),
-                          Text(
-                            'Scanning for people nearby...',
-                            style: TextStyle(color: AppTheme.primaryColor),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-
-                // Nearby users section
-                if (state.nearbyUsers.isNotEmpty) ...[
-                  SliverPadding(
-                    padding: const EdgeInsets.all(16),
-                    sliver: SliverToBoxAdapter(
-                      child: Text(
-                        'Nearby Now (${state.nearbyUsers.length})',
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                    ),
-                  ),
-                  SliverPadding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    sliver: SliverGrid(
-                      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: 2,
-                        mainAxisSpacing: 16,
-                        crossAxisSpacing: 16,
-                        childAspectRatio: 0.75,
-                      ),
-                      delegate: SliverChildBuilderDelegate(
-                        (context, index) {
-                          final user = state.nearbyUsers[index];
-                          return UserCardWidget(
-                            user: user,
-                            onTap: () => _viewProfile(context, user.profile.id),
-                          );
-                        },
-                        childCount: state.nearbyUsers.length,
-                      ),
-                    ),
-                  ),
-                ],
-
-                // All discovered users
-                SliverPadding(
-                  padding: const EdgeInsets.all(16),
-                  sliver: SliverToBoxAdapter(
-                    child: Text(
-                      'Previously Seen (${state.discoveredUsers.length})',
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                  ),
-                ),
-                SliverPadding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  sliver: SliverGrid(
-                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 2,
-                      mainAxisSpacing: 16,
-                      crossAxisSpacing: 16,
-                      childAspectRatio: 0.75,
-                    ),
-                    delegate: SliverChildBuilderDelegate(
-                      (context, index) {
-                        final user = state.discoveredUsers[index];
-                        return UserCardWidget(
-                          user: user,
-                          onTap: () => _viewProfile(context, user.profile.id),
-                        );
-                      },
-                      childCount: state.discoveredUsers.length,
-                    ),
-                  ),
-                ),
-                const SliverPadding(padding: EdgeInsets.only(bottom: 100)),
-              ],
-            ),
           );
         },
       ),
     );
   }
 
-  void _viewProfile(BuildContext context, String userId) {
-    context.read<DiscoveryBloc>().add(ViewUserProfile(userId));
-    // TODO: Navigate to profile detail screen
+  Widget _buildEmptyState() {
+    return RefreshIndicator(
+      onRefresh: _onRefresh,
+      child: ListView(
+        children: [
+          SizedBox(
+            height: MediaQuery.of(context).size.height * 0.7,
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(32),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    // Animated radar icon
+                    Container(
+                      width: 120,
+                      height: 120,
+                      decoration: BoxDecoration(
+                        color: AppTheme.primaryColor.withValues(alpha: 0.1),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                        Icons.radar,
+                        size: 64,
+                        color: AppTheme.primaryColor.withValues(alpha: 0.6),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    Text(
+                      'No one nearby',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'When other Anchor users are nearby,\nthey\'ll appear here.',
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: AppTheme.textSecondary,
+                          ),
+                    ),
+                    const SizedBox(height: 32),
+                    // Pull to refresh hint
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.arrow_downward,
+                          size: 16,
+                          color: AppTheme.textHint,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Pull down to scan',
+                          style: TextStyle(
+                            color: AppTheme.textHint,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 24),
+                    // Debug button
+                    OutlinedButton.icon(
+                      onPressed: _loadMockData,
+                      icon: const Icon(Icons.bug_report, size: 18),
+                      label: const Text('Load test data'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildErrorState(DiscoveryState state) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.error_outline,
+              size: 64,
+              color: AppTheme.errorColor,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Something went wrong',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              state.errorMessage ?? 'Please try again',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: AppTheme.textSecondary),
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton.icon(
+              onPressed: () {
+                context.read<DiscoveryBloc>().add(const LoadDiscoveredPeers());
+              },
+              icon: const Icon(Icons.refresh),
+              label: const Text('Retry'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
