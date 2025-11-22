@@ -1,8 +1,8 @@
+import 'dart:io';
+
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:uuid/uuid.dart';
 
 import '../../../core/utils/logger.dart';
-import '../../../data/models/user_profile.dart';
 import '../../../services/database_service.dart';
 import '../../../services/image_service.dart';
 import 'profile_event.dart';
@@ -16,19 +16,19 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
         _imageService = imageService,
         super(const ProfileState()) {
     on<LoadProfile>(_onLoadProfile);
-    on<UpdateName>(_onUpdateName);
-    on<UpdateAge>(_onUpdateAge);
-    on<UpdateBio>(_onUpdateBio);
+    on<CreateProfile>(_onCreateProfile);
+    on<UpdateProfile>(_onUpdateProfile);
     on<AddPhoto>(_onAddPhoto);
     on<RemovePhoto>(_onRemovePhoto);
-    on<UpdateInterests>(_onUpdateInterests);
-    on<SaveProfile>(_onSaveProfile);
-    on<CreateProfile>(_onCreateProfile);
+    on<ReorderPhotos>(_onReorderPhotos);
+    on<SetPrimaryPhoto>(_onSetPrimaryPhoto);
+    on<PickPhotoFromGallery>(_onPickPhotoFromGallery);
+    on<PickPhotoFromCamera>(_onPickPhotoFromCamera);
+    on<ClearError>(_onClearError);
   }
 
   final DatabaseService _databaseService;
   final ImageService _imageService;
-  final _uuid = const Uuid();
 
   Future<void> _onLoadProfile(
     LoadProfile event,
@@ -37,16 +37,24 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
     emit(state.copyWith(status: ProfileStatus.loading));
 
     try {
-      final profile = await _databaseService.profileRepository.getOwnProfile();
+      final profile = await _databaseService.profileRepository.getProfile();
 
       if (profile == null) {
         emit(state.copyWith(status: ProfileStatus.noProfile));
-      } else {
-        emit(state.copyWith(
-          status: ProfileStatus.loaded,
-          profile: profile,
-        ));
+        return;
       }
+
+      final photos = await _databaseService.profileRepository.getPhotos(profile.id);
+      final photoList = photos.map((p) => ProfilePhoto.fromEntry(p)).toList();
+
+      emit(state.copyWith(
+        status: ProfileStatus.loaded,
+        profileId: profile.id,
+        name: profile.name,
+        age: profile.age,
+        bio: profile.bio,
+        photos: photoList,
+      ));
     } catch (e) {
       Logger.error('Failed to load profile', e, null, 'ProfileBloc');
       emit(state.copyWith(
@@ -56,81 +64,122 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
     }
   }
 
-  Future<void> _onUpdateName(
-    UpdateName event,
+  Future<void> _onCreateProfile(
+    CreateProfile event,
     Emitter<ProfileState> emit,
   ) async {
-    if (state.profile == null) return;
+    if (event.name.trim().isEmpty) {
+      emit(state.copyWith(errorMessage: 'Name is required'));
+      return;
+    }
 
-    final updatedProfile = state.profile!.copyWith(
-      name: event.name,
-      updatedAt: DateTime.now(),
-    );
+    emit(state.copyWith(status: ProfileStatus.saving));
 
-    emit(state.copyWith(
-      profile: updatedProfile,
-      hasUnsavedChanges: true,
-    ));
+    try {
+      final profile = await _databaseService.profileRepository.createProfile(
+        name: event.name.trim(),
+        age: event.age,
+        bio: event.bio?.trim(),
+      );
+
+      emit(state.copyWith(
+        status: ProfileStatus.saved,
+        profileId: profile.id,
+        name: profile.name,
+        age: profile.age,
+        bio: profile.bio,
+        photos: [],
+      ));
+
+      Logger.info('Profile created: ${profile.id}', 'ProfileBloc');
+    } catch (e) {
+      Logger.error('Failed to create profile', e, null, 'ProfileBloc');
+      emit(state.copyWith(
+        status: ProfileStatus.error,
+        errorMessage: 'Failed to create profile',
+      ));
+    }
   }
 
-  Future<void> _onUpdateAge(
-    UpdateAge event,
+  Future<void> _onUpdateProfile(
+    UpdateProfile event,
     Emitter<ProfileState> emit,
   ) async {
-    if (state.profile == null) return;
+    if (state.profileId == null) {
+      emit(state.copyWith(errorMessage: 'No profile to update'));
+      return;
+    }
 
-    final updatedProfile = state.profile!.copyWith(
-      age: event.age,
-      updatedAt: DateTime.now(),
-    );
+    emit(state.copyWith(status: ProfileStatus.saving));
 
-    emit(state.copyWith(
-      profile: updatedProfile,
-      hasUnsavedChanges: true,
-    ));
-  }
+    try {
+      await _databaseService.profileRepository.updateProfile(
+        id: state.profileId!,
+        name: event.name?.trim(),
+        age: event.age,
+        bio: event.bio?.trim(),
+      );
 
-  Future<void> _onUpdateBio(
-    UpdateBio event,
-    Emitter<ProfileState> emit,
-  ) async {
-    if (state.profile == null) return;
+      emit(state.copyWith(
+        status: ProfileStatus.saved,
+        name: event.name?.trim() ?? state.name,
+        age: event.age ?? state.age,
+        bio: event.bio?.trim() ?? state.bio,
+      ));
 
-    final updatedProfile = state.profile!.copyWith(
-      bio: event.bio,
-      updatedAt: DateTime.now(),
-    );
-
-    emit(state.copyWith(
-      profile: updatedProfile,
-      hasUnsavedChanges: true,
-    ));
+      Logger.info('Profile updated', 'ProfileBloc');
+    } catch (e) {
+      Logger.error('Failed to update profile', e, null, 'ProfileBloc');
+      emit(state.copyWith(
+        status: ProfileStatus.error,
+        errorMessage: 'Failed to update profile',
+      ));
+    }
   }
 
   Future<void> _onAddPhoto(
     AddPhoto event,
     Emitter<ProfileState> emit,
   ) async {
-    if (state.profile == null) return;
+    if (state.profileId == null) {
+      emit(state.copyWith(errorMessage: 'Create profile first'));
+      return;
+    }
+
+    if (!state.canAddMorePhotos) {
+      emit(state.copyWith(errorMessage: 'Maximum ${ProfileState.maxPhotos} photos allowed'));
+      return;
+    }
+
+    emit(state.copyWith(isProcessingPhoto: true));
 
     try {
-      // Compress and save the photo
-      final compressed = await _imageService.compressImage(event.photoFile);
-      final savedPath = await _imageService.saveImageToLocal(compressed);
+      // Process image (compress + generate thumbnail)
+      final processed = await _imageService.processImage(event.imageFile);
 
-      final updatedPhotos = [...state.profile!.photoUrls, savedPath];
-      final updatedProfile = state.profile!.copyWith(
-        photoUrls: updatedPhotos,
-        updatedAt: DateTime.now(),
+      // Save to database
+      final isPrimary = state.photos.isEmpty;
+      final photo = await _databaseService.profileRepository.addPhoto(
+        userId: state.profileId!,
+        photoPath: processed.photoPath,
+        thumbnailPath: processed.thumbnailPath,
+        isPrimary: isPrimary,
       );
 
+      final newPhoto = ProfilePhoto.fromEntry(photo);
+      final updatedPhotos = [...state.photos, newPhoto];
+
       emit(state.copyWith(
-        profile: updatedProfile,
-        hasUnsavedChanges: true,
+        status: ProfileStatus.loaded,
+        photos: updatedPhotos,
+        isProcessingPhoto: false,
       ));
+
+      Logger.info('Photo added: ${photo.id}', 'ProfileBloc');
     } catch (e) {
       Logger.error('Failed to add photo', e, null, 'ProfileBloc');
       emit(state.copyWith(
+        isProcessingPhoto: false,
         errorMessage: 'Failed to add photo',
       ));
     }
@@ -140,113 +189,121 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
     RemovePhoto event,
     Emitter<ProfileState> emit,
   ) async {
-    if (state.profile == null) return;
-
     try {
-      final photoToRemove = state.profile!.photoUrls[event.photoIndex];
-      await _imageService.deleteImage(photoToRemove);
+      final photoToRemove = state.photos.firstWhere((p) => p.id == event.photoId);
 
-      final updatedPhotos = [...state.profile!.photoUrls]
-        ..removeAt(event.photoIndex);
-      final updatedProfile = state.profile!.copyWith(
-        photoUrls: updatedPhotos,
-        updatedAt: DateTime.now(),
+      // Delete from database
+      await _databaseService.profileRepository.deletePhoto(event.photoId);
+
+      // Delete files
+      await _imageService.deleteImage(
+        photoToRemove.photoPath,
+        photoToRemove.thumbnailPath,
       );
 
-      emit(state.copyWith(
-        profile: updatedProfile,
-        hasUnsavedChanges: true,
-      ));
-    } catch (e) {
-      Logger.error('Failed to remove photo', e, null, 'ProfileBloc');
-      emit(state.copyWith(
-        errorMessage: 'Failed to remove photo',
-      ));
-    }
-  }
+      // Update state
+      final updatedPhotos = state.photos.where((p) => p.id != event.photoId).toList();
 
-  Future<void> _onUpdateInterests(
-    UpdateInterests event,
-    Emitter<ProfileState> emit,
-  ) async {
-    if (state.profile == null) return;
-
-    final updatedProfile = state.profile!.copyWith(
-      interests: event.interests,
-      updatedAt: DateTime.now(),
-    );
-
-    emit(state.copyWith(
-      profile: updatedProfile,
-      hasUnsavedChanges: true,
-    ));
-  }
-
-  Future<void> _onSaveProfile(
-    SaveProfile event,
-    Emitter<ProfileState> emit,
-  ) async {
-    if (state.profile == null) return;
-
-    emit(state.copyWith(status: ProfileStatus.saving));
-
-    try {
-      await _databaseService.profileRepository.saveOwnProfile(state.profile!);
-      emit(state.copyWith(
-        status: ProfileStatus.saved,
-        hasUnsavedChanges: false,
-      ));
-    } catch (e) {
-      Logger.error('Failed to save profile', e, null, 'ProfileBloc');
-      emit(state.copyWith(
-        status: ProfileStatus.error,
-        errorMessage: 'Failed to save profile',
-      ));
-    }
-  }
-
-  Future<void> _onCreateProfile(
-    CreateProfile event,
-    Emitter<ProfileState> emit,
-  ) async {
-    emit(state.copyWith(status: ProfileStatus.saving));
-
-    try {
-      // Save photos
-      final photoUrls = <String>[];
-      for (final photoFile in event.photoFiles) {
-        final compressed = await _imageService.compressImage(photoFile);
-        final savedPath = await _imageService.saveImageToLocal(compressed);
-        photoUrls.add(savedPath);
+      // Reload photos to get updated primary status
+      if (state.profileId != null) {
+        final photos = await _databaseService.profileRepository.getPhotos(state.profileId!);
+        final photoList = photos.map((p) => ProfilePhoto.fromEntry(p)).toList();
+        emit(state.copyWith(photos: photoList));
+      } else {
+        emit(state.copyWith(photos: updatedPhotos));
       }
 
-      // Create profile
-      final now = DateTime.now();
-      final profile = UserProfile(
-        id: _uuid.v4(),
-        name: event.name,
-        age: event.age,
-        bio: event.bio,
-        photoUrls: photoUrls,
-        interests: event.interests,
-        createdAt: now,
-        updatedAt: now,
-        isOwnProfile: true,
+      Logger.info('Photo removed: ${event.photoId}', 'ProfileBloc');
+    } catch (e) {
+      Logger.error('Failed to remove photo', e, null, 'ProfileBloc');
+      emit(state.copyWith(errorMessage: 'Failed to remove photo'));
+    }
+  }
+
+  Future<void> _onReorderPhotos(
+    ReorderPhotos event,
+    Emitter<ProfileState> emit,
+  ) async {
+    if (state.profileId == null) return;
+
+    try {
+      await _databaseService.profileRepository.reorderPhotos(
+        state.profileId!,
+        event.photoIds,
       );
 
-      await _databaseService.profileRepository.saveOwnProfile(profile);
+      // Reload photos to get updated order
+      final photos = await _databaseService.profileRepository.getPhotos(state.profileId!);
+      final photoList = photos.map((p) => ProfilePhoto.fromEntry(p)).toList();
 
-      emit(state.copyWith(
-        status: ProfileStatus.saved,
-        profile: profile,
-        hasUnsavedChanges: false,
-      ));
+      emit(state.copyWith(photos: photoList));
+
+      Logger.info('Photos reordered', 'ProfileBloc');
     } catch (e) {
-      Logger.error('Failed to create profile', e, null, 'ProfileBloc');
-      emit(state.copyWith(
-        status: ProfileStatus.error,
-        errorMessage: 'Failed to create profile',
-      ));
+      Logger.error('Failed to reorder photos', e, null, 'ProfileBloc');
+      emit(state.copyWith(errorMessage: 'Failed to reorder photos'));
     }
+  }
+
+  Future<void> _onSetPrimaryPhoto(
+    SetPrimaryPhoto event,
+    Emitter<ProfileState> emit,
+  ) async {
+    if (state.profileId == null) return;
+
+    try {
+      await _databaseService.profileRepository.setPrimaryPhoto(
+        state.profileId!,
+        event.photoId,
+      );
+
+      // Reload photos to get updated primary status
+      final photos = await _databaseService.profileRepository.getPhotos(state.profileId!);
+      final photoList = photos.map((p) => ProfilePhoto.fromEntry(p)).toList();
+
+      emit(state.copyWith(photos: photoList));
+
+      Logger.info('Primary photo set: ${event.photoId}', 'ProfileBloc');
+    } catch (e) {
+      Logger.error('Failed to set primary photo', e, null, 'ProfileBloc');
+      emit(state.copyWith(errorMessage: 'Failed to set primary photo'));
+    }
+  }
+
+  Future<void> _onPickPhotoFromGallery(
+    PickPhotoFromGallery event,
+    Emitter<ProfileState> emit,
+  ) async {
+    try {
+      final file = await _imageService.pickFromGallery();
+      if (file != null) {
+        add(AddPhoto(file));
+      }
+    } catch (e) {
+      Logger.error('Failed to pick photo from gallery', e, null, 'ProfileBloc');
+      emit(state.copyWith(errorMessage: 'Failed to pick photo'));
+    }
+  }
+
+  Future<void> _onPickPhotoFromCamera(
+    PickPhotoFromCamera event,
+    Emitter<ProfileState> emit,
+  ) async {
+    try {
+      final file = await _imageService.pickFromCamera();
+      if (file != null) {
+        add(AddPhoto(file));
+      }
+    } catch (e) {
+      Logger.error('Failed to pick photo from camera', e, null, 'ProfileBloc');
+      emit(state.copyWith(errorMessage: 'Failed to take photo'));
+    }
+  }
+
+  void _onClearError(
+    ClearError event,
+    Emitter<ProfileState> emit,
+  ) {
+    emit(state.copyWith(errorMessage: null));
   }
 }

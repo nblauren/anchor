@@ -10,12 +10,30 @@ import '../core/constants/app_constants.dart';
 import '../core/errors/app_error.dart';
 import '../core/utils/logger.dart';
 
+/// Result of processing an image with both full and thumbnail versions
+class ProcessedImage {
+  const ProcessedImage({
+    required this.photoPath,
+    required this.thumbnailPath,
+    required this.thumbnailBytes,
+  });
+
+  final String photoPath;
+  final String thumbnailPath;
+  final Uint8List thumbnailBytes;
+}
+
 /// Service for handling image picking, compression, and storage
 class ImageService {
   ImageService();
 
   final ImagePicker _picker = ImagePicker();
   final Uuid _uuid = const Uuid();
+
+  // Thumbnail constraints for BLE broadcast
+  static const int _thumbnailMaxSize = 100; // 100x100 px
+  static const int _thumbnailMaxBytes = 15 * 1024; // 15KB
+  static const int _thumbnailInitialQuality = 70;
 
   /// Pick an image from gallery
   Future<File?> pickFromGallery() async {
@@ -54,17 +72,84 @@ class ImageService {
     }
   }
 
-  /// Compress an image file
-  Future<File> compressImage(File imageFile) async {
+  /// Process an image: compress full version and generate thumbnail
+  /// Returns paths and thumbnail bytes for BLE broadcast
+  Future<ProcessedImage> processImage(File imageFile) async {
     try {
+      final directory = await getApplicationDocumentsDirectory();
+      final imagesDir = Directory('${directory.path}/profile_images');
+      final thumbsDir = Directory('${directory.path}/thumbnails');
+
+      if (!await imagesDir.exists()) {
+        await imagesDir.create(recursive: true);
+      }
+      if (!await thumbsDir.exists()) {
+        await thumbsDir.create(recursive: true);
+      }
+
+      final fileId = _uuid.v4();
+
+      // Compress and save full image
+      final compressedBytes = await _compressFullImage(imageFile);
+      final photoPath = '${imagesDir.path}/$fileId.jpg';
+      await File(photoPath).writeAsBytes(compressedBytes);
+
+      // Generate and save thumbnail
+      final thumbnailBytes = await _generateThumbnail(imageFile);
+      final thumbnailPath = '${thumbsDir.path}/$fileId_thumb.jpg';
+      await File(thumbnailPath).writeAsBytes(thumbnailBytes);
+
+      Logger.info(
+        'Processed image: photo=${compressedBytes.length}B, thumb=${thumbnailBytes.length}B',
+        'Image',
+      );
+
+      return ProcessedImage(
+        photoPath: photoPath,
+        thumbnailPath: thumbnailPath,
+        thumbnailBytes: thumbnailBytes,
+      );
+    } catch (e) {
+      Logger.error('Failed to process image', e, null, 'Image');
+      throw ImageError('Failed to process image', e);
+    }
+  }
+
+  /// Compress full-size image for local storage
+  Future<Uint8List> _compressFullImage(File imageFile) async {
+    final input = ImageFile(
+      filePath: imageFile.path,
+      rawBytes: await imageFile.readAsBytes(),
+    );
+
+    final config = Configuration(
+      outputType: ImageOutputType.jpg,
+      quality: AppConstants.imageQuality,
+    );
+
+    final output = await compressor.compress(ImageFileConfiguration(
+      input: input,
+      config: config,
+    ));
+
+    return output.rawBytes;
+  }
+
+  /// Generate a small thumbnail for BLE broadcast (max 15KB, ~100x100px)
+  Future<Uint8List> _generateThumbnail(File imageFile) async {
+    final inputBytes = await imageFile.readAsBytes();
+    var quality = _thumbnailInitialQuality;
+
+    // Try progressively lower quality until under size limit
+    while (quality >= 10) {
       final input = ImageFile(
         filePath: imageFile.path,
-        rawBytes: await imageFile.readAsBytes(),
+        rawBytes: inputBytes,
       );
 
       final config = Configuration(
-        outputType: ImageOutputType.webpThenJpg,
-        quality: AppConstants.imageQuality,
+        outputType: ImageOutputType.jpg,
+        quality: quality,
       );
 
       final output = await compressor.compress(ImageFileConfiguration(
@@ -72,52 +157,63 @@ class ImageService {
         config: config,
       ));
 
-      // Save compressed image
-      final compressedFile = File(imageFile.path);
-      await compressedFile.writeAsBytes(output.rawBytes);
-
-      Logger.info(
-        'Compressed image: ${input.sizeInBytes} -> ${output.sizeInBytes} bytes',
-        'Image',
-      );
-
-      return compressedFile;
-    } catch (e) {
-      Logger.error('Failed to compress image', e, null, 'Image');
-      throw ImageError('Failed to compress image', e);
-    }
-  }
-
-  /// Save an image to local storage
-  Future<String> saveImageToLocal(File imageFile) async {
-    try {
-      final directory = await getApplicationDocumentsDirectory();
-      final imagesDir = Directory('${directory.path}/profile_images');
-
-      if (!await imagesDir.exists()) {
-        await imagesDir.create(recursive: true);
+      if (output.sizeInBytes <= _thumbnailMaxBytes) {
+        Logger.info(
+          'Generated thumbnail: ${output.sizeInBytes}B at quality $quality',
+          'Image',
+        );
+        return output.rawBytes;
       }
 
-      final fileName = '${_uuid.v4()}.jpg';
-      final savedPath = '${imagesDir.path}/$fileName';
-
-      await imageFile.copy(savedPath);
-      Logger.info('Saved image to: $savedPath', 'Image');
-
-      return savedPath;
-    } catch (e) {
-      Logger.error('Failed to save image', e, null, 'Image');
-      throw ImageError('Failed to save image', e);
+      quality -= 10;
     }
+
+    // If still too large, return lowest quality version
+    final input = ImageFile(
+      filePath: imageFile.path,
+      rawBytes: inputBytes,
+    );
+
+    final config = Configuration(
+      outputType: ImageOutputType.jpg,
+      quality: 10,
+    );
+
+    final output = await compressor.compress(ImageFileConfiguration(
+      input: input,
+      config: config,
+    ));
+
+    Logger.warning(
+      'Thumbnail still large: ${output.sizeInBytes}B (target: ${_thumbnailMaxBytes}B)',
+      'Image',
+    );
+
+    return output.rawBytes;
   }
 
-  /// Delete an image from local storage
-  Future<void> deleteImage(String path) async {
+  /// Generate thumbnail bytes from an existing photo path
+  Future<Uint8List> generateThumbnailFromPath(String photoPath) async {
+    final file = File(photoPath);
+    if (!await file.exists()) {
+      throw ImageError('Photo file not found: $photoPath');
+    }
+    return _generateThumbnail(file);
+  }
+
+  /// Delete an image and its thumbnail
+  Future<void> deleteImage(String photoPath, String thumbnailPath) async {
     try {
-      final file = File(path);
-      if (await file.exists()) {
-        await file.delete();
-        Logger.info('Deleted image: $path', 'Image');
+      final photoFile = File(photoPath);
+      if (await photoFile.exists()) {
+        await photoFile.delete();
+        Logger.info('Deleted photo: $photoPath', 'Image');
+      }
+
+      final thumbFile = File(thumbnailPath);
+      if (await thumbFile.exists()) {
+        await thumbFile.delete();
+        Logger.info('Deleted thumbnail: $thumbnailPath', 'Image');
       }
     } catch (e) {
       Logger.error('Failed to delete image', e, null, 'Image');
@@ -125,49 +221,62 @@ class ImageService {
     }
   }
 
-  /// Get all saved profile images
-  Future<List<String>> getSavedImages() async {
+  /// Delete image by photo path only (derives thumbnail path)
+  Future<void> deleteImageByPath(String photoPath) async {
     try {
-      final directory = await getApplicationDocumentsDirectory();
-      final imagesDir = Directory('${directory.path}/profile_images');
-
-      if (!await imagesDir.exists()) {
-        return [];
+      final photoFile = File(photoPath);
+      if (await photoFile.exists()) {
+        await photoFile.delete();
+        Logger.info('Deleted photo: $photoPath', 'Image');
       }
-
-      final files = await imagesDir.list().toList();
-      return files
-          .whereType<File>()
-          .map((f) => f.path)
-          .toList();
     } catch (e) {
-      Logger.error('Failed to get saved images', e, null, 'Image');
-      throw ImageError('Failed to get saved images', e);
+      Logger.error('Failed to delete image', e, null, 'Image');
+      throw ImageError('Failed to delete image', e);
     }
   }
 
-  /// Create a thumbnail from an image
-  Future<Uint8List> createThumbnail(File imageFile) async {
+  /// Get the primary thumbnail bytes for BLE broadcast
+  Future<Uint8List?> getPrimaryThumbnailBytes(String? thumbnailPath) async {
+    if (thumbnailPath == null) return null;
+
     try {
-      final input = ImageFile(
-        filePath: imageFile.path,
-        rawBytes: await imageFile.readAsBytes(),
-      );
-
-      final config = Configuration(
-        outputType: ImageOutputType.webpThenJpg,
-        quality: 60,
-      );
-
-      final output = await compressor.compress(ImageFileConfiguration(
-        input: input,
-        config: config,
-      ));
-
-      return output.rawBytes;
+      final file = File(thumbnailPath);
+      if (await file.exists()) {
+        return await file.readAsBytes();
+      }
+      return null;
     } catch (e) {
-      Logger.error('Failed to create thumbnail', e, null, 'Image');
-      throw ImageError('Failed to create thumbnail', e);
+      Logger.error('Failed to read thumbnail', e, null, 'Image');
+      return null;
+    }
+  }
+
+  /// Clean up orphaned images not in the database
+  Future<void> cleanupOrphanedImages(List<String> validPaths) async {
+    try {
+      final directory = await getApplicationDocumentsDirectory();
+      final imagesDir = Directory('${directory.path}/profile_images');
+      final thumbsDir = Directory('${directory.path}/thumbnails');
+
+      if (await imagesDir.exists()) {
+        await for (final entity in imagesDir.list()) {
+          if (entity is File && !validPaths.contains(entity.path)) {
+            await entity.delete();
+            Logger.info('Cleaned up orphaned image: ${entity.path}', 'Image');
+          }
+        }
+      }
+
+      if (await thumbsDir.exists()) {
+        await for (final entity in thumbsDir.list()) {
+          if (entity is File && !validPaths.contains(entity.path)) {
+            await entity.delete();
+            Logger.info('Cleaned up orphaned thumbnail: ${entity.path}', 'Image');
+          }
+        }
+      }
+    } catch (e) {
+      Logger.error('Failed to cleanup orphaned images', e, null, 'Image');
     }
   }
 }

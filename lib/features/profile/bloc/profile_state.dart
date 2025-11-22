@@ -1,6 +1,6 @@
 import 'package:equatable/equatable.dart';
 
-import '../../../data/models/user_profile.dart';
+import '../../../data/local_database/database.dart';
 
 enum ProfileStatus {
   initial,
@@ -12,40 +12,119 @@ enum ProfileStatus {
   noProfile,
 }
 
-class ProfileState extends Equatable {
-  const ProfileState({
-    this.status = ProfileStatus.initial,
-    this.profile,
-    this.errorMessage,
-    this.hasUnsavedChanges = false,
+/// Represents a photo in the profile
+class ProfilePhoto extends Equatable {
+  const ProfilePhoto({
+    required this.id,
+    required this.photoPath,
+    required this.thumbnailPath,
+    required this.isPrimary,
+    required this.orderIndex,
   });
 
-  final ProfileStatus status;
-  final UserProfile? profile;
-  final String? errorMessage;
-  final bool hasUnsavedChanges;
+  final String id;
+  final String photoPath;
+  final String thumbnailPath;
+  final bool isPrimary;
+  final int orderIndex;
 
-  /// Whether the profile setup is complete
-  bool get isProfileComplete =>
-      profile != null &&
-      profile!.name.isNotEmpty &&
-      profile!.age >= 18 &&
-      profile!.photoUrls.isNotEmpty;
-
-  ProfileState copyWith({
-    ProfileStatus? status,
-    UserProfile? profile,
-    String? errorMessage,
-    bool? hasUnsavedChanges,
-  }) {
-    return ProfileState(
-      status: status ?? this.status,
-      profile: profile ?? this.profile,
-      errorMessage: errorMessage,
-      hasUnsavedChanges: hasUnsavedChanges ?? this.hasUnsavedChanges,
+  factory ProfilePhoto.fromEntry(UserPhotoEntry entry) {
+    return ProfilePhoto(
+      id: entry.id,
+      photoPath: entry.photoPath,
+      thumbnailPath: entry.thumbnailPath,
+      isPrimary: entry.isPrimary,
+      orderIndex: entry.orderIndex,
     );
   }
 
   @override
-  List<Object?> get props => [status, profile, errorMessage, hasUnsavedChanges];
+  List<Object?> get props => [id, photoPath, thumbnailPath, isPrimary, orderIndex];
+}
+
+class ProfileState extends Equatable {
+  const ProfileState({
+    this.status = ProfileStatus.initial,
+    this.profileId,
+    this.name,
+    this.age,
+    this.bio,
+    this.photos = const [],
+    this.errorMessage,
+    this.isProcessingPhoto = false,
+  });
+
+  final ProfileStatus status;
+  final String? profileId;
+  final String? name;
+  final int? age;
+  final String? bio;
+  final List<ProfilePhoto> photos;
+  final String? errorMessage;
+  final bool isProcessingPhoto;
+
+  /// Whether a profile exists
+  bool get hasProfile => profileId != null;
+
+  /// Whether the profile is valid for creation/saving
+  bool get isValid => name != null && name!.trim().isNotEmpty;
+
+  /// Whether the profile has at least one photo
+  bool get hasPhotos => photos.isNotEmpty;
+
+  /// Get the primary photo
+  ProfilePhoto? get primaryPhoto {
+    try {
+      return photos.firstWhere((p) => p.isPrimary);
+    } catch (_) {
+      return photos.isNotEmpty ? photos.first : null;
+    }
+  }
+
+  /// Get sorted photos by order index
+  List<ProfilePhoto> get sortedPhotos {
+    final sorted = List<ProfilePhoto>.from(photos);
+    sorted.sort((a, b) => a.orderIndex.compareTo(b.orderIndex));
+    return sorted;
+  }
+
+  /// Maximum photos allowed
+  static const int maxPhotos = 5;
+
+  /// Whether more photos can be added
+  bool get canAddMorePhotos => photos.length < maxPhotos;
+
+  ProfileState copyWith({
+    ProfileStatus? status,
+    String? profileId,
+    String? name,
+    int? age,
+    String? bio,
+    List<ProfilePhoto>? photos,
+    String? errorMessage,
+    bool? isProcessingPhoto,
+  }) {
+    return ProfileState(
+      status: status ?? this.status,
+      profileId: profileId ?? this.profileId,
+      name: name ?? this.name,
+      age: age ?? this.age,
+      bio: bio ?? this.bio,
+      photos: photos ?? this.photos,
+      errorMessage: errorMessage,
+      isProcessingPhoto: isProcessingPhoto ?? this.isProcessingPhoto,
+    );
+  }
+
+  @override
+  List<Object?> get props => [
+        status,
+        profileId,
+        name,
+        age,
+        bio,
+        photos,
+        errorMessage,
+        isProcessingPhoto,
+      ];
 }

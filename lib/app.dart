@@ -9,8 +9,8 @@ import 'features/discovery/screens/discovery_screen.dart';
 import 'features/profile/bloc/profile_bloc.dart';
 import 'features/profile/bloc/profile_event.dart';
 import 'features/profile/bloc/profile_state.dart';
-import 'features/profile/screens/profile_screen.dart';
 import 'features/profile/screens/profile_setup_screen.dart';
+import 'features/profile/screens/profile_view_screen.dart';
 import 'injection.dart';
 
 /// Main application widget
@@ -101,7 +101,7 @@ class _MainScreenState extends State<_MainScreen> {
     return BlocBuilder<ProfileBloc, ProfileState>(
       builder: (context, profileState) {
         // Create ChatBloc with the user's ID
-        final ownUserId = profileState.profile?.id ?? '';
+        final ownUserId = profileState.profileId ?? '';
 
         return BlocProvider<ChatBloc>(
           create: (context) => getIt<ChatBloc>(param1: ownUserId),
@@ -111,7 +111,7 @@ class _MainScreenState extends State<_MainScreen> {
               children: const [
                 DiscoveryScreen(),
                 ChatListScreen(),
-                ProfileScreen(),
+                ProfileViewScreen(),
               ],
             ),
             bottomNavigationBar: BottomNavigationBar(
