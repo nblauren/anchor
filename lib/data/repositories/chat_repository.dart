@@ -302,6 +302,43 @@ class ChatRepository {
   Future<void> retryMessage(String id) async {
     await updateMessageStatus(id, MessageStatus.pending);
   }
+
+  /// Get conversation by peer ID
+  Future<ConversationEntry?> getConversationByPeerId(String peerId) async {
+    return await (_db.select(_db.conversations)
+          ..where((t) => t.peerId.equals(peerId)))
+        .getSingleOrNull();
+  }
+
+  /// Add a message to a conversation (for received messages)
+  Future<MessageEntry> addMessage({
+    required String conversationId,
+    required String senderId,
+    String? textContent,
+    String? photoPath,
+  }) async {
+    final contentType = photoPath != null ? MessageContentType.photo : MessageContentType.text;
+    return receiveMessage(
+      conversationId: conversationId,
+      senderId: senderId,
+      contentType: contentType,
+      textContent: textContent,
+      photoPath: photoPath,
+    );
+  }
+
+  /// Get conversations with peer details (alias for getAllConversations)
+  Future<List<ConversationWithPeer>> getConversationsWithPeers() async {
+    return getAllConversations();
+  }
+
+  /// Clear all conversations and messages
+  Future<void> clearAllConversations() async {
+    await _db.transaction(() async {
+      await _db.delete(_db.messages).go();
+      await _db.delete(_db.conversations).go();
+    });
+  }
 }
 
 /// Helper class for conversation with peer details

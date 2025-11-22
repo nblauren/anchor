@@ -10,11 +10,16 @@ import '../widgets/photo_grid_widget.dart';
 import '../widgets/photo_source_sheet.dart';
 import '../widgets/profile_preview_widget.dart';
 
-/// Initial profile setup screen for new users
+/// Initial profile setup screen for new users (or editing existing profile)
 class ProfileSetupScreen extends StatefulWidget {
-  const ProfileSetupScreen({super.key, this.onComplete});
+  const ProfileSetupScreen({
+    super.key,
+    this.onComplete,
+    this.isEditing = false,
+  });
 
   final VoidCallback? onComplete;
+  final bool isEditing;
 
   @override
   State<ProfileSetupScreen> createState() => _ProfileSetupScreenState();
@@ -29,6 +34,27 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
 
   int _currentPage = 0;
   bool _profileCreated = false;
+  bool _initialized = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // If editing, start with profile created flag true
+    _profileCreated = widget.isEditing;
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Pre-fill form fields if editing
+    if (!_initialized && widget.isEditing) {
+      final state = context.read<ProfileBloc>().state;
+      _nameController.text = state.name ?? '';
+      _ageController.text = state.age?.toString() ?? '';
+      _bioController.text = state.bio ?? '';
+      _initialized = true;
+    }
+  }
 
   @override
   void dispose() {
@@ -118,7 +144,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
       builder: (context, state) {
         return Scaffold(
           appBar: AppBar(
-            title: const Text('Create Profile'),
+            title: Text(widget.isEditing ? 'Edit Profile' : 'Create Profile'),
             leading: _currentPage > 0
                 ? IconButton(
                     icon: const Icon(Icons.arrow_back),
@@ -381,7 +407,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                 flex: 2,
                 child: ElevatedButton(
                   onPressed: _finishSetup,
-                  child: const Text('Start Discovering'),
+                  child: Text(widget.isEditing ? 'Save Changes' : 'Start Discovering'),
                 ),
               ),
             ],

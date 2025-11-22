@@ -3,6 +3,9 @@ import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../features/settings/settings.dart';
+import '../../../services/ble/ble.dart';
+import '../../discovery/bloc/discovery_bloc.dart';
 import '../bloc/profile_bloc.dart';
 import '../bloc/profile_event.dart';
 import '../bloc/profile_state.dart';
@@ -68,6 +71,22 @@ class _ProfileViewScreenState extends State<ProfileViewScreen> {
           age: state.age,
           bio: state.bio,
           photos: state.sortedPhotos,
+        ),
+      ),
+    );
+  }
+
+  void _openSettings(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => MultiBlocProvider(
+          providers: [
+            BlocProvider.value(value: context.read<ProfileBloc>()),
+            BlocProvider.value(value: context.read<DiscoveryBloc>()),
+            BlocProvider.value(value: context.read<BleConnectionBloc>()),
+          ],
+          child: const SettingsScreen(),
         ),
       ),
     );
@@ -141,6 +160,11 @@ class _ProfileViewScreenState extends State<ProfileViewScreen> {
                 icon: const Icon(Icons.visibility),
                 tooltip: 'Preview',
                 onPressed: () => _showPreviewDialog(state),
+              ),
+              IconButton(
+                icon: const Icon(Icons.settings),
+                tooltip: 'Settings',
+                onPressed: () => _openSettings(context),
               ),
             ],
           ),

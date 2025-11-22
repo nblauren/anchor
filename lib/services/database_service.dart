@@ -72,4 +72,22 @@ class DatabaseService {
       throw StateError('DatabaseService is not initialized. Call initialize() first.');
     }
   }
+
+  /// Clear all data from the database
+  Future<void> clearAllData() async {
+    _ensureInitialized();
+    Logger.info('DatabaseService: Clearing all data...', 'Database');
+
+    await _database.transaction(() async {
+      // Delete in order to respect foreign key constraints
+      await _database.delete(_database.messages).go();
+      await _database.delete(_database.conversations).go();
+      await _database.delete(_database.blockedUsers).go();
+      await _database.delete(_database.discoveredPeers).go();
+      await _database.delete(_database.profilePhotos).go();
+      await _database.delete(_database.userProfile).go();
+    });
+
+    Logger.info('DatabaseService: All data cleared', 'Database');
+  }
 }
