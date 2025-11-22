@@ -27,6 +27,24 @@ class CurrentConversation extends Equatable {
   List<Object?> get props => [id, peerId, peerName];
 }
 
+/// Photo transfer progress info
+class PhotoTransferInfo extends Equatable {
+  const PhotoTransferInfo({
+    required this.messageId,
+    required this.progress,
+    required this.isSending,
+  });
+
+  final String messageId;
+  final double progress; // 0.0 to 1.0
+  final bool isSending; // true = sending, false = receiving
+
+  int get progressPercent => (progress * 100).round();
+
+  @override
+  List<Object?> get props => [messageId, progress, isSending];
+}
+
 class ChatState extends Equatable {
   const ChatState({
     this.status = ChatStatus.initial,
@@ -35,6 +53,7 @@ class ChatState extends Equatable {
     this.messages = const [],
     this.errorMessage,
     this.hasMoreMessages = true,
+    this.photoTransfers = const {},
   });
 
   final ChatStatus status;
@@ -43,6 +62,7 @@ class ChatState extends Equatable {
   final List<MessageEntry> messages;
   final String? errorMessage;
   final bool hasMoreMessages;
+  final Map<String, PhotoTransferInfo> photoTransfers; // messageId -> progress
 
   /// Total unread count across all conversations
   int get totalUnreadCount =>
@@ -51,6 +71,9 @@ class ChatState extends Equatable {
   /// Check if we're in a conversation
   bool get isInConversation => currentConversation != null;
 
+  /// Get transfer progress for a specific message
+  PhotoTransferInfo? getTransferProgress(String messageId) => photoTransfers[messageId];
+
   ChatState copyWith({
     ChatStatus? status,
     List<ConversationWithPeer>? conversations,
@@ -58,6 +81,7 @@ class ChatState extends Equatable {
     List<MessageEntry>? messages,
     String? errorMessage,
     bool? hasMoreMessages,
+    Map<String, PhotoTransferInfo>? photoTransfers,
     bool clearCurrentConversation = false,
   }) {
     return ChatState(
@@ -68,6 +92,7 @@ class ChatState extends Equatable {
       messages: messages ?? this.messages,
       errorMessage: errorMessage,
       hasMoreMessages: hasMoreMessages ?? this.hasMoreMessages,
+      photoTransfers: photoTransfers ?? this.photoTransfers,
     );
   }
 
@@ -79,5 +104,6 @@ class ChatState extends Equatable {
         messages,
         errorMessage,
         hasMoreMessages,
+        photoTransfers,
       ];
 }

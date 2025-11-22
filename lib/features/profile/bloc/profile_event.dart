@@ -96,3 +96,8 @@ class PickPhotoFromCamera extends ProfileEvent {
 class ClearError extends ProfileEvent {
   const ClearError();
 }
+
+/// Broadcast profile via BLE
+class BroadcastProfile extends ProfileEvent {
+  const BroadcastProfile();
+}

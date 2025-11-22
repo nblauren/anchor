@@ -7,6 +7,7 @@ import 'features/profile/bloc/profile_bloc.dart';
 import 'services/ble/ble.dart';
 import 'services/database_service.dart';
 import 'services/image_service.dart';
+import 'services/notification_service.dart';
 
 /// Global service locator instance
 final getIt = GetIt.instance;
@@ -29,6 +30,7 @@ Future<void> initializeDependencies({
   // Services (singletons)
   getIt.registerLazySingleton<DatabaseService>(() => DatabaseService());
   getIt.registerLazySingleton<ImageService>(() => ImageService());
+  getIt.registerLazySingleton<NotificationService>(() => NotificationService());
 
   // BLE service - select based on config
   getIt.registerLazySingleton<BleServiceInterface>(() {
@@ -53,17 +55,22 @@ Future<void> initializeDependencies({
     Logger.warning('BLE initialization failed: $e', 'DI');
   }
 
+  // Initialize notification service
+  await getIt<NotificationService>().initialize();
+
   // Blocs (factories - new instance each time)
   getIt.registerFactory<ProfileBloc>(
     () => ProfileBloc(
       databaseService: getIt<DatabaseService>(),
       imageService: getIt<ImageService>(),
+      bleService: getIt<BleServiceInterface>(),
     ),
   );
 
   getIt.registerFactory<DiscoveryBloc>(
     () => DiscoveryBloc(
       peerRepository: getIt<DatabaseService>().peerRepository,
+      bleService: getIt<BleServiceInterface>(),
     ),
   );
 
@@ -72,6 +79,7 @@ Future<void> initializeDependencies({
     (ownUserId, _) => ChatBloc(
       chatRepository: getIt<DatabaseService>().chatRepository,
       imageService: getIt<ImageService>(),
+      bleService: getIt<BleServiceInterface>(),
       ownUserId: ownUserId,
     ),
   );
@@ -79,6 +87,13 @@ Future<void> initializeDependencies({
   // BleStatusBloc for tracking BLE status and permissions
   getIt.registerFactory<BleStatusBloc>(
     () => BleStatusBloc(
+      bleService: getIt<BleServiceInterface>(),
+    ),
+  );
+
+  // BleConnectionBloc for managing BLE lifecycle
+  getIt.registerFactory<BleConnectionBloc>(
+    () => BleConnectionBloc(
       bleService: getIt<BleServiceInterface>(),
     ),
   );

@@ -1,6 +1,7 @@
 import 'package:equatable/equatable.dart';
 
 import '../../../data/local_database/database.dart';
+import '../../../services/ble/ble.dart' as ble;
 
 abstract class ChatEvent extends Equatable {
   const ChatEvent();
@@ -109,4 +110,22 @@ class DeleteConversation extends ChatEvent {
 /// Clear error state
 class ClearChatError extends ChatEvent {
   const ClearChatError();
+}
+
+/// BLE message received from peer
+class BleMessageReceived extends ChatEvent {
+  const BleMessageReceived(this.message);
+  final ble.ReceivedMessage message;
+
+  @override
+  List<Object?> get props => [message];
+}
+
+/// Photo transfer progress updated
+class PhotoTransferProgressUpdated extends ChatEvent {
+  const PhotoTransferProgressUpdated(this.progress);
+  final ble.PhotoTransferProgress progress;
+
+  @override
+  List<Object?> get props => [progress];
 }

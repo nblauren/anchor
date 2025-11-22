@@ -14,6 +14,16 @@ class LoadDiscoveredPeers extends DiscoveryEvent {
   const LoadDiscoveredPeers();
 }
 
+/// Start BLE discovery scanning
+class StartDiscovery extends DiscoveryEvent {
+  const StartDiscovery();
+}
+
+/// Stop BLE discovery scanning
+class StopDiscovery extends DiscoveryEvent {
+  const StopDiscovery();
+}
+
 /// A new peer was discovered via BLE (called by BLE service later)
 class PeerDiscovered extends DiscoveryEvent {
   const PeerDiscovered({

@@ -300,6 +300,32 @@ class ImageService {
     }
   }
 
+  /// Save a received photo from BLE transfer
+  Future<String> saveReceivedPhoto(Uint8List photoData) async {
+    try {
+      final directory = await getApplicationDocumentsDirectory();
+      final receivedDir = Directory('${directory.path}/received_photos');
+
+      if (!await receivedDir.exists()) {
+        await receivedDir.create(recursive: true);
+      }
+
+      final fileId = _uuid.v4();
+      final photoPath = '${receivedDir.path}/$fileId.jpg';
+      await File(photoPath).writeAsBytes(photoData);
+
+      Logger.info(
+        'Saved received photo: ${photoData.length}B -> $photoPath',
+        'Image',
+      );
+
+      return photoPath;
+    } catch (e) {
+      Logger.error('Failed to save received photo', e, null, 'Image');
+      throw ImageError('Failed to save received photo', e);
+    }
+  }
+
   /// Clean up orphaned images not in the database
   Future<void> cleanupOrphanedImages(List<String> validPaths) async {
     try {

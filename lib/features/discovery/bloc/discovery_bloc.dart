@@ -6,15 +6,20 @@ import 'package:uuid/uuid.dart';
 
 import '../../../core/utils/logger.dart';
 import '../../../data/repositories/peer_repository.dart';
+import '../../../services/ble/ble.dart' as ble;
 import 'discovery_event.dart';
 import 'discovery_state.dart';
 
 class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
   DiscoveryBloc({
     required PeerRepository peerRepository,
+    required ble.BleServiceInterface bleService,
   })  : _peerRepository = peerRepository,
+        _bleService = bleService,
         super(const DiscoveryState()) {
     on<LoadDiscoveredPeers>(_onLoadDiscoveredPeers);
+    on<StartDiscovery>(_onStartDiscovery);
+    on<StopDiscovery>(_onStopDiscovery);
     on<PeerDiscovered>(_onPeerDiscovered);
     on<PeerUpdated>(_onPeerUpdated);
     on<PeerLost>(_onPeerLost);
@@ -24,13 +29,75 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
     on<LoadMockPeers>(_onLoadMockPeers);
     on<ClearDiscoveryError>(_onClearError);
 
+    // Subscribe to BLE peer discovery stream
+    _peerDiscoveredSubscription = _bleService.peerDiscoveredStream.listen(
+      _onBlePeerDiscovered,
+    );
+
+    // Subscribe to BLE peer lost stream
+    _peerLostSubscription = _bleService.peerLostStream.listen(
+      (peerId) => add(PeerLost(peerId)),
+    );
+
     // Debounce timer for batching peer updates
     _debounceTimer?.cancel();
   }
 
   final PeerRepository _peerRepository;
+  final ble.BleServiceInterface _bleService;
   Timer? _debounceTimer;
   bool _pendingUpdate = false;
+  StreamSubscription<ble.DiscoveredPeer>? _peerDiscoveredSubscription;
+  StreamSubscription<String>? _peerLostSubscription;
+
+  /// Handle BLE peer discovered event - convert to bloc event
+  void _onBlePeerDiscovered(ble.DiscoveredPeer peer) {
+    // Check if peer is blocked before processing
+    _peerRepository.isPeerBlocked(peer.peerId).then((isBlocked) {
+      if (!isBlocked) {
+        add(PeerDiscovered(
+          peerId: peer.peerId,
+          name: peer.name,
+          age: peer.age,
+          bio: peer.bio,
+          thumbnailData: peer.thumbnailBytes,
+          rssi: peer.rssi,
+        ));
+      }
+    });
+  }
+
+  /// Start BLE discovery scanning
+  Future<void> _onStartDiscovery(
+    StartDiscovery event,
+    Emitter<DiscoveryState> emit,
+  ) async {
+    try {
+      emit(state.copyWith(isScanning: true));
+      await _bleService.startScanning();
+      Logger.info('BLE scanning started', 'DiscoveryBloc');
+    } catch (e) {
+      Logger.error('Failed to start BLE scanning', e, null, 'DiscoveryBloc');
+      emit(state.copyWith(
+        isScanning: false,
+        errorMessage: 'Failed to start discovery',
+      ));
+    }
+  }
+
+  /// Stop BLE discovery scanning
+  Future<void> _onStopDiscovery(
+    StopDiscovery event,
+    Emitter<DiscoveryState> emit,
+  ) async {
+    try {
+      await _bleService.stopScanning();
+      emit(state.copyWith(isScanning: false));
+      Logger.info('BLE scanning stopped', 'DiscoveryBloc');
+    } catch (e) {
+      Logger.error('Failed to stop BLE scanning', e, null, 'DiscoveryBloc');
+    }
+  }
 
   /// Load peers from database
   Future<void> _onLoadDiscoveredPeers(
@@ -195,12 +262,20 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
     }
   }
 
-  /// Refresh peers from database
+  /// Refresh peers from database and trigger BLE scan
   Future<void> _onRefreshPeers(
     RefreshPeers event,
     Emitter<DiscoveryState> emit,
   ) async {
-    // Don't show loading indicator for refresh
+    // Trigger BLE scan to discover new peers
+    try {
+      await _bleService.startScanning();
+      emit(state.copyWith(isScanning: true));
+    } catch (e) {
+      Logger.warning('Could not start BLE scan during refresh: $e', 'DiscoveryBloc');
+    }
+
+    // Load existing peers from database
     try {
       final entries = await _peerRepository.getAllPeers(includeBlocked: false);
       final peers = entries.map(DiscoveredPeer.fromEntry).toList();
@@ -340,6 +415,8 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
   @override
   Future<void> close() {
     _debounceTimer?.cancel();
+    _peerDiscoveredSubscription?.cancel();
+    _peerLostSubscription?.cancel();
     return super.close();
   }
 }

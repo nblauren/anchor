@@ -1,8 +1,10 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../core/utils/logger.dart';
+import '../../../services/ble/ble.dart' as ble;
 import '../../../services/database_service.dart';
 import '../../../services/image_service.dart';
 import 'profile_event.dart';
@@ -12,8 +14,10 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
   ProfileBloc({
     required DatabaseService databaseService,
     required ImageService imageService,
+    required ble.BleServiceInterface bleService,
   })  : _databaseService = databaseService,
         _imageService = imageService,
+        _bleService = bleService,
         super(const ProfileState()) {
     on<LoadProfile>(_onLoadProfile);
     on<CreateProfile>(_onCreateProfile);
@@ -24,11 +28,13 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
     on<SetPrimaryPhoto>(_onSetPrimaryPhoto);
     on<PickPhotoFromGallery>(_onPickPhotoFromGallery);
     on<PickPhotoFromCamera>(_onPickPhotoFromCamera);
+    on<BroadcastProfile>(_onBroadcastProfile);
     on<ClearError>(_onClearError);
   }
 
   final DatabaseService _databaseService;
   final ImageService _imageService;
+  final ble.BleServiceInterface _bleService;
 
   Future<void> _onLoadProfile(
     LoadProfile event,
@@ -92,6 +98,9 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
       ));
 
       Logger.info('Profile created: ${profile.id}', 'ProfileBloc');
+
+      // Broadcast profile via BLE
+      add(const BroadcastProfile());
     } catch (e) {
       Logger.error('Failed to create profile', e, null, 'ProfileBloc');
       emit(state.copyWith(
@@ -128,6 +137,9 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
       ));
 
       Logger.info('Profile updated', 'ProfileBloc');
+
+      // Broadcast updated profile via BLE
+      add(const BroadcastProfile());
     } catch (e) {
       Logger.error('Failed to update profile', e, null, 'ProfileBloc');
       emit(state.copyWith(
@@ -264,6 +276,9 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
       emit(state.copyWith(photos: photoList));
 
       Logger.info('Primary photo set: ${event.photoId}', 'ProfileBloc');
+
+      // Rebroadcast with new primary photo thumbnail
+      add(const BroadcastProfile());
     } catch (e) {
       Logger.error('Failed to set primary photo', e, null, 'ProfileBloc');
       emit(state.copyWith(errorMessage: 'Failed to set primary photo'));
@@ -297,6 +312,46 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
     } catch (e) {
       Logger.error('Failed to pick photo from camera', e, null, 'ProfileBloc');
       emit(state.copyWith(errorMessage: 'Failed to take photo'));
+    }
+  }
+
+  /// Broadcast profile via BLE
+  Future<void> _onBroadcastProfile(
+    BroadcastProfile event,
+    Emitter<ProfileState> emit,
+  ) async {
+    if (state.profileId == null || state.name == null) {
+      Logger.warning('Cannot broadcast - no profile', 'ProfileBloc');
+      return;
+    }
+
+    try {
+      // Get primary photo thumbnail for broadcasting
+      Uint8List? thumbnailBytes;
+      final primaryPhoto = state.primaryPhoto;
+      if (primaryPhoto != null) {
+        final thumbnailFile = File(primaryPhoto.thumbnailPath);
+        if (await thumbnailFile.exists()) {
+          thumbnailBytes = await thumbnailFile.readAsBytes();
+        }
+      }
+
+      // Create broadcast payload
+      final payload = ble.BroadcastPayload(
+        userId: state.profileId!,
+        name: state.name!,
+        age: state.age,
+        bio: state.bio,
+        thumbnailBytes: thumbnailBytes,
+      );
+
+      // Broadcast via BLE
+      await _bleService.broadcastProfile(payload);
+
+      Logger.info('Profile broadcast via BLE', 'ProfileBloc');
+    } catch (e) {
+      Logger.error('Failed to broadcast profile', e, null, 'ProfileBloc');
+      // Don't emit error - broadcasting failure shouldn't block user
     }
   }
 

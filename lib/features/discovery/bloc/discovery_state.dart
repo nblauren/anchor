@@ -124,12 +124,14 @@ class DiscoveryState extends Equatable {
     this.peers = const [],
     this.errorMessage,
     this.lastRefreshed,
+    this.isScanning = false,
   });
 
   final DiscoveryStatus status;
   final List<DiscoveredPeer> peers;
   final String? errorMessage;
   final DateTime? lastRefreshed;
+  final bool isScanning;
 
   /// Visible peers (excluding blocked), sorted by last seen
   List<DiscoveredPeer> get visiblePeers {
@@ -160,15 +162,17 @@ class DiscoveryState extends Equatable {
     List<DiscoveredPeer>? peers,
     String? errorMessage,
     DateTime? lastRefreshed,
+    bool? isScanning,
   }) {
     return DiscoveryState(
       status: status ?? this.status,
       peers: peers ?? this.peers,
       errorMessage: errorMessage,
       lastRefreshed: lastRefreshed ?? this.lastRefreshed,
+      isScanning: isScanning ?? this.isScanning,
     );
   }
 
   @override
-  List<Object?> get props => [status, peers, errorMessage, lastRefreshed];
+  List<Object?> get props => [status, peers, errorMessage, lastRefreshed, isScanning];
 }

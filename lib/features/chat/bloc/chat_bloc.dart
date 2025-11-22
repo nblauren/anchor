@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter_bloc/flutter_bloc.dart';
 
@@ -6,6 +7,7 @@ import '../../../core/constants/app_constants.dart';
 import '../../../core/utils/logger.dart';
 import '../../../data/local_database/database.dart';
 import '../../../data/repositories/chat_repository.dart';
+import '../../../services/ble/ble.dart' as ble;
 import '../../../services/image_service.dart';
 import 'chat_event.dart';
 import 'chat_state.dart';
@@ -14,9 +16,11 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   ChatBloc({
     required ChatRepository chatRepository,
     required ImageService imageService,
+    required ble.BleServiceInterface bleService,
     required String ownUserId,
   })  : _chatRepository = chatRepository,
         _imageService = imageService,
+        _bleService = bleService,
         _ownUserId = ownUserId,
         super(const ChatState()) {
     on<LoadConversations>(_onLoadConversations);
@@ -25,19 +29,42 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     on<SendTextMessage>(_onSendTextMessage);
     on<SendPhotoMessage>(_onSendPhotoMessage);
     on<MessageReceived>(_onMessageReceived);
+    on<BleMessageReceived>(_onBleMessageReceived);
     on<MessageStatusUpdated>(_onMessageStatusUpdated);
+    on<PhotoTransferProgressUpdated>(_onPhotoTransferProgress);
     on<RetryFailedMessage>(_onRetryFailedMessage);
     on<MarkMessagesRead>(_onMarkMessagesRead);
     on<CloseConversation>(_onCloseConversation);
     on<DeleteConversation>(_onDeleteConversation);
     on<ClearChatError>(_onClearError);
+
+    // Subscribe to BLE message stream
+    _messageSubscription = _bleService.messageReceivedStream.listen(
+      (msg) => add(BleMessageReceived(msg)),
+    );
+
+    // Subscribe to BLE photo progress stream
+    _photoProgressSubscription = _bleService.photoProgressStream.listen(
+      (progress) => add(PhotoTransferProgressUpdated(progress)),
+    );
+
+    // Subscribe to BLE photo received stream
+    _photoReceivedSubscription = _bleService.photoReceivedStream.listen(
+      _onBlePhotoReceived,
+    );
   }
 
   final ChatRepository _chatRepository;
   final ImageService _imageService;
+  final ble.BleServiceInterface _bleService;
   final String _ownUserId;
 
-  // Mock echo timer
+  // BLE subscriptions
+  StreamSubscription<ble.ReceivedMessage>? _messageSubscription;
+  StreamSubscription<ble.PhotoTransferProgress>? _photoProgressSubscription;
+  StreamSubscription<ble.ReceivedPhoto>? _photoReceivedSubscription;
+
+  // Mock echo timer (for testing when using MockBleService)
   Timer? _echoTimer;
 
   String get ownUserId => _ownUserId;
@@ -131,7 +158,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     emit(state.copyWith(status: ChatStatus.sending));
 
     try {
-      // Send message
+      // Save message to database as pending
       final message = await _chatRepository.sendTextMessage(
         conversationId: state.currentConversation!.id,
         senderId: _ownUserId,
@@ -144,11 +171,29 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         messages: [message, ...state.messages],
       ));
 
-      // Simulate sending (update to sent status after delay)
-      _simulateSend(message.id);
+      // Send via BLE
+      final payload = ble.MessagePayload(
+        messageId: message.id,
+        type: ble.MessageType.text,
+        content: event.text.trim(),
+      );
 
-      // Schedule mock echo response
-      _scheduleMockEcho(event.text.trim());
+      final success = await _bleService.sendMessage(
+        state.currentConversation!.peerId,
+        payload,
+      );
+
+      if (success) {
+        add(MessageStatusUpdated(
+          messageId: message.id,
+          status: MessageStatus.sent,
+        ));
+      } else {
+        add(MessageStatusUpdated(
+          messageId: message.id,
+          status: MessageStatus.failed,
+        ));
+      }
 
       // Refresh conversations
       add(const LoadConversations());
@@ -173,21 +218,42 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       // Compress the photo for chat (target ~100-200KB)
       final compressedPath = await _imageService.compressForChat(event.photoPath);
 
-      // Send photo message
+      // Save photo message to database as pending
       final message = await _chatRepository.sendPhotoMessage(
         conversationId: state.currentConversation!.id,
         senderId: _ownUserId,
         photoPath: compressedPath,
       );
 
-      // Add to messages list
+      // Add to messages list with transfer progress tracking
+      final updatedTransfers = Map<String, PhotoTransferInfo>.from(state.photoTransfers);
+      updatedTransfers[message.id] = PhotoTransferInfo(
+        messageId: message.id,
+        progress: 0,
+        isSending: true,
+      );
+
       emit(state.copyWith(
         status: ChatStatus.loaded,
         messages: [message, ...state.messages],
+        photoTransfers: updatedTransfers,
       ));
 
-      // Simulate sending
-      _simulateSend(message.id);
+      // Read photo bytes and send via BLE
+      final photoBytes = await File(compressedPath).readAsBytes();
+      final success = await _bleService.sendPhoto(
+        state.currentConversation!.peerId,
+        photoBytes,
+        message.id,
+      );
+
+      if (!success) {
+        add(MessageStatusUpdated(
+          messageId: message.id,
+          status: MessageStatus.failed,
+        ));
+      }
+      // Status will be updated via PhotoTransferProgressUpdated events
 
       // Refresh conversations
       add(const LoadConversations());
@@ -216,6 +282,110 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       add(const LoadConversations());
     } catch (e) {
       Logger.error('Failed to handle received message', e, null, 'ChatBloc');
+    }
+  }
+
+  /// Handle BLE message received from peer
+  Future<void> _onBleMessageReceived(
+    BleMessageReceived event,
+    Emitter<ChatState> emit,
+  ) async {
+    try {
+      final bleMsg = event.message;
+
+      // Get or create conversation with this peer
+      final conversation = await _chatRepository.getOrCreateConversation(bleMsg.fromPeerId);
+
+      // Save received message to database
+      final message = await _chatRepository.receiveMessage(
+        conversationId: conversation.id,
+        senderId: bleMsg.fromPeerId,
+        contentType: bleMsg.type == ble.MessageType.text
+            ? MessageContentType.text
+            : MessageContentType.photo,
+        textContent: bleMsg.type == ble.MessageType.text ? bleMsg.content : null,
+      );
+
+      // If viewing this conversation, add to UI
+      if (state.currentConversation?.peerId == bleMsg.fromPeerId) {
+        emit(state.copyWith(
+          messages: [message, ...state.messages],
+        ));
+      }
+
+      // Refresh conversations list
+      add(const LoadConversations());
+
+      Logger.info(
+        'ChatBloc: Received BLE message from ${bleMsg.fromPeerId.substring(0, 8)}',
+        'Chat',
+      );
+    } catch (e) {
+      Logger.error('Failed to handle BLE message', e, null, 'ChatBloc');
+    }
+  }
+
+  /// Handle photo transfer progress updates
+  void _onPhotoTransferProgress(
+    PhotoTransferProgressUpdated event,
+    Emitter<ChatState> emit,
+  ) {
+    final progress = event.progress;
+    final updatedTransfers = Map<String, PhotoTransferInfo>.from(state.photoTransfers);
+
+    if (progress.status == ble.PhotoTransferStatus.completed) {
+      // Remove from tracking and update message status
+      updatedTransfers.remove(progress.messageId);
+      add(MessageStatusUpdated(
+        messageId: progress.messageId,
+        status: MessageStatus.sent,
+      ));
+    } else if (progress.status == ble.PhotoTransferStatus.failed ||
+        progress.status == ble.PhotoTransferStatus.cancelled) {
+      // Remove from tracking and mark as failed
+      updatedTransfers.remove(progress.messageId);
+      add(MessageStatusUpdated(
+        messageId: progress.messageId,
+        status: MessageStatus.failed,
+      ));
+    } else {
+      // Update progress
+      updatedTransfers[progress.messageId] = PhotoTransferInfo(
+        messageId: progress.messageId,
+        progress: progress.progress,
+        isSending: true, // Receiving progress tracked separately
+      );
+    }
+
+    emit(state.copyWith(photoTransfers: updatedTransfers));
+  }
+
+  /// Handle BLE photo received from peer
+  Future<void> _onBlePhotoReceived(ble.ReceivedPhoto photo) async {
+    try {
+      // Get or create conversation with this peer
+      final conversation = await _chatRepository.getOrCreateConversation(photo.fromPeerId);
+
+      // Save photo to file
+      final photoPath = await _imageService.saveReceivedPhoto(photo.photoData);
+
+      // Save received photo message to database
+      final message = await _chatRepository.receiveMessage(
+        conversationId: conversation.id,
+        senderId: photo.fromPeerId,
+        contentType: MessageContentType.photo,
+        photoPath: photoPath,
+      );
+
+      // Add MessageReceived event to update UI
+      add(MessageReceived(message));
+
+      Logger.info(
+        'ChatBloc: Received BLE photo from ${photo.fromPeerId.substring(0, 8)}',
+        'Chat',
+      );
+    } catch (e) {
+      Logger.error('Failed to handle BLE photo', e, null, 'ChatBloc');
     }
   }
 
@@ -338,58 +508,12 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     emit(state.copyWith(errorMessage: null));
   }
 
-  /// Simulate message sending (update status after delay)
-  void _simulateSend(String messageId) {
-    Future.delayed(const Duration(milliseconds: 500), () {
-      add(MessageStatusUpdated(
-        messageId: messageId,
-        status: MessageStatus.sent,
-      ));
-    });
-  }
-
-  /// Schedule a mock echo response for testing
-  void _scheduleMockEcho(String originalText) {
-    _echoTimer?.cancel();
-    _echoTimer = Timer(const Duration(seconds: 1), () async {
-      if (state.currentConversation == null) return;
-
-      try {
-        // Create echo response
-        final echoText = _generateEchoResponse(originalText);
-
-        final echoMessage = await _chatRepository.receiveMessage(
-          conversationId: state.currentConversation!.id,
-          senderId: state.currentConversation!.peerId,
-          contentType: MessageContentType.text,
-          textContent: echoText,
-        );
-
-        add(MessageReceived(echoMessage));
-      } catch (e) {
-        Logger.error('Failed to generate echo', e, null, 'ChatBloc');
-      }
-    });
-  }
-
-  /// Generate a mock echo response
-  String _generateEchoResponse(String originalText) {
-    final responses = [
-      "Hey! Got your message: \"$originalText\"",
-      "Thanks for saying: $originalText",
-      "Interesting! You said: $originalText",
-      "Cool message! \"$originalText\"",
-      "I hear you: $originalText",
-    ];
-
-    // Pick a response based on message length (deterministic for same input)
-    final index = originalText.length % responses.length;
-    return responses[index];
-  }
-
   @override
   Future<void> close() {
     _echoTimer?.cancel();
+    _messageSubscription?.cancel();
+    _photoProgressSubscription?.cancel();
+    _photoReceivedSubscription?.cancel();
     return super.close();
   }
 }
