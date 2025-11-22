@@ -1,14 +1,16 @@
 import '../core/utils/logger.dart';
 import '../data/local_database/database.dart';
 import '../data/repositories/chat_repository.dart';
+import '../data/repositories/peer_repository.dart';
 import '../data/repositories/profile_repository.dart';
 
-/// Service for managing database access
+/// Service for managing database access and repositories
 class DatabaseService {
   DatabaseService();
 
   late final AppDatabase _database;
   late final ProfileRepository _profileRepository;
+  late final PeerRepository _peerRepository;
   late final ChatRepository _chatRepository;
 
   bool _isInitialized = false;
@@ -16,13 +18,19 @@ class DatabaseService {
   /// Whether the service is initialized
   bool get isInitialized => _isInitialized;
 
-  /// Access to profile repository
+  /// Access to profile repository (local user profile and photos)
   ProfileRepository get profileRepository {
     _ensureInitialized();
     return _profileRepository;
   }
 
-  /// Access to chat repository
+  /// Access to peer repository (discovered peers and blocking)
+  PeerRepository get peerRepository {
+    _ensureInitialized();
+    return _peerRepository;
+  }
+
+  /// Access to chat repository (conversations and messages)
   ChatRepository get chatRepository {
     _ensureInitialized();
     return _chatRepository;
@@ -42,6 +50,7 @@ class DatabaseService {
 
     _database = AppDatabase();
     _profileRepository = ProfileRepository(_database);
+    _peerRepository = PeerRepository(_database);
     _chatRepository = ChatRepository(_database);
 
     _isInitialized = true;

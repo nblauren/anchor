@@ -1,184 +1,320 @@
 import 'package:drift/drift.dart';
+import 'package:uuid/uuid.dart';
 
 import '../local_database/database.dart';
-import '../models/chat_message.dart';
-import '../models/conversation.dart';
 
-/// Repository for managing chat messages and conversations
+/// Repository for managing conversations and messages
 class ChatRepository {
-  ChatRepository(this._database);
+  ChatRepository(this._db);
 
-  final AppDatabase _database;
-
-  // ==================== Messages ====================
-
-  /// Save a new message
-  Future<void> saveMessage(ChatMessage message) async {
-    final companion = ChatMessagesCompanion(
-      id: Value(message.id),
-      conversationId: Value(message.conversationId),
-      senderId: Value(message.senderId),
-      receiverId: Value(message.receiverId),
-      content: Value(message.content),
-      timestamp: Value(message.timestamp),
-      isDelivered: Value(message.isDelivered),
-      isRead: Value(message.isRead),
-      isSentByMe: Value(message.isSentByMe),
-    );
-
-    await _database.into(_database.chatMessages).insertOnConflictUpdate(companion);
-  }
-
-  /// Get messages for a conversation
-  Future<List<ChatMessage>> getMessagesForConversation(
-    String conversationId, {
-    int limit = 20,
-    int offset = 0,
-  }) async {
-    final results = await (_database.select(_database.chatMessages)
-          ..where((tbl) => tbl.conversationId.equals(conversationId))
-          ..orderBy([(tbl) => OrderingTerm.desc(tbl.timestamp)])
-          ..limit(limit, offset: offset))
-        .get();
-
-    return results.map(_mapToMessage).toList();
-  }
-
-  /// Mark messages as read
-  Future<void> markMessagesAsRead(String conversationId) async {
-    await (_database.update(_database.chatMessages)
-          ..where((tbl) => tbl.conversationId.equals(conversationId))
-          ..where((tbl) => tbl.isRead.equals(false))
-          ..where((tbl) => tbl.isSentByMe.equals(false)))
-        .write(const ChatMessagesCompanion(isRead: Value(true)));
-  }
-
-  /// Mark message as delivered
-  Future<void> markMessageAsDelivered(String messageId) async {
-    await (_database.update(_database.chatMessages)
-          ..where((tbl) => tbl.id.equals(messageId)))
-        .write(const ChatMessagesCompanion(isDelivered: Value(true)));
-  }
-
-  /// Delete a message
-  Future<void> deleteMessage(String messageId) async {
-    await (_database.delete(_database.chatMessages)
-          ..where((tbl) => tbl.id.equals(messageId)))
-        .go();
-  }
+  final AppDatabase _db;
+  static const _uuid = Uuid();
 
   // ==================== Conversations ====================
 
-  /// Get or create a conversation with a user
-  Future<Conversation> getOrCreateConversation({
-    required String participantId,
-    required String participantName,
-    String? participantPhotoUrl,
-  }) async {
-    // Try to find existing conversation
-    final existing = await (_database.select(_database.conversations)
-          ..where((tbl) => tbl.participantId.equals(participantId)))
-        .getSingleOrNull();
+  /// Get all conversations with peer details
+  Future<List<ConversationWithPeer>> getAllConversations() async {
+    final query = _db.select(_db.conversations).join([
+      leftOuterJoin(
+        _db.discoveredPeers,
+        _db.discoveredPeers.peerId.equalsExp(_db.conversations.peerId),
+      ),
+    ]);
+    query.orderBy([OrderingTerm.desc(_db.conversations.updatedAt)]);
 
-    if (existing != null) {
-      return _mapToConversation(existing);
-    }
+    final results = await query.get();
+    final conversations = <ConversationWithPeer>[];
 
-    // Create new conversation
-    final now = DateTime.now();
-    final conversationId = '${participantId}_${now.millisecondsSinceEpoch}';
-
-    final companion = ConversationsCompanion(
-      id: Value(conversationId),
-      participantId: Value(participantId),
-      participantName: Value(participantName),
-      participantPhotoUrl: Value(participantPhotoUrl),
-      unreadCount: const Value(0),
-      createdAt: Value(now),
-      updatedAt: Value(now),
-    );
-
-    await _database.into(_database.conversations).insert(companion);
-
-    return Conversation(
-      id: conversationId,
-      participantId: participantId,
-      participantName: participantName,
-      participantPhotoUrl: participantPhotoUrl,
-      unreadCount: 0,
-      createdAt: now,
-      updatedAt: now,
-    );
-  }
-
-  /// Get all conversations
-  Future<List<Conversation>> getAllConversations() async {
-    final results = await (_database.select(_database.conversations)
-          ..orderBy([(tbl) => OrderingTerm.desc(tbl.updatedAt)]))
-        .get();
-
-    final conversations = <Conversation>[];
     for (final row in results) {
-      final conversation = _mapToConversation(row);
+      final conversation = row.readTable(_db.conversations);
+      final peer = row.readTableOrNull(_db.discoveredPeers);
 
       // Get last message
-      final lastMessage = await (_database.select(_database.chatMessages)
-            ..where((tbl) => tbl.conversationId.equals(row.id))
-            ..orderBy([(tbl) => OrderingTerm.desc(tbl.timestamp)])
-            ..limit(1))
-          .getSingleOrNull();
+      final lastMessage = await getLastMessage(conversation.id);
 
-      conversations.add(conversation.copyWith(
-        lastMessage: lastMessage != null ? _mapToMessage(lastMessage) : null,
+      // Get unread count
+      final unreadCount = await getUnreadCount(conversation.id);
+
+      conversations.add(ConversationWithPeer(
+        conversation: conversation,
+        peer: peer,
+        lastMessage: lastMessage,
+        unreadCount: unreadCount,
       ));
     }
 
     return conversations;
   }
 
-  /// Update conversation's unread count
-  Future<void> updateUnreadCount(String conversationId, int count) async {
-    await (_database.update(_database.conversations)
-          ..where((tbl) => tbl.id.equals(conversationId)))
-        .write(ConversationsCompanion(
-      unreadCount: Value(count),
-      updatedAt: Value(DateTime.now()),
-    ));
+  /// Get a conversation by ID
+  Future<ConversationEntry?> getConversationById(String id) async {
+    return await (_db.select(_db.conversations)
+          ..where((t) => t.id.equals(id)))
+        .getSingleOrNull();
+  }
+
+  /// Get or create a conversation with a peer
+  Future<ConversationEntry> getOrCreateConversation(String peerId) async {
+    // Try to find existing
+    final existing = await (_db.select(_db.conversations)
+          ..where((t) => t.peerId.equals(peerId)))
+        .getSingleOrNull();
+
+    if (existing != null) {
+      return existing;
+    }
+
+    // Create new
+    final now = DateTime.now();
+    final id = _uuid.v4();
+
+    final entry = ConversationsCompanion.insert(
+      id: id,
+      peerId: peerId,
+      createdAt: now,
+      updatedAt: now,
+    );
+
+    await _db.into(_db.conversations).insert(entry);
+
+    return ConversationEntry(
+      id: id,
+      peerId: peerId,
+      createdAt: now,
+      updatedAt: now,
+    );
+  }
+
+  /// Update conversation's updated_at timestamp
+  Future<void> touchConversation(String id) async {
+    await (_db.update(_db.conversations)..where((t) => t.id.equals(id)))
+        .write(ConversationsCompanion(updatedAt: Value(DateTime.now())));
   }
 
   /// Delete a conversation and all its messages
-  Future<void> deleteConversation(String conversationId) async {
-    await (_database.delete(_database.chatMessages)
-          ..where((tbl) => tbl.conversationId.equals(conversationId)))
-        .go();
-    await (_database.delete(_database.conversations)
-          ..where((tbl) => tbl.id.equals(conversationId)))
-        .go();
+  Future<void> deleteConversation(String id) async {
+    await _db.transaction(() async {
+      // Delete messages first
+      await (_db.delete(_db.messages)..where((t) => t.conversationId.equals(id)))
+          .go();
+      // Delete conversation
+      await (_db.delete(_db.conversations)..where((t) => t.id.equals(id))).go();
+    });
   }
 
-  ChatMessage _mapToMessage(dynamic row) {
-    return ChatMessage(
-      id: row.id,
-      conversationId: row.conversationId,
-      senderId: row.senderId,
-      receiverId: row.receiverId,
-      content: row.content,
-      timestamp: row.timestamp,
-      isDelivered: row.isDelivered,
-      isRead: row.isRead,
-      isSentByMe: row.isSentByMe,
+  /// Watch all conversations
+  Stream<List<ConversationEntry>> watchConversations() {
+    return (_db.select(_db.conversations)
+          ..orderBy([(t) => OrderingTerm.desc(t.updatedAt)]))
+        .watch();
+  }
+
+  // ==================== Messages ====================
+
+  /// Get messages for a conversation
+  Future<List<MessageEntry>> getMessages(
+    String conversationId, {
+    int limit = 50,
+    int offset = 0,
+  }) async {
+    return await (_db.select(_db.messages)
+          ..where((t) => t.conversationId.equals(conversationId))
+          ..orderBy([(t) => OrderingTerm.desc(t.createdAt)])
+          ..limit(limit, offset: offset))
+        .get();
+  }
+
+  /// Get the last message in a conversation
+  Future<MessageEntry?> getLastMessage(String conversationId) async {
+    return await (_db.select(_db.messages)
+          ..where((t) => t.conversationId.equals(conversationId))
+          ..orderBy([(t) => OrderingTerm.desc(t.createdAt)])
+          ..limit(1))
+        .getSingleOrNull();
+  }
+
+  /// Send a text message
+  Future<MessageEntry> sendTextMessage({
+    required String conversationId,
+    required String senderId,
+    required String text,
+  }) async {
+    final id = _uuid.v4();
+    final now = DateTime.now();
+
+    final entry = MessagesCompanion.insert(
+      id: id,
+      conversationId: conversationId,
+      senderId: senderId,
+      contentType: MessageContentType.text,
+      textContent: Value(text),
+      status: MessageStatus.pending,
+      createdAt: now,
+    );
+
+    await _db.into(_db.messages).insert(entry);
+
+    // Update conversation timestamp
+    await touchConversation(conversationId);
+
+    return MessageEntry(
+      id: id,
+      conversationId: conversationId,
+      senderId: senderId,
+      contentType: MessageContentType.text,
+      textContent: text,
+      photoPath: null,
+      status: MessageStatus.pending,
+      createdAt: now,
     );
   }
 
-  Conversation _mapToConversation(dynamic row) {
-    return Conversation(
-      id: row.id,
-      participantId: row.participantId,
-      participantName: row.participantName,
-      participantPhotoUrl: row.participantPhotoUrl,
-      unreadCount: row.unreadCount,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
+  /// Send a photo message
+  Future<MessageEntry> sendPhotoMessage({
+    required String conversationId,
+    required String senderId,
+    required String photoPath,
+  }) async {
+    final id = _uuid.v4();
+    final now = DateTime.now();
+
+    final entry = MessagesCompanion.insert(
+      id: id,
+      conversationId: conversationId,
+      senderId: senderId,
+      contentType: MessageContentType.photo,
+      photoPath: Value(photoPath),
+      status: MessageStatus.pending,
+      createdAt: now,
+    );
+
+    await _db.into(_db.messages).insert(entry);
+
+    // Update conversation timestamp
+    await touchConversation(conversationId);
+
+    return MessageEntry(
+      id: id,
+      conversationId: conversationId,
+      senderId: senderId,
+      contentType: MessageContentType.photo,
+      textContent: null,
+      photoPath: photoPath,
+      status: MessageStatus.pending,
+      createdAt: now,
     );
   }
+
+  /// Receive a message (from BLE)
+  Future<MessageEntry> receiveMessage({
+    required String conversationId,
+    required String senderId,
+    required MessageContentType contentType,
+    String? textContent,
+    String? photoPath,
+  }) async {
+    final id = _uuid.v4();
+    final now = DateTime.now();
+
+    final entry = MessagesCompanion.insert(
+      id: id,
+      conversationId: conversationId,
+      senderId: senderId,
+      contentType: contentType,
+      textContent: Value(textContent),
+      photoPath: Value(photoPath),
+      status: MessageStatus.delivered,
+      createdAt: now,
+    );
+
+    await _db.into(_db.messages).insert(entry);
+
+    // Update conversation timestamp
+    await touchConversation(conversationId);
+
+    return MessageEntry(
+      id: id,
+      conversationId: conversationId,
+      senderId: senderId,
+      contentType: contentType,
+      textContent: textContent,
+      photoPath: photoPath,
+      status: MessageStatus.delivered,
+      createdAt: now,
+    );
+  }
+
+  /// Update message status
+  Future<void> updateMessageStatus(String id, MessageStatus status) async {
+    await (_db.update(_db.messages)..where((t) => t.id.equals(id)))
+        .write(MessagesCompanion(status: Value(status)));
+  }
+
+  /// Mark all pending messages as failed
+  Future<void> markPendingAsFailed(String conversationId) async {
+    await (_db.update(_db.messages)
+          ..where((t) =>
+              t.conversationId.equals(conversationId) &
+              t.status.equalsValue(MessageStatus.pending)))
+        .write(const MessagesCompanion(status: Value(MessageStatus.failed)));
+  }
+
+  /// Delete a message
+  Future<void> deleteMessage(String id) async {
+    await (_db.delete(_db.messages)..where((t) => t.id.equals(id))).go();
+  }
+
+  /// Get unread count for a conversation (messages from peer)
+  Future<int> getUnreadCount(String conversationId, {String? localUserId}) async {
+    // For simplicity, count messages with status 'delivered' that aren't from local user
+    // In a real app, you'd track read status separately
+    final count = _db.messages.id.count();
+    final query = _db.selectOnly(_db.messages)
+      ..where(_db.messages.conversationId.equals(conversationId))
+      ..where(_db.messages.status.equalsValue(MessageStatus.delivered));
+    if (localUserId != null) {
+      query.where(_db.messages.senderId.equals(localUserId).not());
+    }
+    query.addColumns([count]);
+    final result = await query.getSingle();
+    return result.read(count) ?? 0;
+  }
+
+  /// Watch messages for a conversation
+  Stream<List<MessageEntry>> watchMessages(String conversationId) {
+    return (_db.select(_db.messages)
+          ..where((t) => t.conversationId.equals(conversationId))
+          ..orderBy([(t) => OrderingTerm.desc(t.createdAt)]))
+        .watch();
+  }
+
+  /// Get message count for a conversation
+  Future<int> getMessageCount(String conversationId) async {
+    final count = _db.messages.id.count();
+    final query = _db.selectOnly(_db.messages)
+      ..where(_db.messages.conversationId.equals(conversationId))
+      ..addColumns([count]);
+    final result = await query.getSingle();
+    return result.read(count) ?? 0;
+  }
+
+  /// Retry sending a failed message
+  Future<void> retryMessage(String id) async {
+    await updateMessageStatus(id, MessageStatus.pending);
+  }
+}
+
+/// Helper class for conversation with peer details
+class ConversationWithPeer {
+  const ConversationWithPeer({
+    required this.conversation,
+    this.peer,
+    this.lastMessage,
+    this.unreadCount = 0,
+  });
+
+  final ConversationEntry conversation;
+  final DiscoveredPeerEntry? peer;
+  final MessageEntry? lastMessage;
+  final int unreadCount;
 }

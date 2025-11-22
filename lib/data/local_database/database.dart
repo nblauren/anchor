@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
@@ -9,47 +10,74 @@ import '../../core/constants/app_constants.dart';
 
 part 'database.g.dart';
 
-/// User profiles table
+// ==================== Enums ====================
+
+/// Content type for messages
+enum MessageContentType {
+  text,
+  photo,
+}
+
+/// Message delivery status
+enum MessageStatus {
+  pending,
+  sent,
+  delivered,
+  failed,
+}
+
+// ==================== Tables ====================
+
+/// Local user's own profile
+@DataClassName('UserProfileEntry')
 class UserProfiles extends Table {
   TextColumn get id => text()();
   TextColumn get name => text()();
-  IntColumn get age => integer()();
+  IntColumn get age => integer().nullable()();
   TextColumn get bio => text().nullable()();
-  TextColumn get photoUrls => text()(); // JSON encoded list
-  TextColumn get interests => text()(); // JSON encoded list
   DateTimeColumn get createdAt => dateTime()();
   DateTimeColumn get updatedAt => dateTime()();
-  BoolColumn get isOwnProfile => boolean().withDefault(const Constant(false))();
-  DateTimeColumn get lastSeenAt => dateTime().nullable()();
-  TextColumn get bleIdentifier => text().nullable()();
 
   @override
   Set<Column> get primaryKey => {id};
 }
 
-/// Chat messages table
-class ChatMessages extends Table {
+/// Local user's photos
+@DataClassName('UserPhotoEntry')
+class UserPhotos extends Table {
   TextColumn get id => text()();
-  TextColumn get conversationId => text()();
-  TextColumn get senderId => text()();
-  TextColumn get receiverId => text()();
-  TextColumn get content => text()();
-  DateTimeColumn get timestamp => dateTime()();
-  BoolColumn get isDelivered => boolean().withDefault(const Constant(false))();
-  BoolColumn get isRead => boolean().withDefault(const Constant(false))();
-  BoolColumn get isSentByMe => boolean().withDefault(const Constant(false))();
+  TextColumn get userId => text().references(UserProfiles, #id)();
+  TextColumn get photoPath => text()();
+  TextColumn get thumbnailPath => text()();
+  BoolColumn get isPrimary => boolean().withDefault(const Constant(false))();
+  IntColumn get orderIndex => integer()();
+  DateTimeColumn get createdAt => dateTime()();
 
   @override
   Set<Column> get primaryKey => {id};
 }
 
-/// Conversations table
+/// Nearby users found via BLE
+@DataClassName('DiscoveredPeerEntry')
+class DiscoveredPeers extends Table {
+  TextColumn get peerId => text()();
+  TextColumn get name => text()();
+  IntColumn get age => integer().nullable()();
+  TextColumn get bio => text().nullable()();
+  BlobColumn get thumbnailData => blob().nullable()();
+  DateTimeColumn get lastSeenAt => dateTime()();
+  IntColumn get rssi => integer().nullable()();
+  BoolColumn get isBlocked => boolean().withDefault(const Constant(false))();
+
+  @override
+  Set<Column> get primaryKey => {peerId};
+}
+
+/// Chat conversations
+@DataClassName('ConversationEntry')
 class Conversations extends Table {
   TextColumn get id => text()();
-  TextColumn get participantId => text()();
-  TextColumn get participantName => text()();
-  TextColumn get participantPhotoUrl => text().nullable()();
-  IntColumn get unreadCount => integer().withDefault(const Constant(0))();
+  TextColumn get peerId => text().references(DiscoveredPeers, #peerId)();
   DateTimeColumn get createdAt => dateTime()();
   DateTimeColumn get updatedAt => dateTime()();
 
@@ -57,12 +85,50 @@ class Conversations extends Table {
   Set<Column> get primaryKey => {id};
 }
 
-@DriftDatabase(tables: [UserProfiles, ChatMessages, Conversations])
+/// Chat messages
+@DataClassName('MessageEntry')
+class Messages extends Table {
+  TextColumn get id => text()();
+  TextColumn get conversationId => text().references(Conversations, #id)();
+  TextColumn get senderId => text()();
+  TextColumn get contentType => textEnum<MessageContentType>()();
+  TextColumn get textContent => text().nullable()();
+  TextColumn get photoPath => text().nullable()();
+  TextColumn get status => textEnum<MessageStatus>()();
+  DateTimeColumn get createdAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// Blocked users
+@DataClassName('BlockedUserEntry')
+class BlockedUsers extends Table {
+  TextColumn get peerId => text()();
+  DateTimeColumn get blockedAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {peerId};
+}
+
+// ==================== Database ====================
+
+@DriftDatabase(tables: [
+  UserProfiles,
+  UserPhotos,
+  DiscoveredPeers,
+  Conversations,
+  Messages,
+  BlockedUsers,
+])
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
 
+  // For testing
+  AppDatabase.forTesting(super.e);
+
   @override
-  int get schemaVersion => AppConstants.databaseVersion;
+  int get schemaVersion => 2;
 
   @override
   MigrationStrategy get migration {
@@ -71,7 +137,18 @@ class AppDatabase extends _$AppDatabase {
         await m.createAll();
       },
       onUpgrade: (Migrator m, int from, int to) async {
-        // Handle future migrations here
+        if (from < 2) {
+          // Migration from v1 to v2: complete schema change
+          // Drop old tables and create new ones
+          await m.deleteTable('user_profiles');
+          await m.deleteTable('chat_messages');
+          await m.deleteTable('conversations');
+          await m.createAll();
+        }
+      },
+      beforeOpen: (details) async {
+        // Enable foreign keys
+        await customStatement('PRAGMA foreign_keys = ON');
       },
     );
   }
