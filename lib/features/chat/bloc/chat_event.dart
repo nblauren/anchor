@@ -1,6 +1,6 @@
 import 'package:equatable/equatable.dart';
 
-import '../../../data/models/chat_message.dart';
+import '../../../data/local_database/database.dart';
 
 abstract class ChatEvent extends Equatable {
   const ChatEvent();
@@ -14,23 +14,21 @@ class LoadConversations extends ChatEvent {
   const LoadConversations();
 }
 
-/// Open a specific conversation
+/// Open a specific conversation with a peer
 class OpenConversation extends ChatEvent {
   const OpenConversation({
-    required this.participantId,
-    required this.participantName,
-    this.participantPhotoUrl,
+    required this.peerId,
+    required this.peerName,
   });
 
-  final String participantId;
-  final String participantName;
-  final String? participantPhotoUrl;
+  final String peerId;
+  final String peerName;
 
   @override
-  List<Object?> get props => [participantId, participantName, participantPhotoUrl];
+  List<Object?> get props => [peerId, peerName];
 }
 
-/// Load messages for current conversation
+/// Load messages for current conversation (paginated)
 class LoadMessages extends ChatEvent {
   const LoadMessages({this.loadMore = false});
   final bool loadMore;
@@ -39,25 +37,57 @@ class LoadMessages extends ChatEvent {
   List<Object?> get props => [loadMore];
 }
 
-/// Send a message
-class SendMessage extends ChatEvent {
-  const SendMessage(this.content);
-  final String content;
+/// Send a text message
+class SendTextMessage extends ChatEvent {
+  const SendTextMessage(this.text);
+  final String text;
 
   @override
-  List<Object?> get props => [content];
+  List<Object?> get props => [text];
 }
 
-/// Message received from BLE
+/// Send a photo message
+class SendPhotoMessage extends ChatEvent {
+  const SendPhotoMessage(this.photoPath);
+  final String photoPath;
+
+  @override
+  List<Object?> get props => [photoPath];
+}
+
+/// Message received from BLE (will be called later)
 class MessageReceived extends ChatEvent {
   const MessageReceived(this.message);
-  final ChatMessage message;
+  final MessageEntry message;
 
   @override
   List<Object?> get props => [message];
 }
 
-/// Mark messages as read
+/// Message status was updated
+class MessageStatusUpdated extends ChatEvent {
+  const MessageStatusUpdated({
+    required this.messageId,
+    required this.status,
+  });
+
+  final String messageId;
+  final MessageStatus status;
+
+  @override
+  List<Object?> get props => [messageId, status];
+}
+
+/// Retry sending a failed message
+class RetryFailedMessage extends ChatEvent {
+  const RetryFailedMessage(this.messageId);
+  final String messageId;
+
+  @override
+  List<Object?> get props => [messageId];
+}
+
+/// Mark messages as read in current conversation
 class MarkMessagesRead extends ChatEvent {
   const MarkMessagesRead();
 }
@@ -74,4 +104,9 @@ class DeleteConversation extends ChatEvent {
 
   @override
   List<Object?> get props => [conversationId];
+}
+
+/// Clear error state
+class ClearChatError extends ChatEvent {
+  const ClearChatError();
 }

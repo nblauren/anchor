@@ -1,9 +1,10 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../data/local_database/database.dart';
+import '../../../data/repositories/chat_repository.dart';
+import '../../../injection.dart';
 import '../bloc/chat_bloc.dart';
 import '../bloc/chat_event.dart';
 import '../bloc/chat_state.dart';
@@ -24,6 +25,29 @@ class _ChatListScreenState extends State<ChatListScreen> {
     context.read<ChatBloc>().add(const LoadConversations());
   }
 
+  void _openConversation(ConversationWithPeer conv) {
+    final peerName = conv.peer?.name ?? 'Unknown';
+    final peerId = conv.conversation.peerId;
+    final ownUserId = context.read<ChatBloc>().ownUserId;
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => BlocProvider<ChatBloc>(
+          create: (_) => getIt<ChatBloc>(param1: ownUserId),
+          child: ChatScreen(
+            peerId: peerId,
+            peerName: peerName,
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _deleteConversation(String conversationId) {
+    context.read<ChatBloc>().add(DeleteConversation(conversationId));
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -32,143 +56,183 @@ class _ChatListScreenState extends State<ChatListScreen> {
       ),
       body: BlocBuilder<ChatBloc, ChatState>(
         builder: (context, state) {
-          if (state.status == ChatStatus.loading &&
-              state.conversations.isEmpty) {
+          if (state.status == ChatStatus.loading && state.conversations.isEmpty) {
             return const Center(child: CircularProgressIndicator());
           }
 
           if (state.conversations.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(
-                    Icons.chat_bubble_outline,
-                    size: 80,
-                    color: AppTheme.textSecondary,
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'No messages yet',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          color: AppTheme.textSecondary,
-                        ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Start a conversation with someone nearby',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: AppTheme.textHint,
-                        ),
-                  ),
-                ],
-              ),
-            );
+            return _buildEmptyState();
           }
 
-          return ListView.builder(
-            itemCount: state.conversations.length,
-            itemBuilder: (context, index) {
-              final conversation = state.conversations[index];
-              final hasUnread = conversation.unreadCount > 0;
-
-              return Dismissible(
-                key: Key(conversation.id),
-                direction: DismissDirection.endToStart,
-                background: Container(
-                  color: AppTheme.error,
-                  alignment: Alignment.centerRight,
-                  padding: const EdgeInsets.only(right: 16),
-                  child: const Icon(Icons.delete, color: Colors.white),
-                ),
-                onDismissed: (_) {
-                  context
-                      .read<ChatBloc>()
-                      .add(DeleteConversation(conversation.id));
-                },
-                child: ListTile(
-                  leading: CircleAvatar(
-                    radius: 28,
-                    backgroundColor: AppTheme.darkCard,
-                    backgroundImage: conversation.participantPhotoUrl != null
-                        ? FileImage(File(conversation.participantPhotoUrl!))
-                        : null,
-                    child: conversation.participantPhotoUrl == null
-                        ? const Icon(Icons.person, color: AppTheme.textSecondary)
-                        : null,
-                  ),
-                  title: Text(
-                    conversation.participantName,
-                    style: TextStyle(
-                      fontWeight: hasUnread ? FontWeight.bold : FontWeight.normal,
-                    ),
-                  ),
-                  subtitle: conversation.lastMessage != null
-                      ? Text(
-                          conversation.lastMessage!.content,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: hasUnread
-                                ? AppTheme.textPrimary
-                                : AppTheme.textSecondary,
-                          ),
-                        )
-                      : null,
-                  trailing: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text(
-                        _formatTime(conversation.updatedAt),
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: hasUnread
-                              ? AppTheme.primaryColor
-                              : AppTheme.textHint,
-                        ),
-                      ),
-                      if (hasUnread) ...[
-                        const SizedBox(height: 4),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: AppTheme.primaryColor,
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Text(
-                            '${conversation.unreadCount}',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                  onTap: () {
-                    context.read<ChatBloc>().add(OpenConversation(
-                          participantId: conversation.participantId,
-                          participantName: conversation.participantName,
-                          participantPhotoUrl: conversation.participantPhotoUrl,
-                        ));
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => const ChatScreen(),
-                      ),
-                    );
-                  },
-                ),
-              );
+          return RefreshIndicator(
+            onRefresh: () async {
+              context.read<ChatBloc>().add(const LoadConversations());
             },
+            child: ListView.builder(
+              itemCount: state.conversations.length,
+              itemBuilder: (context, index) {
+                final conv = state.conversations[index];
+                return _buildConversationTile(conv);
+              },
+            ),
           );
         },
+      ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(
+            Icons.chat_bubble_outline,
+            size: 80,
+            color: AppTheme.textSecondary,
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'No messages yet',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  color: AppTheme.textSecondary,
+                ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Start a conversation with someone nearby',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: AppTheme.textHint,
+                ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildConversationTile(ConversationWithPeer conv) {
+    final peer = conv.peer;
+    final lastMessage = conv.lastMessage;
+    final hasUnread = conv.unreadCount > 0;
+    final peerName = peer?.name ?? 'Unknown';
+
+    return Dismissible(
+      key: Key(conv.conversation.id),
+      direction: DismissDirection.endToStart,
+      background: Container(
+        color: AppTheme.errorColor,
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 16),
+        child: const Icon(Icons.delete, color: Colors.white),
+      ),
+      confirmDismiss: (_) async {
+        return await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            backgroundColor: AppTheme.darkCard,
+            title: const Text('Delete Conversation'),
+            content: Text('Delete all messages with $peerName?'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                style: TextButton.styleFrom(foregroundColor: AppTheme.errorColor),
+                child: const Text('Delete'),
+              ),
+            ],
+          ),
+        );
+      },
+      onDismissed: (_) => _deleteConversation(conv.conversation.id),
+      child: ListTile(
+        leading: _buildAvatar(peerName, peer?.thumbnailData),
+        title: Text(
+          peerName,
+          style: TextStyle(
+            fontWeight: hasUnread ? FontWeight.bold : FontWeight.normal,
+          ),
+        ),
+        subtitle: lastMessage != null ? _buildLastMessage(lastMessage, hasUnread) : null,
+        trailing: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Text(
+              _formatTime(conv.conversation.updatedAt),
+              style: TextStyle(
+                fontSize: 12,
+                color: hasUnread ? AppTheme.primaryColor : AppTheme.textHint,
+              ),
+            ),
+            if (hasUnread) ...[
+              const SizedBox(height: 4),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryColor,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  '${conv.unreadCount}',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+        onTap: () => _openConversation(conv),
+      ),
+    );
+  }
+
+  Widget _buildAvatar(String name, dynamic thumbnailData) {
+    final colorIndex = name.hashCode.abs() % _avatarColors.length;
+    final color = _avatarColors[colorIndex];
+
+    if (thumbnailData != null && thumbnailData is List<int> && thumbnailData.isNotEmpty) {
+      return CircleAvatar(
+        radius: 28,
+        backgroundImage: MemoryImage(
+          thumbnailData is List<int> ? List<int>.from(thumbnailData) as dynamic : thumbnailData,
+        ),
+      );
+    }
+
+    return CircleAvatar(
+      radius: 28,
+      backgroundColor: color.withValues(alpha: 0.3),
+      child: Text(
+        name.isNotEmpty ? name[0].toUpperCase() : '?',
+        style: TextStyle(
+          color: color,
+          fontWeight: FontWeight.bold,
+          fontSize: 20,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLastMessage(MessageEntry message, bool hasUnread) {
+    String preview;
+    if (message.contentType == MessageContentType.photo) {
+      preview = '📷 Photo';
+    } else {
+      preview = message.textContent ?? '';
+    }
+
+    return Text(
+      preview,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(
+        color: hasUnread ? AppTheme.textPrimary : AppTheme.textSecondary,
       ),
     );
   }
@@ -188,4 +252,13 @@ class _ChatListScreenState extends State<ChatListScreen> {
       return '${dateTime.day}/${dateTime.month}';
     }
   }
+
+  static const _avatarColors = [
+    Color(0xFF6366F1),
+    Color(0xFFEC4899),
+    Color(0xFF10B981),
+    Color(0xFFF59E0B),
+    Color(0xFF3B82F6),
+    Color(0xFF8B5CF6),
+  ];
 }

@@ -251,6 +251,55 @@ class ImageService {
     }
   }
 
+  /// Compress a photo for chat messages (target ~100-200KB)
+  Future<String> compressForChat(String imagePath) async {
+    try {
+      final directory = await getApplicationDocumentsDirectory();
+      final chatImagesDir = Directory('${directory.path}/chat_images');
+
+      if (!await chatImagesDir.exists()) {
+        await chatImagesDir.create(recursive: true);
+      }
+
+      final file = File(imagePath);
+      if (!await file.exists()) {
+        throw ImageError('Image file not found: $imagePath');
+      }
+
+      final inputBytes = await file.readAsBytes();
+      final fileId = _uuid.v4();
+
+      // Target ~150KB with quality 60
+      final input = ImageFile(
+        filePath: imagePath,
+        rawBytes: inputBytes,
+      );
+
+      final config = Configuration(
+        outputType: ImageOutputType.jpg,
+        quality: 60,
+      );
+
+      final output = await compressor.compress(ImageFileConfiguration(
+        input: input,
+        config: config,
+      ));
+
+      final outputPath = '${chatImagesDir.path}/$fileId.jpg';
+      await File(outputPath).writeAsBytes(output.rawBytes);
+
+      Logger.info(
+        'Compressed chat image: ${inputBytes.length}B -> ${output.sizeInBytes}B',
+        'Image',
+      );
+
+      return outputPath;
+    } catch (e) {
+      Logger.error('Failed to compress chat image', e, null, 'Image');
+      throw ImageError('Failed to compress chat image', e);
+    }
+  }
+
   /// Clean up orphaned images not in the database
   Future<void> cleanupOrphanedImages(List<String> validPaths) async {
     try {

@@ -37,8 +37,8 @@ Future<void> initializeDependencies() async {
   // ChatBloc needs the user's own ID, which we get from profile
   getIt.registerFactoryParam<ChatBloc, String, void>(
     (ownUserId, _) => ChatBloc(
-      databaseService: getIt<DatabaseService>(),
-      bleService: getIt<BleService>(),
+      chatRepository: getIt<DatabaseService>().chatRepository,
+      imageService: getIt<ImageService>(),
       ownUserId: ownUserId,
     ),
   );

@@ -1,7 +1,7 @@
 import 'package:equatable/equatable.dart';
 
-import '../../../data/models/chat_message.dart';
-import '../../../data/models/conversation.dart';
+import '../../../data/local_database/database.dart';
+import '../../../data/repositories/chat_repository.dart';
 
 enum ChatStatus {
   initial,
@@ -9,6 +9,22 @@ enum ChatStatus {
   loaded,
   sending,
   error,
+}
+
+/// Current conversation info
+class CurrentConversation extends Equatable {
+  const CurrentConversation({
+    required this.id,
+    required this.peerId,
+    required this.peerName,
+  });
+
+  final String id;
+  final String peerId;
+  final String peerName;
+
+  @override
+  List<Object?> get props => [id, peerId, peerName];
 }
 
 class ChatState extends Equatable {
@@ -22,9 +38,9 @@ class ChatState extends Equatable {
   });
 
   final ChatStatus status;
-  final List<Conversation> conversations;
-  final Conversation? currentConversation;
-  final List<ChatMessage> messages;
+  final List<ConversationWithPeer> conversations;
+  final CurrentConversation? currentConversation;
+  final List<MessageEntry> messages;
   final String? errorMessage;
   final bool hasMoreMessages;
 
@@ -32,18 +48,23 @@ class ChatState extends Equatable {
   int get totalUnreadCount =>
       conversations.fold(0, (sum, conv) => sum + conv.unreadCount);
 
+  /// Check if we're in a conversation
+  bool get isInConversation => currentConversation != null;
+
   ChatState copyWith({
     ChatStatus? status,
-    List<Conversation>? conversations,
-    Conversation? currentConversation,
-    List<ChatMessage>? messages,
+    List<ConversationWithPeer>? conversations,
+    CurrentConversation? currentConversation,
+    List<MessageEntry>? messages,
     String? errorMessage,
     bool? hasMoreMessages,
+    bool clearCurrentConversation = false,
   }) {
     return ChatState(
       status: status ?? this.status,
       conversations: conversations ?? this.conversations,
-      currentConversation: currentConversation,
+      currentConversation:
+          clearCurrentConversation ? null : (currentConversation ?? this.currentConversation),
       messages: messages ?? this.messages,
       errorMessage: errorMessage,
       hasMoreMessages: hasMoreMessages ?? this.hasMoreMessages,
