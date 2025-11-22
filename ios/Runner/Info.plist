@@ -57,5 +57,10 @@
 	<string>Anchor uses your location to help discover people nearby.</string>
 	<key>MinimumOSVersion</key>
 	<string>14.0</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>bluetooth-central</string>
+		<string>bluetooth-peripheral</string>
+	</array>
 </dict>
 </plist>

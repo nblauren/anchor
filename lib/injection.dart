@@ -1,5 +1,6 @@
 import 'package:get_it/get_it.dart';
 
+import 'core/utils/logger.dart';
 import 'features/chat/bloc/chat_bloc.dart';
 import 'features/discovery/bloc/discovery_bloc.dart';
 import 'features/profile/bloc/profile_bloc.dart';
@@ -11,19 +12,46 @@ import 'services/image_service.dart';
 final getIt = GetIt.instance;
 
 /// Initialize all dependencies
-Future<void> initializeDependencies() async {
+///
+/// [bleConfig] controls whether to use mock or real BLE service.
+/// Defaults to [BleConfig.fromEnvironment()] which reads from
+/// environment variables (BRIDGEFY_API_KEY, USE_MOCK_BLE).
+Future<void> initializeDependencies({
+  BleConfig? bleConfig,
+}) async {
+  // Determine BLE config
+  final config = bleConfig ?? BleConfig.fromEnvironment();
+  Logger.info('Initializing with BLE config: $config', 'DI');
+
+  // Register BLE config
+  getIt.registerSingleton<BleConfig>(config);
+
   // Services (singletons)
   getIt.registerLazySingleton<DatabaseService>(() => DatabaseService());
   getIt.registerLazySingleton<ImageService>(() => ImageService());
 
-  // BLE service - using MockBleService for now, will switch to real implementation later
-  getIt.registerLazySingleton<BleServiceInterface>(() => MockBleService());
+  // BLE service - select based on config
+  getIt.registerLazySingleton<BleServiceInterface>(() {
+    if (config.useMockService) {
+      Logger.info('Using MockBleService for testing', 'DI');
+      return MockBleService();
+    } else {
+      Logger.info('Using BridgefyBleService for production', 'DI');
+      return BridgefyBleService(config: config);
+    }
+  });
 
   // Initialize database
   await getIt<DatabaseService>().initialize();
 
   // Initialize BLE service
-  await getIt<BleServiceInterface>().initialize();
+  try {
+    await getIt<BleServiceInterface>().initialize();
+  } catch (e) {
+    // BLE initialization may fail if Bridgefy SDK not available
+    // App can still function with mock service fallback
+    Logger.warning('BLE initialization failed: $e', 'DI');
+  }
 
   // Blocs (factories - new instance each time)
   getIt.registerFactory<ProfileBloc>(
