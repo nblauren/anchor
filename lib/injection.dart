@@ -38,8 +38,8 @@ Future<void> initializeDependencies({
       Logger.info('Using MockBleService for testing', 'DI');
       return MockBleService();
     } else {
-      Logger.info('Using BridgefyBleService for production', 'DI');
-      return BridgefyBleService(config: config);
+      Logger.info('Using FlutterBluePlusBleService for production', 'DI');
+      return FlutterBluePlusBleService(config: config);
     }
   });
 
@@ -50,8 +50,8 @@ Future<void> initializeDependencies({
   try {
     await getIt<BleServiceInterface>().initialize();
   } catch (e) {
-    // BLE initialization may fail if Bridgefy SDK not available
-    // App can still function with mock service fallback
+    // BLE initialization may fail if permissions not granted or BLE unavailable
+    // Log the error but don't crash - user will see permissions screen
     Logger.warning('BLE initialization failed: $e', 'DI');
   }
 
