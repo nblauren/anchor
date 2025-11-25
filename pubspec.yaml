@@ -26,6 +26,10 @@ dependencies:
   path_provider: ^2.1.1
   shared_preferences: ^2.2.2
 
+  # BLE Communication
+  flutter_blue_plus: ^1.32.0
+  permission_handler: ^11.0.0
+
   # Image Handling
   image_picker: ^1.0.5
   image_compression_flutter: ^1.0.4
