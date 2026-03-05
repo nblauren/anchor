@@ -17,10 +17,12 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     required ChatRepository chatRepository,
     required ImageService imageService,
     required ble.BleServiceInterface bleService,
+    required NotificationService notificationService,
     required String ownUserId,
   })  : _chatRepository = chatRepository,
         _imageService = imageService,
         _bleService = bleService,
+        _notificationService = notificationService,
         _ownUserId = ownUserId,
         super(const ChatState()) {
     on<LoadConversations>(_onLoadConversations);
@@ -57,6 +59,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   final ChatRepository _chatRepository;
   final ImageService _imageService;
   final ble.BleServiceInterface _bleService;
+  final NotificationService _notificationService;
   final String _ownUserId;
 
   // BLE subscriptions
@@ -303,7 +306,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       final conversation =
           await _chatRepository.getOrCreateConversation(bleMsg.fromPeerId);
 
-      NotificationService().showMessageNotification(
+      await _notificationService.showMessageNotification(
         fromPeerId: bleMsg.fromPeerId,
         fromName: state.currentConversation?.peerName ?? 'Unknown',
         messagePreview: bleMsg.type == ble.MessageType.text
