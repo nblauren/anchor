@@ -64,6 +64,22 @@ class ChatRepository {
       return existing;
     }
 
+    // Ensure the peer exists in discovered_peers (foreign key requirement).
+    // This handles the case where a message arrives before discovery completes.
+    final peerExists = await (_db.select(_db.discoveredPeers)
+          ..where((t) => t.peerId.equals(peerId)))
+        .getSingleOrNull();
+
+    if (peerExists == null) {
+      await _db.into(_db.discoveredPeers).insert(
+            DiscoveredPeersCompanion.insert(
+              peerId: peerId,
+              name: 'Unknown',
+              lastSeenAt: DateTime.now(),
+            ),
+          );
+    }
+
     // Create new
     final now = DateTime.now();
     final id = _uuid.v4();

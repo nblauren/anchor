@@ -27,8 +27,7 @@ dependencies:
   shared_preferences: ^2.2.2
 
   # BLE Communication
-  flutter_blue_plus: ^1.32.0
-  flutter_ble_peripheral: ^2.0.2
+  bluetooth_low_energy: ^6.2.1
   permission_handler: ^11.0.0
 
   # Image Handling

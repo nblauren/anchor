@@ -239,11 +239,41 @@ class PeerRepository {
   /// Clear all peers older than a duration
   Future<int> clearOldPeers(Duration olderThan) async {
     final cutoff = DateTime.now().subtract(olderThan);
-    return await (_db.delete(_db.discoveredPeers)
-          ..where((t) =>
-              t.lastSeenAt.isSmallerThanValue(cutoff) &
-              t.isBlocked.equals(false)))
-        .go();
+    return await _db.transaction(() async {
+      // Find peers to delete
+      final peersToDelete = await (_db.select(_db.discoveredPeers)
+            ..where((t) =>
+                t.lastSeenAt.isSmallerThanValue(cutoff) &
+                t.isBlocked.equals(false)))
+          .get();
+
+      if (peersToDelete.isEmpty) return 0;
+
+      final peerIds = peersToDelete.map((p) => p.peerId).toList();
+
+      // Delete messages in conversations with these peers
+      for (final peerId in peerIds) {
+        final conversations = await (_db.select(_db.conversations)
+              ..where((t) => t.peerId.equals(peerId)))
+            .get();
+        for (final conv in conversations) {
+          await (_db.delete(_db.messages)
+                ..where((t) => t.conversationId.equals(conv.id)))
+              .go();
+        }
+        // Delete conversations
+        await (_db.delete(_db.conversations)
+              ..where((t) => t.peerId.equals(peerId)))
+            .go();
+      }
+
+      // Now delete the peers
+      return await (_db.delete(_db.discoveredPeers)
+            ..where((t) =>
+                t.lastSeenAt.isSmallerThanValue(cutoff) &
+                t.isBlocked.equals(false)))
+          .go();
+    });
   }
 
   /// Search peers by name

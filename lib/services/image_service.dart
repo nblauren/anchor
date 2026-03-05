@@ -34,6 +34,9 @@ class ImageService {
   static const int _thumbnailMaxBytes = 15 * 1024; // 15KB
   static const int _thumbnailInitialQuality = 70;
 
+  // BLE transfer compression target (~50KB keeps transfer under 30s)
+  static const int _bleTransferMaxBytes = 50 * 1024; // 50KB
+
   /// Pick an image from gallery
   Future<File?> pickFromGallery() async {
     try {
@@ -296,6 +299,89 @@ class ImageService {
     } catch (e) {
       Logger.error('Failed to compress chat image', e, null, 'Image');
       throw ImageError('Failed to compress chat image', e);
+    }
+  }
+
+  /// Compress a photo aggressively for BLE transfer (target ~30-50KB)
+  ///
+  /// BLE has very limited bandwidth — each chunk is only a few hundred bytes
+  /// and transfers take seconds per chunk. This reduces the image to the
+  /// smallest reasonable size while maintaining recognisable quality.
+  Future<Uint8List> compressForBleTransfer(String imagePath) async {
+    try {
+      final file = File(imagePath);
+      if (!await file.exists()) {
+        throw ImageError('Image file not found: $imagePath');
+      }
+
+      final inputBytes = await file.readAsBytes();
+
+      // Already small enough — skip re-compression
+      if (inputBytes.length <= _bleTransferMaxBytes) {
+        Logger.info(
+          'BLE photo already small enough: ${inputBytes.length}B',
+          'Image',
+        );
+        return inputBytes;
+      }
+
+      // Try progressively lower quality until under target
+      var quality = 50;
+      while (quality >= 10) {
+        final input = ImageFile(
+          filePath: imagePath,
+          rawBytes: inputBytes,
+        );
+
+        final config = Configuration(
+          outputType: ImageOutputType.jpg,
+          quality: quality,
+        );
+
+        final output = await compressor.compress(ImageFileConfiguration(
+          input: input,
+          config: config,
+        ));
+
+        if (output.sizeInBytes <= _bleTransferMaxBytes) {
+          Logger.info(
+            'BLE photo compressed: ${inputBytes.length}B -> ${output.sizeInBytes}B '
+            '(quality $quality)',
+            'Image',
+          );
+          return output.rawBytes;
+        }
+
+        quality -= 10;
+      }
+
+      // Last resort: lowest quality
+      final input = ImageFile(
+        filePath: imagePath,
+        rawBytes: inputBytes,
+      );
+
+      const config = Configuration(
+        outputType: ImageOutputType.jpg,
+        quality: 10,
+      );
+
+      final output = await compressor.compress(ImageFileConfiguration(
+        input: input,
+        config: config,
+      ));
+
+      Logger.warning(
+        'BLE photo still large after max compression: ${output.sizeInBytes}B '
+        '(target: ${_bleTransferMaxBytes}B)',
+        'Image',
+      );
+
+      return output.rawBytes;
+    } catch (e) {
+      Logger.error('Failed to compress photo for BLE', e, null, 'Image');
+      // Fallback: return original bytes
+      return await File(imagePath).readAsBytes();
     }
   }
 

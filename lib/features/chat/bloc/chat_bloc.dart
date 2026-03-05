@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter_bloc/flutter_bloc.dart';
 
@@ -239,8 +238,9 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         photoTransfers: updatedTransfers,
       ));
 
-      // Read photo bytes and send via BLE
-      final photoBytes = await File(compressedPath).readAsBytes();
+      // Compress aggressively for BLE transfer (~50KB) while keeping the
+      // higher-quality local copy for display.
+      final photoBytes = await _imageService.compressForBleTransfer(compressedPath);
       final success = await _bleService.sendPhoto(
         state.currentConversation!.peerId,
         photoBytes,

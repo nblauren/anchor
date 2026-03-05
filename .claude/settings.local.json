@@ -5,7 +5,10 @@
       "Bash(flutter analyze:*)",
       "Bash(dart run build_runner:*)",
       "Bash(find:*)",
-      "Bash(cd /Users/nblaurenciana/Documents/GitHub/anchor/ios && pod install 2>&1)"
+      "Bash(cd /Users/nblaurenciana/Documents/GitHub/anchor/ios && pod install 2>&1)",
+      "WebSearch",
+      "Bash(flutter pub add bluetooth_low_energy --dry-run 2>&1 | head -30)",
+      "Bash(flutter pub get 2>&1)"
     ]
   }
 }

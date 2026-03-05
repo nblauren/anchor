@@ -4,8 +4,7 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
-import 'package:flutter_ble_peripheral/flutter_ble_peripheral.dart';
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:bluetooth_low_energy/bluetooth_low_energy.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../../core/utils/logger.dart';
@@ -14,37 +13,34 @@ import 'ble_models.dart';
 import 'ble_service_interface.dart';
 import 'photo_chunker.dart';
 
-/// BLE service implementation using flutter_blue_plus (central/scan) +
-/// flutter_ble_peripheral (peripheral/advertise) for direct peer-to-peer
-/// communication.
+/// BLE service using `bluetooth_low_energy` which provides both Central
+/// (scanning/connecting) and Peripheral (GATT server/advertising) in one
+/// package — enabling real peer-to-peer discovery AND messaging on iOS & Android.
 ///
-/// **Discovery approach:**
-///   - Each device advertises the Anchor service UUID so scanners can filter.
-///   - On Android: profile data is encoded in manufacturer data.
-///   - On iOS: only service UUID and local name are advertised (iOS drops
-///     manufacturer data from CBPeripheralManager advertisements).
-///   - The scanner uses `withServices` on iOS (required for overflow area
-///     discovery) and no filter on Android (128-bit UUID may overflow to
-///     scan response which the OS filter ignores).
+/// Each device:
+///   1. Runs a GATT server with profile metadata + messaging characteristics.
+///   2. Advertises the Anchor service UUID + local name.
+///   3. Scans for other Anchor devices.
+///   4. Connects to discovered peers to read profile / send messages.
 class FlutterBluePlusBleService implements BleServiceInterface {
   FlutterBluePlusBleService({
     required this.config,
-  })  : _photoReassembler = PhotoReassembler(),
-        _peripheral = FlutterBlePeripheral();
+  }) : _photoReassembler = PhotoReassembler();
 
   final BleConfig config;
   final PhotoReassembler _photoReassembler;
-  final FlutterBlePeripheral _peripheral;
 
-  // UUIDs for Anchor BLE service
-  static const _serviceUuidStr = '0000fff0-0000-1000-8000-00805f9b34fb';
-  static final _serviceUuid = Guid(_serviceUuidStr);
-  static final _messagingChar = Guid('0000fff3-0000-1000-8000-00805f9b34fb');
+  // Managers
+  late final CentralManager _central;
+  late final PeripheralManager _peripheral;
 
-  // Manufacturer company ID — 0xFFFF is reserved for internal/testing use.
-  static const _manufacturerId = 0xFFFF;
-  // Magic bytes that prefix manufacturer data so we can identify Anchor payloads.
-  static const _anchorMagic = [0xAC, 0x01]; // "Anchor v1"
+  // UUIDs
+  static final _serviceUuid =
+      UUID.fromString('0000fff0-0000-1000-8000-00805f9b34fb');
+  static final _profileCharUuid =
+      UUID.fromString('0000fff1-0000-1000-8000-00805f9b34fb');
+  static final _messagingCharUuid =
+      UUID.fromString('0000fff3-0000-1000-8000-00805f9b34fb');
 
   // Status
   BleStatus _status = BleStatus.disabled;
@@ -66,20 +62,38 @@ class FlutterBluePlusBleService implements BleServiceInterface {
   // Peer tracking
   final Map<String, DiscoveredPeer> _visiblePeers = {};
   final Map<String, Timer> _peerTimeoutTimers = {};
-  final Map<String, BluetoothDevice> _connectedDevices = {};
 
-  // Connection management
-  final Map<String, StreamSubscription> _connectionSubscriptions = {};
+  // Connected peripherals (for sending messages as central)
+  final Map<String, Peripheral> _discoveredPeripherals = {};
+  final Map<String, GATTCharacteristic> _messagingChars = {};
 
-  // Pending broadcast payload (for retry when peripheral becomes ready)
-  BroadcastPayload? _pendingPayload;
+  // Map from app userId → BLE peerId (peripheral UUID) so incoming messages
+  // (which carry the sender's app userId) can be routed to the correct peer.
+  final Map<String, String> _userIdToPeerId = {};
 
   // Scan lifecycle
   Timer? _scanRestartTimer;
   static const _scanDuration = Duration(seconds: 8);
   static const _scanPause = Duration(seconds: 4);
-  StreamSubscription? _scanSubscription;
-  StreamSubscription? _adapterStateSubscription;
+
+  // Subscriptions
+  StreamSubscription? _centralStateSubscription;
+  StreamSubscription? _peripheralStateSubscription;
+  StreamSubscription? _discoveredSubscription;
+  StreamSubscription? _charWriteSubscription;
+
+  // GATT characteristics (server side)
+  GATTCharacteristic? _serverProfileChar;
+  GATTCharacteristic? _serverMessagingChar;
+
+  // Cached profile data for GATT server read requests
+  Uint8List _profileData = Uint8List(0);
+  BroadcastPayload? _pendingPayload;
+
+  // Active incoming binary photo transfers (keyed by centralUuid)
+  // Stores metadata from the photo_start message so binary chunks
+  // can be correlated without carrying their own metadata.
+  final Map<String, _IncomingPhotoTransfer> _incomingPhotoTransfers = {};
 
   // ==================== Lifecycle ====================
 
@@ -87,26 +101,24 @@ class FlutterBluePlusBleService implements BleServiceInterface {
   Future<void> initialize() async {
     if (_isInitialized) return;
 
-    Logger.info('FlutterBluePlusBleService: Initializing...', 'BLE');
+    Logger.info('BleService: Initializing...', 'BLE');
 
     try {
-      if (!await FlutterBluePlus.isSupported) {
-        _setStatus(BleStatus.disabled);
-        throw StateError('Bluetooth is not available on this device');
-      }
+      _central = CentralManager();
+      _peripheral = PeripheralManager();
 
-      _adapterStateSubscription =
-          FlutterBluePlus.adapterState.listen(_onAdapterStateChanged);
+      // Listen to central manager state
+      _centralStateSubscription =
+          _central.stateChanged.listen((e) => _onStateChanged(e.state));
 
       _isInitialized = true;
 
-      final adapterState = await FlutterBluePlus.adapterState.first;
-      _onAdapterStateChanged(adapterState);
+      // Check initial state
+      _onStateChanged(_central.state);
 
-      Logger.info('FlutterBluePlusBleService: Initialized successfully', 'BLE');
+      Logger.info('BleService: Initialized successfully', 'BLE');
     } catch (e) {
-      Logger.error(
-          'FlutterBluePlusBleService: Initialization failed', e, null, 'BLE');
+      Logger.error('BleService: Initialization failed', e, null, 'BLE');
       _setStatus(BleStatus.error);
       rethrow;
     }
@@ -115,52 +127,51 @@ class FlutterBluePlusBleService implements BleServiceInterface {
   @override
   Future<void> start() async {
     _ensureInitialized();
-    Logger.info('FlutterBluePlusBleService: Starting...', 'BLE');
+    Logger.info('BleService: Starting...', 'BLE');
 
     try {
+      await _setupGattServer();
       await startScanning();
       _setStatus(BleStatus.ready);
     } catch (e) {
-      Logger.error('FlutterBluePlusBleService: Start failed', e, null, 'BLE');
+      Logger.error('BleService: Start failed', e, null, 'BLE');
       rethrow;
     }
   }
 
   @override
   Future<void> stop() async {
-    Logger.info('FlutterBluePlusBleService: Stopping...', 'BLE');
+    Logger.info('BleService: Stopping...', 'BLE');
 
     await stopScanning();
     await stopBroadcasting();
 
-    for (final device in _connectedDevices.values) {
-      try {
-        await device.disconnect();
-      } catch (e) {
-        Logger.error(
-            'FlutterBluePlusBleService: Disconnect failed', e, null, 'BLE');
-      }
+    try {
+      await _peripheral.removeAllServices();
+    } catch (e) {
+      Logger.error('BleService: Remove services failed', e, null, 'BLE');
     }
-    _connectedDevices.clear();
+
+    _discoveredPeripherals.clear();
+    _messagingChars.clear();
+    _userIdToPeerId.clear();
     _setStatus(BleStatus.ready);
   }
 
   @override
   Future<void> dispose() async {
-    Logger.info('FlutterBluePlusBleService: Disposing...', 'BLE');
+    Logger.info('BleService: Disposing...', 'BLE');
 
     await stop();
 
     for (final timer in _peerTimeoutTimers.values) {
       timer.cancel();
     }
-    for (final sub in _connectionSubscriptions.values) {
-      await sub.cancel();
-    }
 
-    await _scanSubscription?.cancel();
-    await _adapterStateSubscription?.cancel();
+    await _centralStateSubscription?.cancel();
     await _peripheralStateSubscription?.cancel();
+    await _discoveredSubscription?.cancel();
+    await _charWriteSubscription?.cancel();
 
     await _statusController.close();
     await _peerDiscoveredController.close();
@@ -175,34 +186,349 @@ class FlutterBluePlusBleService implements BleServiceInterface {
 
   void _ensureInitialized() {
     if (!_isInitialized) {
-      throw StateError(
-          'FlutterBluePlusBleService not initialized. Call initialize() first.');
+      throw StateError('BleService not initialized. Call initialize() first.');
     }
   }
 
-  void _onAdapterStateChanged(BluetoothAdapterState state) {
-    Logger.info(
-        'FlutterBluePlusBleService: Adapter state: ${state.name}', 'BLE');
+  void _onStateChanged(BluetoothLowEnergyState state) {
+    Logger.info('BleService: State changed: $state', 'BLE');
 
     switch (state) {
-      case BluetoothAdapterState.on:
+      case BluetoothLowEnergyState.poweredOn:
         if (_status == BleStatus.disabled) {
           _setStatus(BleStatus.ready);
         }
+        // Retry pending advertising
+        if (_pendingPayload != null && !_isBroadcasting) {
+          _startAdvertisingAndGatt(_pendingPayload!);
+        }
         break;
-      case BluetoothAdapterState.off:
+      case BluetoothLowEnergyState.poweredOff:
         _setStatus(BleStatus.disabled);
         _isScanning = false;
         _isBroadcasting = false;
         break;
-      case BluetoothAdapterState.unavailable:
-        _setStatus(BleStatus.disabled);
-        break;
-      case BluetoothAdapterState.unauthorized:
+      case BluetoothLowEnergyState.unauthorized:
         _setStatus(BleStatus.noPermission);
+        break;
+      case BluetoothLowEnergyState.unsupported:
+        _setStatus(BleStatus.disabled);
         break;
       default:
         break;
+    }
+  }
+
+  // ==================== GATT Server ====================
+
+  Future<void> _setupGattServer() async {
+    Logger.info('BleService: Setting up GATT server...', 'BLE');
+
+    try {
+      await _peripheral.removeAllServices();
+
+      // Profile characteristic: centrals read this to get our profile
+      _serverProfileChar = GATTCharacteristic.mutable(
+        uuid: _profileCharUuid,
+        properties: [
+          GATTCharacteristicProperty.read,
+        ],
+        permissions: [
+          GATTCharacteristicPermission.read,
+        ],
+        descriptors: [],
+      );
+
+      // Messaging characteristic: centrals write to this to send us messages
+      _serverMessagingChar = GATTCharacteristic.mutable(
+        uuid: _messagingCharUuid,
+        properties: [
+          GATTCharacteristicProperty.write,
+          GATTCharacteristicProperty.writeWithoutResponse,
+        ],
+        permissions: [
+          GATTCharacteristicPermission.write,
+        ],
+        descriptors: [],
+      );
+
+      final service = GATTService(
+        uuid: _serviceUuid,
+        isPrimary: true,
+        includedServices: [],
+        characteristics: [_serverProfileChar!, _serverMessagingChar!],
+      );
+
+      await _peripheral.addService(service);
+
+      // Handle profile read requests
+      _peripheral.characteristicReadRequested.listen(_onProfileReadRequested);
+
+      // Handle incoming messages (writes to messaging characteristic)
+      await _charWriteSubscription?.cancel();
+      _charWriteSubscription =
+          _peripheral.characteristicWriteRequested.listen(_onMessageWriteReceived);
+
+      Logger.info('BleService: GATT server ready', 'BLE');
+    } catch (e) {
+      Logger.error('BleService: GATT server setup failed', e, null, 'BLE');
+    }
+  }
+
+  void _onProfileReadRequested(
+      GATTCharacteristicReadRequestedEventArgs args) async {
+    try {
+      await _peripheral.respondReadRequestWithValue(
+        args.request,
+        value: _profileData,
+      );
+    } catch (e) {
+      Logger.error('BleService: Profile read response failed', e, null, 'BLE');
+    }
+  }
+
+  void _onMessageWriteReceived(
+      GATTCharacteristicWriteRequestedEventArgs args) async {
+    try {
+      // Respond to the write request
+      await _peripheral.respondWriteRequest(args.request);
+
+      final data = args.request.value;
+      if (data.isEmpty) return;
+
+      // Binary photo chunk: first byte is 0x02
+      if (data[0] == 0x02) {
+        _handleBinaryPhotoChunk(data, args.central.uuid);
+        return;
+      }
+
+      // JSON payload (text messages, photo_start, legacy photo_chunk)
+      final jsonStr = utf8.decode(data);
+      final json = jsonDecode(jsonStr) as Map<String, dynamic>;
+
+      final fromPeerId = _resolveSenderPeerId(json, args.central.uuid);
+      final type = json['type'] as String? ?? 'message';
+
+      if (type == 'photo_start') {
+        _handlePhotoStart(json, fromPeerId);
+      } else if (type == 'photo_chunk') {
+        _handleReceivedPhotoChunk(json, fromPeerId);
+      } else {
+        _handleReceivedMessage(json, fromPeerId);
+      }
+    } catch (e) {
+      Logger.error('BleService: Write receive failed', e, null, 'BLE');
+    }
+  }
+
+  /// Resolve the sender's peerId from the payload's sender_id field,
+  /// mapping their app userId back to the BLE peripheral UUID we use
+  /// in our database.
+  String _resolveSenderPeerId(Map<String, dynamic> json, UUID centralUuid) {
+    final senderId = json['sender_id'] as String?;
+    if (senderId != null &&
+        senderId.isNotEmpty &&
+        _userIdToPeerId.containsKey(senderId)) {
+      return _userIdToPeerId[senderId]!;
+    }
+    return centralUuid.toString();
+  }
+
+  void _handleReceivedMessage(Map<String, dynamic> json, String fromPeerId) {
+    final message = ReceivedMessage(
+      fromPeerId: fromPeerId,
+      messageId: json['message_id'] as String? ?? '',
+      type: MessageType.values[json['message_type'] as int? ?? 0],
+      content: json['content'] as String? ?? '',
+      timestamp: DateTime.now(),
+    );
+
+    _messageReceivedController.add(message);
+
+    Logger.info(
+      'BleService: Received message from '
+      '${fromPeerId.substring(0, min(8, fromPeerId.length))}',
+      'BLE',
+    );
+  }
+
+  void _handleReceivedPhotoChunk(
+      Map<String, dynamic> json, String fromPeerId) {
+    final dataField = json['data'];
+    Uint8List chunkData;
+    if (dataField is String) {
+      // base64 encoded
+      chunkData = base64Decode(dataField);
+    } else if (dataField is List) {
+      // legacy int array fallback
+      chunkData = Uint8List.fromList(dataField.cast<int>());
+    } else {
+      chunkData = Uint8List(0);
+    }
+
+    final chunk = PhotoChunk(
+      messageId: json['message_id'] as String? ?? '',
+      chunkIndex: json['chunk_index'] as int? ?? 0,
+      totalChunks: json['total_chunks'] as int? ?? 1,
+      data: chunkData,
+      totalSize: json['total_size'] as int? ?? 0,
+    );
+
+    Logger.info(
+      'BleService: Received photo chunk ${chunk.chunkIndex + 1}/${chunk.totalChunks} '
+      'for ${chunk.messageId.substring(0, min(8, chunk.messageId.length))}',
+      'BLE',
+    );
+
+    // Emit receive-side progress
+    _photoProgressController.add(PhotoTransferProgress(
+      messageId: chunk.messageId,
+      peerId: fromPeerId,
+      progress: (chunk.chunkIndex + 1) / chunk.totalChunks,
+      status: PhotoTransferStatus.inProgress,
+    ));
+
+    // Feed to reassembler
+    final result = _photoReassembler.addChunk(chunk);
+
+    if (result.isComplete && result.photoData != null) {
+      Logger.info(
+        'BleService: Photo reassembly complete: ${chunk.messageId} '
+        '(${result.photoData!.length} bytes)',
+        'BLE',
+      );
+
+      _photoReceivedController.add(ReceivedPhoto(
+        fromPeerId: fromPeerId,
+        messageId: chunk.messageId,
+        photoBytes: result.photoData!,
+        timestamp: DateTime.now(),
+      ));
+
+      _photoProgressController.add(PhotoTransferProgress(
+        messageId: chunk.messageId,
+        peerId: fromPeerId,
+        progress: 1.0,
+        status: PhotoTransferStatus.completed,
+      ));
+    }
+  }
+
+  /// Handle photo_start JSON message — stores metadata for the upcoming
+  /// binary chunk stream from this central.
+  void _handlePhotoStart(Map<String, dynamic> json, String fromPeerId) {
+    final messageId = json['message_id'] as String? ?? '';
+    final totalChunks = json['total_chunks'] as int? ?? 0;
+    final totalSize = json['total_size'] as int? ?? 0;
+
+    // Key by fromPeerId — one active transfer per peer
+    _incomingPhotoTransfers[fromPeerId] = _IncomingPhotoTransfer(
+      messageId: messageId,
+      totalChunks: totalChunks,
+      totalSize: totalSize,
+      receivedData: BytesBuilder(copy: false),
+      receivedCount: 0,
+    );
+
+    Logger.info(
+      'BleService: Photo transfer starting from '
+      '${fromPeerId.substring(0, min(8, fromPeerId.length))}: '
+      '$totalChunks chunks, $totalSize bytes',
+      'BLE',
+    );
+
+    _photoProgressController.add(PhotoTransferProgress(
+      messageId: messageId,
+      peerId: fromPeerId,
+      progress: 0,
+      status: PhotoTransferStatus.starting,
+    ));
+  }
+
+  /// Handle a binary photo chunk: [0x02][uint16 chunk_index][raw data]
+  void _handleBinaryPhotoChunk(Uint8List data, UUID centralUuid) {
+    if (data.length < 3) return; // too short
+
+    final chunkIndex = (data[1] << 8) | data[2];
+    final chunkData = data.sublist(3);
+
+    // Resolve peer ID from central UUID
+    final centralId = centralUuid.toString();
+    // Try to find the transfer by checking both the centralId directly and
+    // via the userIdToPeerId mapping
+    var fromPeerId = centralId;
+    _IncomingPhotoTransfer? transfer = _incomingPhotoTransfers[centralId];
+
+    if (transfer == null) {
+      // Try resolving via known peer IDs — the photo_start may have been
+      // stored under the resolved peerId
+      for (final entry in _incomingPhotoTransfers.entries) {
+        if (_userIdToPeerId.values.contains(entry.key) ||
+            entry.key == centralId) {
+          transfer = entry.value;
+          fromPeerId = entry.key;
+          break;
+        }
+      }
+    } else {
+      fromPeerId = centralId;
+    }
+
+    if (transfer == null) {
+      Logger.warning(
+        'BleService: Binary photo chunk received but no active transfer '
+        'from $centralId (chunk $chunkIndex)',
+        'BLE',
+      );
+      return;
+    }
+
+    transfer.receivedData.add(chunkData);
+    transfer.receivedCount++;
+
+    // Log every 50 chunks to avoid spam
+    if (transfer.receivedCount % 50 == 0 ||
+        transfer.receivedCount == transfer.totalChunks) {
+      Logger.info(
+        'BleService: Photo chunk ${transfer.receivedCount}/${transfer.totalChunks} '
+        'for ${transfer.messageId.substring(0, min(8, transfer.messageId.length))}',
+        'BLE',
+      );
+    }
+
+    // Emit progress
+    _photoProgressController.add(PhotoTransferProgress(
+      messageId: transfer.messageId,
+      peerId: fromPeerId,
+      progress: transfer.receivedCount / transfer.totalChunks,
+      status: PhotoTransferStatus.inProgress,
+    ));
+
+    // Check if transfer is complete
+    if (transfer.receivedCount >= transfer.totalChunks) {
+      final photoBytes = transfer.receivedData.toBytes();
+
+      Logger.info(
+        'BleService: Binary photo complete: ${transfer.messageId} '
+        '(${photoBytes.length} bytes)',
+        'BLE',
+      );
+
+      _photoReceivedController.add(ReceivedPhoto(
+        fromPeerId: fromPeerId,
+        messageId: transfer.messageId,
+        photoBytes: photoBytes,
+        timestamp: DateTime.now(),
+      ));
+
+      _photoProgressController.add(PhotoTransferProgress(
+        messageId: transfer.messageId,
+        peerId: fromPeerId,
+        progress: 1.0,
+        status: PhotoTransferStatus.completed,
+      ));
+
+      _incomingPhotoTransfers.remove(fromPeerId);
     }
   }
 
@@ -216,22 +542,23 @@ class FlutterBluePlusBleService implements BleServiceInterface {
 
   @override
   Future<bool> isBluetoothAvailable() async {
-    return await FlutterBluePlus.isSupported;
+    return true; // If we got this far, BLE is available
   }
 
   @override
   Future<bool> isBluetoothEnabled() async {
-    final state = await FlutterBluePlus.adapterState.first;
-    return state == BluetoothAdapterState.on ||
-        state == BluetoothAdapterState.unknown;
+    if (!_isInitialized) return false;
+    final state = _central.state;
+    return state == BluetoothLowEnergyState.poweredOn ||
+        state == BluetoothLowEnergyState.unknown;
   }
 
   @override
   Future<bool> requestPermissions() async {
     try {
-      final permissions = <Permission>[];
-
       if (Platform.isAndroid) {
+        final permissions = <Permission>[];
+
         if (await Permission.bluetoothScan.isDenied) {
           permissions.add(Permission.bluetoothScan);
         }
@@ -241,19 +568,19 @@ class FlutterBluePlusBleService implements BleServiceInterface {
         if (await Permission.bluetoothAdvertise.isDenied) {
           permissions.add(Permission.bluetoothAdvertise);
         }
+        if (await Permission.locationWhenInUse.isDenied) {
+          permissions.add(Permission.locationWhenInUse);
+        }
+
+        if (permissions.isEmpty) return true;
+        final statuses = await permissions.request();
+        return statuses.values.every((s) => s.isGranted);
       }
 
-      if (await Permission.locationWhenInUse.isDenied) {
-        permissions.add(Permission.locationWhenInUse);
-      }
-
-      if (permissions.isEmpty) return true;
-
-      final statuses = await permissions.request();
-      return statuses.values.every((status) => status.isGranted);
+      // iOS: permissions are requested implicitly by the BLE managers
+      return true;
     } catch (e) {
-      Logger.error('FlutterBluePlusBleService: Permission request failed', e,
-          null, 'BLE');
+      Logger.error('BleService: Permission request failed', e, null, 'BLE');
       return false;
     }
   }
@@ -265,9 +592,10 @@ class FlutterBluePlusBleService implements BleServiceInterface {
           await Permission.bluetoothConnect.isGranted &&
           await Permission.locationWhenInUse.isGranted;
     } else if (Platform.isIOS) {
-      final adapterState = await FlutterBluePlus.adapterState.first;
-      return adapterState != BluetoothAdapterState.unauthorized &&
-          adapterState != BluetoothAdapterState.unknown;
+      if (!_isInitialized) return false;
+      final state = _central.state;
+      return state != BluetoothLowEnergyState.unauthorized &&
+          state != BluetoothLowEnergyState.unknown;
     }
     return false;
   }
@@ -286,119 +614,61 @@ class FlutterBluePlusBleService implements BleServiceInterface {
     _ensureInitialized();
     _pendingPayload = payload;
 
-    Logger.info(
-        'FlutterBluePlusBleService: Broadcasting profile for ${payload.name} (platform: ${Platform.operatingSystem})',
-        'BLE');
+    // Encode profile data for GATT read requests
+    _profileData = _encodeProfileData(payload);
 
-    // Wait for peripheral manager to be ready (poweredOn).
-    // On iOS, CBPeripheralManager silently drops startAdvertising calls
-    // if it hasn't reached poweredOn yet.
-    final isReady = await _peripheral.isBluetoothOn;
-    if (!isReady) {
+    Logger.info(
+      'BleService: Broadcasting profile for ${payload.name}',
+      'BLE',
+    );
+
+    final state = _peripheral.state;
+    if (state != BluetoothLowEnergyState.poweredOn) {
       Logger.warning(
-        'FlutterBluePlusBleService: Peripheral not ready yet, will retry when ready',
+        'BleService: Peripheral not ready ($state), will retry when ready',
         'BLE',
       );
-      _startPeripheralStateListener();
       return;
     }
 
-    await _startAdvertising(payload);
+    await _startAdvertisingAndGatt(payload);
   }
 
-  /// Actually start the BLE advertisement.
-  Future<void> _startAdvertising(BroadcastPayload payload) async {
+  Future<void> _startAdvertisingAndGatt(BroadcastPayload payload) async {
     try {
       if (_isBroadcasting) {
-        await _peripheral.stop();
+        await _peripheral.stopAdvertising();
         _isBroadcasting = false;
       }
 
-      if (Platform.isIOS) {
-        // iOS: CBPeripheralManager silently drops manufacturer data.
-        // Only service UUID and local name are supported.
-        final compactName = _encodeLocalName(payload);
+      // Encode compact name for advertisement
+      final compactName = _encodeLocalName(payload);
 
-        Logger.info(
-          'FlutterBluePlusBleService: iOS advertising with localName="$compactName", serviceUuid=$_serviceUuidStr',
-          'BLE',
-        );
-
-        await _peripheral.start(
-          advertiseData: AdvertiseData(
-            serviceUuid: _serviceUuidStr,
-            localName: compactName,
-          ),
-        );
-      } else {
-        // Android: use manufacturer data for full profile encoding.
-        final mfgData = _encodeManufacturerData(payload);
-
-        Logger.info(
-          'FlutterBluePlusBleService: Android advertising with ${mfgData.length} bytes mfg data',
-          'BLE',
-        );
-
-        await _peripheral.start(
-          advertiseData: AdvertiseData(
-            serviceUuid: _serviceUuidStr,
-            manufacturerId: _manufacturerId,
-            manufacturerData: mfgData,
-            includeDeviceName: false,
-          ),
-          advertiseSettings: AdvertiseSettings(
-            advertiseMode: AdvertiseMode.advertiseModeBalanced,
-            txPowerLevel: AdvertiseTxPower.advertiseTxPowerMedium,
-            connectable: true,
-            timeout: 0,
-          ),
-        );
-      }
-
-      _isBroadcasting = true;
-
-      // Verify advertising actually started on iOS
-      final isAdvertising = await _peripheral.isAdvertising;
       Logger.info(
-        'FlutterBluePlusBleService: Advertising started. isAdvertising=$isAdvertising',
+        'BleService: Advertising with name="$compactName"',
         'BLE',
       );
-    } catch (e, stack) {
-      Logger.error(
-          'FlutterBluePlusBleService: Advertising FAILED', e, stack, 'BLE');
+
+      await _peripheral.startAdvertising(Advertisement(
+        name: compactName,
+        serviceUUIDs: [_serviceUuid],
+      ));
+
+      _isBroadcasting = true;
+      Logger.info('BleService: Advertising started', 'BLE');
+    } catch (e) {
+      Logger.error('BleService: Advertising failed', e, null, 'BLE');
       _isBroadcasting = false;
     }
   }
 
-  /// Listen for peripheral manager state changes to retry advertising
-  /// when Bluetooth becomes ready.
-  StreamSubscription? _peripheralStateSubscription;
-
-  void _startPeripheralStateListener() {
-    _peripheralStateSubscription?.cancel();
-    _peripheralStateSubscription =
-        _peripheral.onPeripheralStateChanged?.listen((state) {
-      Logger.info(
-        'FlutterBluePlusBleService: Peripheral state changed: $state',
-        'BLE',
-      );
-      if (state == PeripheralState.idle && _pendingPayload != null) {
-        // idle = poweredOn and ready
-        _startAdvertising(_pendingPayload!);
-        _peripheralStateSubscription?.cancel();
-        _peripheralStateSubscription = null;
-      }
-    });
-  }
-
   @override
   Future<void> stopBroadcasting() async {
-    Logger.info('FlutterBluePlusBleService: Stopped broadcasting', 'BLE');
+    Logger.info('BleService: Stopped broadcasting', 'BLE');
     try {
-      await _peripheral.stop();
+      await _peripheral.stopAdvertising();
     } catch (e) {
-      Logger.error(
-          'FlutterBluePlusBleService: Stop advertising failed', e, null, 'BLE');
+      Logger.error('BleService: Stop advertising failed', e, null, 'BLE');
     }
     _isBroadcasting = false;
   }
@@ -406,18 +676,16 @@ class FlutterBluePlusBleService implements BleServiceInterface {
   @override
   bool get isBroadcasting => _isBroadcasting;
 
-  /// Encode a compact local name for iOS advertisements.
-  /// Format: "A:<name>:<age>" — kept short to fit BLE advertisement limits.
-  /// "A:" prefix identifies this as an Anchor device.
+  /// Encode local name: "A:<name>:<age>"
   String _encodeLocalName(BroadcastPayload payload) {
-    final name =
-        payload.name.length > 8 ? payload.name.substring(0, 8) : payload.name;
+    final name = payload.name.length > 8
+        ? payload.name.substring(0, 8)
+        : payload.name;
     final age = payload.age ?? 0;
     return 'A:$name:$age';
   }
 
-  /// Decode a compact local name from iOS advertisements.
-  /// Returns (name, age) or null if not an Anchor local name.
+  /// Decode local name "A:<name>:<age>"
   ({String name, int? age})? _decodeLocalName(String advName) {
     if (!advName.startsWith('A:')) return null;
     final parts = advName.split(':');
@@ -430,67 +698,15 @@ class FlutterBluePlusBleService implements BleServiceInterface {
     );
   }
 
-  /// Encode profile as manufacturer data (Android only).
-  ///
-  /// Format: [magic:2][age:1][nameLen:1][name:N][userId:16]
-  Uint8List _encodeManufacturerData(BroadcastPayload payload) {
-    final nameBytes =
-        utf8.encode(payload.name.substring(0, min(payload.name.length, 8)));
-
-    final userIdHex = payload.userId.replaceAll('-', '');
-    final userIdBytes = Uint8List(16);
-    for (int i = 0; i < 16; i++) {
-      userIdBytes[i] =
-          int.parse(userIdHex.substring(i * 2, i * 2 + 2), radix: 16);
-    }
-
-    final result = BytesBuilder();
-    result.add(_anchorMagic); // 2 bytes magic
-    result.addByte(payload.age ?? 0); // 1 byte age
-    result.addByte(nameBytes.length); // 1 byte name length
-    result.add(nameBytes); // N bytes name
-    result.add(userIdBytes); // 16 bytes userId
-    return result.toBytes(); // Total: 20 + nameLen (max 28)
-  }
-
-  /// Decode profile from manufacturer data (Android advertisers).
-  DiscoveredPeer? _decodeManufacturerData(
-      int companyId, List<int> bytes, int rssi) {
-    if (companyId != _manufacturerId) return null;
-    if (bytes.length < 20) return null;
-    if (bytes[0] != _anchorMagic[0] || bytes[1] != _anchorMagic[1]) {
-      return null;
-    }
-
-    try {
-      final age = bytes[2] == 0 ? null : bytes[2] as int?;
-      final nameLen = bytes[3];
-      if (4 + nameLen + 16 > bytes.length) return null;
-
-      final name = utf8.decode(bytes.sublist(4, 4 + nameLen));
-      final userIdBytes = bytes.sublist(4 + nameLen, 4 + nameLen + 16);
-      final userId = _bytesToUuid(userIdBytes);
-
-      return DiscoveredPeer(
-        peerId: userId,
-        name: name.isEmpty ? 'Anchor User' : name,
-        age: age,
-        bio: null,
-        thumbnailBytes: null,
-        rssi: rssi,
-        timestamp: DateTime.now(),
-      );
-    } catch (e) {
-      Logger.error('FlutterBluePlusBleService: Manufacturer data decode failed',
-          e, null, 'BLE');
-      return null;
-    }
-  }
-
-  String _bytesToUuid(List<int> bytes) {
-    final hex = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
-    return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-'
-        '${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20)}';
+  /// Encode profile data as JSON for GATT characteristic reads.
+  Uint8List _encodeProfileData(BroadcastPayload payload) {
+    final json = {
+      'userId': payload.userId,
+      'name': payload.name,
+      'age': payload.age,
+      'bio': payload.bio,
+    };
+    return Uint8List.fromList(utf8.encode(jsonEncode(json)));
   }
 
   // ==================== Discovery ====================
@@ -507,67 +723,43 @@ class FlutterBluePlusBleService implements BleServiceInterface {
     if (_isScanning) return;
     _ensureInitialized();
 
-    Logger.info('FlutterBluePlusBleService: Starting periodic scan...', 'BLE');
+    Logger.info('BleService: Starting periodic scan...', 'BLE');
 
     _isScanning = true;
     _setStatus(BleStatus.scanning);
 
-    // Set up the scan result listener once.
-    await _scanSubscription?.cancel();
-    _scanSubscription = FlutterBluePlus.onScanResults.listen(
-      (results) {
-        Logger.info(
-          'FlutterBluePlusBleService: onScanResults fired with ${results.length} result(s)',
-          'BLE',
-        );
-        for (final result in results) {
-          Logger.info(
-            'FlutterBluePlusBleService: Scan result: '
-            'name="${result.advertisementData.advName}", '
-            'remoteId=${result.device.remoteId}, '
-            'serviceUuids=${result.advertisementData.serviceUuids.map((u) => u.toString()).toList()}, '
-            'mfgData=${result.advertisementData.manufacturerData.keys.toList()}, '
-            'rssi=${result.rssi}',
-            'BLE',
-          );
-          _onDeviceDiscovered(result);
-        }
-      },
-      onError: (e) {
-        Logger.error('FlutterBluePlusBleService: Scan error', e, null, 'BLE');
-      },
-    );
+    // Listen for discovered peripherals
+    await _discoveredSubscription?.cancel();
+    _discoveredSubscription = _central.discovered.listen(_onDeviceDiscovered);
 
-    // Run the first scan cycle immediately.
+    // Start first scan cycle
     _runScanCycle();
   }
 
-  /// One scan cycle: scan for [_scanDuration], pause for [_scanPause], repeat.
   void _runScanCycle() async {
     if (!_isScanning) return;
 
     try {
-      Logger.info('FlutterBluePlusBleService: Scan cycle starting...', 'BLE');
+      Logger.info('BleService: Scan cycle starting...', 'BLE');
 
-      // Don't use withServices filter — on Android, 128-bit UUIDs may
-      // overflow to scan response which the OS filter ignores. On iOS,
-      // the filter can also miss devices if advertising hasn't fully
-      // started. We identify Anchor devices in _onDeviceDiscovered.
-      await FlutterBluePlus.startScan(
-        timeout: _scanDuration,
-        androidUsesFineLocation: true,
-      );
+      await _central.startDiscovery();
 
-      // startScan returns after the timeout. Schedule the next cycle.
-      if (_isScanning) {
-        _scanRestartTimer?.cancel();
-        _scanRestartTimer = Timer(_scanPause, _runScanCycle);
-      }
+      // Stop after scan duration and schedule next cycle
+      _scanRestartTimer?.cancel();
+      _scanRestartTimer = Timer(_scanDuration, () async {
+        if (!_isScanning) return;
+        try {
+          await _central.stopDiscovery();
+        } catch (_) {}
+
+        // Pause then restart
+        if (_isScanning) {
+          _scanRestartTimer = Timer(_scanPause, _runScanCycle);
+        }
+      });
     } catch (e) {
-      Logger.error(
-          'FlutterBluePlusBleService: Scan cycle failed', e, null, 'BLE');
+      Logger.error('BleService: Scan cycle failed', e, null, 'BLE');
 
-      // Retry after pause.
       if (_isScanning) {
         _scanRestartTimer?.cancel();
         _scanRestartTimer = Timer(_scanPause, _runScanCycle);
@@ -579,53 +771,35 @@ class FlutterBluePlusBleService implements BleServiceInterface {
   Future<void> stopScanning() async {
     if (!_isScanning) return;
 
-    Logger.info('FlutterBluePlusBleService: Stopping scan...', 'BLE');
+    Logger.info('BleService: Stopping scan...', 'BLE');
 
     _isScanning = false;
     _scanRestartTimer?.cancel();
     _scanRestartTimer = null;
 
     try {
-      await FlutterBluePlus.stopScan();
-      await _scanSubscription?.cancel();
-      _scanSubscription = null;
+      await _central.stopDiscovery();
+      await _discoveredSubscription?.cancel();
+      _discoveredSubscription = null;
     } catch (e) {
-      Logger.error(
-          'FlutterBluePlusBleService: Scan stop failed', e, null, 'BLE');
+      Logger.error('BleService: Scan stop failed', e, null, 'BLE');
     }
   }
 
   @override
   bool get isScanning => _isScanning;
 
-  void _onDeviceDiscovered(ScanResult result) {
-    final device = result.device;
-    final deviceId = device.remoteId.toString();
-    final advData = result.advertisementData;
+  void _onDeviceDiscovered(DiscoveredEventArgs event) {
+    final peripheral = event.peripheral;
+    final deviceId = peripheral.uuid.toString();
+    final adv = event.advertisement;
+    final rssi = event.rssi;
 
-    // ---- Try manufacturer data (works when advertiser is Android) ----
-    for (final entry in advData.manufacturerData.entries) {
-      final peer = _decodeManufacturerData(entry.key, entry.value, result.rssi);
-      if (peer != null) {
-        Logger.info(
-          'FlutterBluePlusBleService: Discovered Android peer "${peer.name}" via mfg data (RSSI: ${result.rssi})',
-          'BLE',
-        );
-        _emitPeer(peer);
-        return;
-      }
-    }
+    // Check service UUID
+    final hasAnchorService = adv.serviceUUIDs.contains(_serviceUuid);
 
-    // ---- Check for Anchor service UUID ----
-    final hasAnchorService = advData.serviceUuids.any(
-      (uuid) => uuid.toString().toLowerCase() == _serviceUuidStr.toLowerCase(),
-    );
-
-    // ---- Check for Anchor local name prefix ("A:name:age") ----
-    // This is the primary identifier for iOS-to-iOS discovery, because
-    // flutter_ble_peripheral on iOS may not reliably include the service
-    // UUID in the advertisement packet.
-    final advName = advData.advName;
+    // Check local name prefix
+    final advName = adv.name ?? '';
     final decoded = advName.isNotEmpty ? _decodeLocalName(advName) : null;
 
     // Not an Anchor device if neither marker is present
@@ -635,11 +809,13 @@ class FlutterBluePlusBleService implements BleServiceInterface {
     final age = decoded?.age;
 
     Logger.info(
-      'FlutterBluePlusBleService: Discovered peer "$name" '
-      '(advName: "$advName", hasService: $hasAnchorService, '
-      'RSSI: ${result.rssi}, deviceId: $deviceId)',
+      'BleService: Discovered peer "$name" '
+      '(hasService: $hasAnchorService, RSSI: $rssi, id: $deviceId)',
       'BLE',
     );
+
+    // Store the peripheral for later connection
+    _discoveredPeripherals[deviceId] = peripheral;
 
     final peer = DiscoveredPeer(
       peerId: deviceId,
@@ -647,10 +823,134 @@ class FlutterBluePlusBleService implements BleServiceInterface {
       age: age,
       bio: null,
       thumbnailBytes: null,
-      rssi: result.rssi,
+      rssi: rssi,
       timestamp: DateTime.now(),
     );
     _emitPeer(peer);
+
+    // Try to connect and read full profile in the background
+    _connectAndReadProfile(deviceId, peripheral);
+  }
+
+  /// Connect to a discovered peer to read their full profile from GATT.
+  // Cached maximum write lengths per peripheral (avoids repeated queries)
+  final Map<String, int> _maxWriteLengths = {};
+
+  Future<void> _connectAndReadProfile(
+      String peerId, Peripheral peripheral) async {
+    // Don't re-connect if we already have messaging char cached
+    if (_messagingChars.containsKey(peerId)) return;
+
+    try {
+      await _central.connect(peripheral);
+
+      // Request larger MTU on Android (iOS auto-negotiates)
+      if (Platform.isAndroid) {
+        try {
+          await _central.requestMTU(peripheral, mtu: 517);
+        } catch (e) {
+          Logger.warning('BleService: MTU request failed for $peerId', 'BLE');
+        }
+      }
+
+      // Query the safe write length for this connection
+      try {
+        final maxLen = await _central.getMaximumWriteLength(
+          peripheral,
+          type: GATTCharacteristicWriteType.withResponse,
+        );
+        _maxWriteLengths[peerId] = maxLen;
+        Logger.info(
+          'BleService: Max write length for $peerId: $maxLen bytes',
+          'BLE',
+        );
+      } catch (e) {
+        Logger.warning(
+          'BleService: getMaximumWriteLength failed for $peerId',
+          'BLE',
+        );
+      }
+
+      final services = await _central.discoverGATT(peripheral);
+      final anchorService = services
+          .where((s) => s.uuid == _serviceUuid)
+          .firstOrNull;
+
+      if (anchorService == null) {
+        await _central.disconnect(peripheral);
+        return;
+      }
+
+      // Read profile characteristic
+      final profileChar = anchorService.characteristics
+          .where((c) => c.uuid == _profileCharUuid)
+          .firstOrNull;
+
+      if (profileChar != null) {
+        try {
+          final data = await _central.readCharacteristic(
+            peripheral,
+            profileChar,
+          );
+          _updatePeerFromProfile(peerId, data);
+        } catch (e) {
+          Logger.warning('BleService: Profile read failed for $peerId', 'BLE');
+        }
+      }
+
+      // Cache messaging characteristic for sending
+      final msgChar = anchorService.characteristics
+          .where((c) => c.uuid == _messagingCharUuid)
+          .firstOrNull;
+
+      if (msgChar != null) {
+        _messagingChars[peerId] = msgChar;
+        Logger.info('BleService: Messaging ready for $peerId', 'BLE');
+      }
+
+      // Keep connection alive for messaging
+    } catch (e) {
+      Logger.warning(
+        'BleService: Connect to $peerId failed: $e',
+        'BLE',
+      );
+    }
+  }
+
+  void _updatePeerFromProfile(String peerId, Uint8List data) {
+    try {
+      final json = jsonDecode(utf8.decode(data)) as Map<String, dynamic>;
+      final existingPeer = _visiblePeers[peerId];
+      if (existingPeer == null) return;
+
+      final userId = json['userId'] as String?;
+
+      // Record userId → BLE peerId mapping so incoming messages (which carry
+      // the sender's app userId) can be routed to the correct peer.
+      if (userId != null && userId.isNotEmpty) {
+        _userIdToPeerId[userId] = peerId;
+      }
+
+      // Update the existing peer entry in-place — keep the BLE peripheral UUID
+      // as the stable peerId to avoid creating duplicate database records.
+      final updatedPeer = DiscoveredPeer(
+        peerId: peerId,
+        name: json['name'] as String? ?? existingPeer.name,
+        age: json['age'] as int? ?? existingPeer.age,
+        bio: json['bio'] as String?,
+        thumbnailBytes: null,
+        rssi: existingPeer.rssi,
+        timestamp: DateTime.now(),
+      );
+
+      _emitPeer(updatedPeer);
+      Logger.info(
+        'BleService: Updated profile for "${updatedPeer.name}"',
+        'BLE',
+      );
+    } catch (e) {
+      Logger.warning('BleService: Profile decode failed', 'BLE');
+    }
   }
 
   void _emitPeer(DiscoveredPeer peer) {
@@ -669,7 +969,10 @@ class FlutterBluePlusBleService implements BleServiceInterface {
       final peer = _visiblePeers.remove(peerId);
       _peerTimeoutTimers.remove(peerId)?.cancel();
       _peerLostController.add(peerId);
-      Logger.info('FlutterBluePlusBleService: Lost peer ${peer?.name}', 'BLE');
+      _messagingChars.remove(peerId);
+      _maxWriteLengths.remove(peerId);
+      _userIdToPeerId.removeWhere((_, v) => v == peerId);
+      Logger.info('BleService: Lost peer ${peer?.name}', 'BLE');
     }
   }
 
@@ -680,41 +983,40 @@ class FlutterBluePlusBleService implements BleServiceInterface {
     _ensureInitialized();
 
     Logger.info(
-      'FlutterBluePlusBleService: Sending ${payload.type.name} to ${peerId.substring(0, 8)}',
+      'BleService: Sending ${payload.type.name} to ${peerId.substring(0, min(8, peerId.length))}',
       'BLE',
     );
 
     try {
-      final device = _connectedDevices.values
-          .where((d) => _visiblePeers[peerId] != null)
-          .firstOrNull;
+      // Find the messaging characteristic and peripheral
+      var msgChar = _messagingChars[peerId];
+      var peripheral = _discoveredPeripherals[peerId];
 
-      if (device == null) {
-        Logger.info(
-            'FlutterBluePlusBleService: Peer not connected: $peerId', 'BLE');
-        // TODO: Queue message for later delivery
+      // Try to connect if not already connected
+      if (msgChar == null && peripheral != null) {
+        await _connectAndReadProfile(peerId, peripheral);
+        msgChar = _messagingChars[peerId];
+      }
+
+      if (msgChar == null || peripheral == null) {
+        Logger.info('BleService: Peer not reachable: $peerId', 'BLE');
         return false;
       }
 
-      final services = await device.discoverServices();
-      final service =
-          services.where((s) => s.serviceUuid == _serviceUuid).firstOrNull;
-      if (service == null) return false;
-
-      final messageChar = service.characteristics
-          .where((c) => c.characteristicUuid == _messagingChar)
-          .firstOrNull;
-      if (messageChar == null) return false;
-
       final data = _serializeMessagePayload(payload);
-      await messageChar.write(data, withoutResponse: true);
+      await _central.writeCharacteristic(
+        peripheral,
+        msgChar,
+        value: data,
+        type: GATTCharacteristicWriteType.withResponse,
+      );
 
-      Logger.info(
-          'FlutterBluePlusBleService: Message sent successfully', 'BLE');
+      Logger.info('BleService: Message sent successfully', 'BLE');
       return true;
     } catch (e) {
-      Logger.error(
-          'FlutterBluePlusBleService: Message send failed', e, null, 'BLE');
+      Logger.error('BleService: Message send failed', e, null, 'BLE');
+      // Clear cached connection so it retries next time
+      _messagingChars.remove(peerId);
       return false;
     }
   }
@@ -726,6 +1028,7 @@ class FlutterBluePlusBleService implements BleServiceInterface {
   Uint8List _serializeMessagePayload(MessagePayload payload) {
     final json = {
       'type': 'message',
+      'sender_id': _pendingPayload?.userId ?? '',
       'message_type': payload.type.index,
       'message_id': payload.messageId,
       'content': payload.content,
@@ -736,6 +1039,9 @@ class FlutterBluePlusBleService implements BleServiceInterface {
 
   // ==================== Photo Transfer ====================
 
+  // Track cancelled transfers so in-flight sends stop early
+  final Set<String> _cancelledTransfers = {};
+
   @override
   Future<bool> sendPhoto(
       String peerId, Uint8List photoData, String messageId) async {
@@ -743,7 +1049,7 @@ class FlutterBluePlusBleService implements BleServiceInterface {
 
     if (photoData.length > config.maxPhotoSize) {
       Logger.error(
-        'FlutterBluePlusBleService: Photo too large (${photoData.length} > ${config.maxPhotoSize})',
+        'BleService: Photo too large (${photoData.length} > ${config.maxPhotoSize})',
         null,
         null,
         'BLE',
@@ -752,12 +1058,152 @@ class FlutterBluePlusBleService implements BleServiceInterface {
     }
 
     Logger.info(
-      'FlutterBluePlusBleService: Photo transfer not yet implemented',
+      'BleService: Starting photo transfer $messageId '
+      '(${photoData.length} bytes) to ${peerId.substring(0, min(8, peerId.length))}',
       'BLE',
     );
 
-    // TODO: Implement chunked photo transfer
-    return false;
+    try {
+      // Ensure we have a connection to this peer
+      var msgChar = _messagingChars[peerId];
+      var peripheral = _discoveredPeripherals[peerId];
+
+      if (msgChar == null && peripheral != null) {
+        await _connectAndReadProfile(peerId, peripheral);
+        msgChar = _messagingChars[peerId];
+      }
+
+      if (msgChar == null || peripheral == null) {
+        Logger.info('BleService: Peer not reachable for photo: $peerId', 'BLE');
+        _photoProgressController.add(PhotoTransferProgress(
+          messageId: messageId,
+          peerId: peerId,
+          progress: 0,
+          status: PhotoTransferStatus.failed,
+          errorMessage: 'Peer not reachable',
+        ));
+        return false;
+      }
+
+      // --- Binary photo transfer protocol ---
+      //
+      // iOS CoreBluetooth has a very limited "prepare queue" on the GATT
+      // server side. Any writeWithResponse whose payload exceeds the ATT MTU
+      // (~185 bytes iOS-to-iOS) gets split into Prepare Write + Execute Write
+      // ATT operations, and the receiver's queue overflows (CBATTError code 9).
+      //
+      // To avoid this we use a two-phase binary protocol:
+      //   Phase 1: Send a small JSON "photo_start" message with metadata.
+      //   Phase 2: Send raw binary chunks with only 3 bytes overhead each:
+      //            [0x02][uint16 chunk_index][raw photo bytes]
+      //
+      // This keeps every single write well under the ATT MTU.
+
+      // Use a conservative max payload — iOS default ATT MTU is 185,
+      // usable payload is MTU - 3 = 182 bytes.
+      final maxWriteLen = _maxWriteLengths[peerId] ?? 182;
+      // Binary chunk overhead: 1 (marker) + 2 (index) = 3 bytes
+      const binaryOverhead = 3;
+      final rawChunkSize = max(20, maxWriteLen - binaryOverhead);
+
+      // Split photo into chunks
+      final totalChunks = (photoData.length + rawChunkSize - 1) ~/ rawChunkSize;
+
+      Logger.info(
+        'BleService: Photo binary transfer: ${photoData.length}B, '
+        '$totalChunks chunks (${rawChunkSize}B each, maxWrite=$maxWriteLen)',
+        'BLE',
+      );
+
+      // Phase 1: Send photo_start metadata as JSON (no photo data, small payload)
+      final startPayload = utf8.encode(jsonEncode({
+        'type': 'photo_start',
+        'sender_id': _pendingPayload?.userId ?? '',
+        'message_id': messageId,
+        'total_chunks': totalChunks,
+        'total_size': photoData.length,
+      }));
+
+      await _central.writeCharacteristic(
+        peripheral,
+        msgChar,
+        value: Uint8List.fromList(startPayload),
+        type: GATTCharacteristicWriteType.withResponse,
+      );
+
+      await Future.delayed(const Duration(milliseconds: 50));
+
+      // Emit starting progress
+      _photoProgressController.add(PhotoTransferProgress(
+        messageId: messageId,
+        peerId: peerId,
+        progress: 0,
+        status: PhotoTransferStatus.starting,
+      ));
+
+      // Phase 2: Send binary chunks
+      for (var i = 0; i < totalChunks; i++) {
+        // Check if transfer was cancelled
+        if (_cancelledTransfers.contains(messageId)) {
+          _cancelledTransfers.remove(messageId);
+          _photoProgressController.add(PhotoTransferProgress(
+            messageId: messageId,
+            peerId: peerId,
+            progress: i / totalChunks,
+            status: PhotoTransferStatus.cancelled,
+          ));
+          return false;
+        }
+
+        // Build binary payload: [0x02][uint16 chunk_index][raw data]
+        final dataStart = i * rawChunkSize;
+        final dataEnd = min(dataStart + rawChunkSize, photoData.length);
+        final chunkData = photoData.sublist(dataStart, dataEnd);
+
+        final payload = Uint8List(binaryOverhead + chunkData.length);
+        payload[0] = 0x02; // photo chunk marker
+        payload[1] = (i >> 8) & 0xFF; // chunk index high byte
+        payload[2] = i & 0xFF; // chunk index low byte
+        payload.setRange(binaryOverhead, payload.length, chunkData);
+
+        await _central.writeCharacteristic(
+          peripheral,
+          msgChar,
+          value: payload,
+          type: GATTCharacteristicWriteType.withResponse,
+        );
+
+        // Pace writes to let the receiver's GATT server process each one
+        if (i < totalChunks - 1) {
+          await Future.delayed(const Duration(milliseconds: 50));
+        }
+
+        // Emit progress
+        final progress = (i + 1) / totalChunks;
+        _photoProgressController.add(PhotoTransferProgress(
+          messageId: messageId,
+          peerId: peerId,
+          progress: progress,
+          status: i == totalChunks - 1
+              ? PhotoTransferStatus.completed
+              : PhotoTransferStatus.inProgress,
+        ));
+      }
+
+      Logger.info('BleService: Photo transfer completed: $messageId', 'BLE');
+      return true;
+    } catch (e) {
+      Logger.error('BleService: Photo transfer failed', e, null, 'BLE');
+      _messagingChars.remove(peerId);
+      _photoProgressController.add(PhotoTransferProgress(
+        messageId: messageId,
+        peerId: peerId,
+        progress: 0,
+        status: PhotoTransferStatus.failed,
+        errorMessage: e.toString(),
+      ));
+      return false;
+    }
   }
 
   @override
@@ -770,9 +1216,8 @@ class FlutterBluePlusBleService implements BleServiceInterface {
 
   @override
   Future<void> cancelPhotoTransfer(String messageId) async {
-    Logger.info(
-        'FlutterBluePlusBleService: Cancelling photo transfer $messageId',
-        'BLE');
+    Logger.info('BleService: Cancelling photo transfer $messageId', 'BLE');
+    _cancelledTransfers.add(messageId);
     _photoReassembler.cancel(messageId);
   }
 
@@ -790,4 +1235,21 @@ class FlutterBluePlusBleService implements BleServiceInterface {
 
   @override
   List<String> get visiblePeerIds => _visiblePeers.keys.toList();
+}
+
+/// Tracks an incoming binary photo transfer from a specific peer.
+class _IncomingPhotoTransfer {
+  _IncomingPhotoTransfer({
+    required this.messageId,
+    required this.totalChunks,
+    required this.totalSize,
+    required this.receivedData,
+    required this.receivedCount,
+  });
+
+  final String messageId;
+  final int totalChunks;
+  final int totalSize;
+  final BytesBuilder receivedData;
+  int receivedCount;
 }
