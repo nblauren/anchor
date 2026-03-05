@@ -48,8 +48,7 @@ class ChatRepository {
 
   /// Get a conversation by ID
   Future<ConversationEntry?> getConversationById(String id) async {
-    return await (_db.select(_db.conversations)
-          ..where((t) => t.id.equals(id)))
+    return await (_db.select(_db.conversations)..where((t) => t.id.equals(id)))
         .getSingleOrNull();
   }
 
@@ -111,7 +110,8 @@ class ChatRepository {
   Future<void> deleteConversation(String id) async {
     await _db.transaction(() async {
       // Delete messages first
-      await (_db.delete(_db.messages)..where((t) => t.conversationId.equals(id)))
+      await (_db.delete(_db.messages)
+            ..where((t) => t.conversationId.equals(id)))
           .go();
       // Delete conversation
       await (_db.delete(_db.conversations)..where((t) => t.id.equals(id))).go();
@@ -281,7 +281,8 @@ class ChatRepository {
   }
 
   /// Get unread count for a conversation (messages from peer)
-  Future<int> getUnreadCount(String conversationId, {String? localUserId}) async {
+  Future<int> getUnreadCount(String conversationId,
+      {String? localUserId}) async {
     // For simplicity, count messages with status 'delivered' that aren't from local user
     // In a real app, you'd track read status separately
     final count = _db.messages.id.count();
@@ -333,7 +334,8 @@ class ChatRepository {
     String? textContent,
     String? photoPath,
   }) async {
-    final contentType = photoPath != null ? MessageContentType.photo : MessageContentType.text;
+    final contentType =
+        photoPath != null ? MessageContentType.photo : MessageContentType.text;
     return receiveMessage(
       conversationId: conversationId,
       senderId: senderId,
@@ -354,6 +356,15 @@ class ChatRepository {
       await _db.delete(_db.messages).go();
       await _db.delete(_db.conversations).go();
     });
+  }
+
+  Future<int> getUnreadMessageCount(String senderId) {
+    final count = _db.messages.id.count();
+    final query = _db.selectOnly(_db.messages)
+      ..where(_db.messages.status.equalsValue(MessageStatus.delivered))
+      ..where(_db.messages.senderId.equals(senderId).not())
+      ..addColumns([count]);
+    return query.getSingle().then((result) => result.read(count) ?? 0);
   }
 }
 

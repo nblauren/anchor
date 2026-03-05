@@ -266,8 +266,8 @@ class FlutterBluePlusBleService implements BleServiceInterface {
 
       // Handle incoming messages (writes to messaging characteristic)
       await _charWriteSubscription?.cancel();
-      _charWriteSubscription =
-          _peripheral.characteristicWriteRequested.listen(_onMessageWriteReceived);
+      _charWriteSubscription = _peripheral.characteristicWriteRequested
+          .listen(_onMessageWriteReceived);
 
       Logger.info('BleService: GATT server ready', 'BLE');
     } catch (e) {
@@ -347,13 +347,12 @@ class FlutterBluePlusBleService implements BleServiceInterface {
 
     Logger.info(
       'BleService: Received message from '
-      '${fromPeerId.substring(0, min(8, fromPeerId.length))}',
+          '${fromPeerId.substring(0, min(8, fromPeerId.length))}',
       'BLE',
     );
   }
 
-  void _handleReceivedPhotoChunk(
-      Map<String, dynamic> json, String fromPeerId) {
+  void _handleReceivedPhotoChunk(Map<String, dynamic> json, String fromPeerId) {
     final dataField = json['data'];
     Uint8List chunkData;
     if (dataField is String) {
@@ -376,7 +375,7 @@ class FlutterBluePlusBleService implements BleServiceInterface {
 
     Logger.info(
       'BleService: Received photo chunk ${chunk.chunkIndex + 1}/${chunk.totalChunks} '
-      'for ${chunk.messageId.substring(0, min(8, chunk.messageId.length))}',
+          'for ${chunk.messageId.substring(0, min(8, chunk.messageId.length))}',
       'BLE',
     );
 
@@ -394,7 +393,7 @@ class FlutterBluePlusBleService implements BleServiceInterface {
     if (result.isComplete && result.photoData != null) {
       Logger.info(
         'BleService: Photo reassembly complete: ${chunk.messageId} '
-        '(${result.photoData!.length} bytes)',
+            '(${result.photoData!.length} bytes)',
         'BLE',
       );
 
@@ -432,8 +431,8 @@ class FlutterBluePlusBleService implements BleServiceInterface {
 
     Logger.info(
       'BleService: Photo transfer starting from '
-      '${fromPeerId.substring(0, min(8, fromPeerId.length))}: '
-      '$totalChunks chunks, $totalSize bytes',
+          '${fromPeerId.substring(0, min(8, fromPeerId.length))}: '
+          '$totalChunks chunks, $totalSize bytes',
       'BLE',
     );
 
@@ -477,7 +476,7 @@ class FlutterBluePlusBleService implements BleServiceInterface {
     if (transfer == null) {
       Logger.warning(
         'BleService: Binary photo chunk received but no active transfer '
-        'from $centralId (chunk $chunkIndex)',
+            'from $centralId (chunk $chunkIndex)',
         'BLE',
       );
       return;
@@ -491,7 +490,7 @@ class FlutterBluePlusBleService implements BleServiceInterface {
         transfer.receivedCount == transfer.totalChunks) {
       Logger.info(
         'BleService: Photo chunk ${transfer.receivedCount}/${transfer.totalChunks} '
-        'for ${transfer.messageId.substring(0, min(8, transfer.messageId.length))}',
+            'for ${transfer.messageId.substring(0, min(8, transfer.messageId.length))}',
         'BLE',
       );
     }
@@ -510,7 +509,7 @@ class FlutterBluePlusBleService implements BleServiceInterface {
 
       Logger.info(
         'BleService: Binary photo complete: ${transfer.messageId} '
-        '(${photoBytes.length} bytes)',
+            '(${photoBytes.length} bytes)',
         'BLE',
       );
 
@@ -678,9 +677,8 @@ class FlutterBluePlusBleService implements BleServiceInterface {
 
   /// Encode local name: "A:<name>:<age>"
   String _encodeLocalName(BroadcastPayload payload) {
-    final name = payload.name.length > 8
-        ? payload.name.substring(0, 8)
-        : payload.name;
+    final name =
+        payload.name.length > 8 ? payload.name.substring(0, 8) : payload.name;
     final age = payload.age ?? 0;
     return 'A:$name:$age';
   }
@@ -742,7 +740,7 @@ class FlutterBluePlusBleService implements BleServiceInterface {
     try {
       Logger.info('BleService: Scan cycle starting...', 'BLE');
 
-      await _central.startDiscovery();
+      await _central.startDiscovery(serviceUUIDs: [_serviceUuid]);
 
       // Stop after scan duration and schedule next cycle
       _scanRestartTimer?.cancel();
@@ -789,11 +787,27 @@ class FlutterBluePlusBleService implements BleServiceInterface {
   @override
   bool get isScanning => _isScanning;
 
+  final Map<String, int> _lastRssi = {}; // peerId → last seen RSSI
+  final Map<String, DateTime> _lastEmit = {}; // peerId → last emit time
+
   void _onDeviceDiscovered(DiscoveredEventArgs event) {
     final peripheral = event.peripheral;
     final deviceId = peripheral.uuid.toString();
     final adv = event.advertisement;
     final rssi = event.rssi;
+    final now = DateTime.now();
+
+    // Skip if same peer and RSSI change < 5 dBm within 3 seconds
+    if (_lastEmit.containsKey(deviceId)) {
+      final timeSince = now.difference(_lastEmit[deviceId]!);
+      final rssiDelta = (_lastRssi[deviceId]! - rssi).abs();
+      if (timeSince < const Duration(seconds: 3) && rssiDelta < 5) {
+        return;
+      }
+    }
+
+    _lastRssi[deviceId] = rssi;
+    _lastEmit[deviceId] = now;
 
     // Check service UUID
     final hasAnchorService = adv.serviceUUIDs.contains(_serviceUuid);
@@ -805,12 +819,13 @@ class FlutterBluePlusBleService implements BleServiceInterface {
     // Not an Anchor device if neither marker is present
     if (!hasAnchorService && decoded == null) return;
 
-    final name = decoded?.name ?? (advName.isNotEmpty ? advName : 'Anchor User');
+    final name =
+        decoded?.name ?? (advName.isNotEmpty ? advName : 'Anchor User');
     final age = decoded?.age;
 
     Logger.info(
       'BleService: Discovered peer "$name" '
-      '(hasService: $hasAnchorService, RSSI: $rssi, id: $deviceId)',
+          '(hasService: $hasAnchorService, RSSI: $rssi, id: $deviceId)',
       'BLE',
     );
 
@@ -872,9 +887,8 @@ class FlutterBluePlusBleService implements BleServiceInterface {
       }
 
       final services = await _central.discoverGATT(peripheral);
-      final anchorService = services
-          .where((s) => s.uuid == _serviceUuid)
-          .firstOrNull;
+      final anchorService =
+          services.where((s) => s.uuid == _serviceUuid).firstOrNull;
 
       if (anchorService == null) {
         await _central.disconnect(peripheral);
@@ -1059,7 +1073,7 @@ class FlutterBluePlusBleService implements BleServiceInterface {
 
     Logger.info(
       'BleService: Starting photo transfer $messageId '
-      '(${photoData.length} bytes) to ${peerId.substring(0, min(8, peerId.length))}',
+          '(${photoData.length} bytes) to ${peerId.substring(0, min(8, peerId.length))}',
       'BLE',
     );
 
@@ -1111,7 +1125,7 @@ class FlutterBluePlusBleService implements BleServiceInterface {
 
       Logger.info(
         'BleService: Photo binary transfer: ${photoData.length}B, '
-        '$totalChunks chunks (${rawChunkSize}B each, maxWrite=$maxWriteLen)',
+            '$totalChunks chunks (${rawChunkSize}B each, maxWrite=$maxWriteLen)',
         'BLE',
       );
 

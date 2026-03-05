@@ -124,13 +124,13 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
       child: LayoutBuilder(
         builder: (context, constraints) {
           // Responsive column count: 2 for phones, 3 for tablets
-          final crossAxisCount = constraints.maxWidth > 600 ? 3 : 2;
+          final crossAxisCount = constraints.maxWidth > 600 ? 5 : 3;
 
           return GridView.builder(
             padding: const EdgeInsets.all(12),
             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: crossAxisCount,
-              childAspectRatio: 0.75, // Taller cards
+              childAspectRatio: 1,
               crossAxisSpacing: 12,
               mainAxisSpacing: 12,
             ),

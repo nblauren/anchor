@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:anchor/services/notification_service.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../core/constants/app_constants.dart';
@@ -97,7 +98,8 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
 
     try {
       // Get or create conversation
-      final conversationEntry = await _chatRepository.getOrCreateConversation(event.peerId);
+      final conversationEntry =
+          await _chatRepository.getOrCreateConversation(event.peerId);
 
       emit(state.copyWith(
         status: ChatStatus.loaded,
@@ -135,7 +137,8 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         offset: offset,
       );
 
-      final allMessages = event.loadMore ? [...state.messages, ...messages] : messages;
+      final allMessages =
+          event.loadMore ? [...state.messages, ...messages] : messages;
 
       emit(state.copyWith(
         status: ChatStatus.loaded,
@@ -215,7 +218,8 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
 
     try {
       // Compress the photo for chat (target ~100-200KB)
-      final compressedPath = await _imageService.compressForChat(event.photoPath);
+      final compressedPath =
+          await _imageService.compressForChat(event.photoPath);
 
       // Save photo message to database as pending
       final message = await _chatRepository.sendPhotoMessage(
@@ -225,7 +229,8 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       );
 
       // Add to messages list with transfer progress tracking
-      final updatedTransfers = Map<String, PhotoTransferInfo>.from(state.photoTransfers);
+      final updatedTransfers =
+          Map<String, PhotoTransferInfo>.from(state.photoTransfers);
       updatedTransfers[message.id] = PhotoTransferInfo(
         messageId: message.id,
         progress: 0,
@@ -240,7 +245,8 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
 
       // Compress aggressively for BLE transfer (~50KB) while keeping the
       // higher-quality local copy for display.
-      final photoBytes = await _imageService.compressForBleTransfer(compressedPath);
+      final photoBytes =
+          await _imageService.compressForBleTransfer(compressedPath);
       final success = await _bleService.sendPhoto(
         state.currentConversation!.peerId,
         photoBytes,
@@ -294,7 +300,16 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       final bleMsg = event.message;
 
       // Get or create conversation with this peer
-      final conversation = await _chatRepository.getOrCreateConversation(bleMsg.fromPeerId);
+      final conversation =
+          await _chatRepository.getOrCreateConversation(bleMsg.fromPeerId);
+
+      NotificationService().showMessageNotification(
+        fromPeerId: bleMsg.fromPeerId,
+        fromName: state.currentConversation?.peerName ?? 'Unknown',
+        messagePreview: bleMsg.type == ble.MessageType.text
+            ? bleMsg.content
+            : 'Photo received',
+      );
 
       // Save received message to database
       final message = await _chatRepository.receiveMessage(
@@ -303,7 +318,8 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         contentType: bleMsg.type == ble.MessageType.text
             ? MessageContentType.text
             : MessageContentType.photo,
-        textContent: bleMsg.type == ble.MessageType.text ? bleMsg.content : null,
+        textContent:
+            bleMsg.type == ble.MessageType.text ? bleMsg.content : null,
       );
 
       // If viewing this conversation, add to UI
@@ -331,7 +347,8 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     Emitter<ChatState> emit,
   ) {
     final progress = event.progress;
-    final updatedTransfers = Map<String, PhotoTransferInfo>.from(state.photoTransfers);
+    final updatedTransfers =
+        Map<String, PhotoTransferInfo>.from(state.photoTransfers);
 
     if (progress.status == ble.PhotoTransferStatus.completed) {
       // Remove from tracking and update message status
@@ -364,7 +381,8 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   Future<void> _onBlePhotoReceived(ble.ReceivedPhoto photo) async {
     try {
       // Get or create conversation with this peer
-      final conversation = await _chatRepository.getOrCreateConversation(photo.fromPeerId);
+      final conversation =
+          await _chatRepository.getOrCreateConversation(photo.fromPeerId);
 
       // Save photo to file
       final photoPath = await _imageService.saveReceivedPhoto(photo.photoBytes);
@@ -426,7 +444,8 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   ) async {
     try {
       // Mark as pending again
-      await _chatRepository.updateMessageStatus(event.messageId, MessageStatus.pending);
+      await _chatRepository.updateMessageStatus(
+          event.messageId, MessageStatus.pending);
 
       // Update in state
       final updatedMessages = state.messages.map((msg) {
