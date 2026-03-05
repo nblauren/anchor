@@ -136,14 +136,14 @@ class SettingsScreen extends StatelessWidget {
                   color: AppTheme.primaryColor.withValues(alpha: 0.5),
                 ),
                 const SizedBox(height: 8),
-                Text(
+                const Text(
                   'Anchor',
                   style: TextStyle(
                     color: AppTheme.textSecondary,
                     fontSize: 14,
                   ),
                 ),
-                Text(
+                const Text(
                   'Connect. Offline. Together.',
                   style: TextStyle(
                     color: AppTheme.textHint,

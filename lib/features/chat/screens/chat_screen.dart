@@ -336,6 +336,9 @@ class _ChatScreenState extends State<ChatScreen> {
               textCapitalization: TextCapitalization.sentences,
               maxLines: 4,
               minLines: 1,
+              onTapOutside: (PointerDownEvent event) {
+                FocusManager.instance.primaryFocus?.unfocus();
+              },
               onSubmitted: (_) => _sendMessage(),
             ),
           ),

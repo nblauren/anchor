@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:photo_view/photo_view.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../data/local_database/database.dart';
@@ -52,7 +53,7 @@ class MessageBubbleWidget extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             // Content (text or photo)
-            if (isPhoto) _buildPhotoContent() else _buildTextContent(),
+            if (isPhoto) _buildPhotoContent(context) else _buildTextContent(),
 
             // Timestamp and status
             Padding(
@@ -99,9 +100,8 @@ class MessageBubbleWidget extends StatelessWidget {
     );
   }
 
-  Widget _buildPhotoContent() {
+  Widget _buildPhotoContent(context) {
     final photoPath = message.photoPath;
-
     if (photoPath == null || photoPath.isEmpty) {
       return _buildPhotoPlaceholder();
     }
@@ -110,7 +110,40 @@ class MessageBubbleWidget extends StatelessWidget {
 
     return GestureDetector(
       onTap: () {
-        // Could open full-screen viewer
+        showDialog(
+          context: context,
+          barrierColor: Colors.black87,
+          builder: (context) => Dialog(
+            insetPadding:
+                const EdgeInsets.all(0), // removes default margins → full bleed
+            backgroundColor: Colors.transparent,
+            child: Stack(
+              fit: StackFit.expand, // or use SizedBox.expand
+              children: [
+                PhotoView(
+                  imageProvider: FileImage(file),
+                  minScale: PhotoViewComputedScale.contained * 0.8,
+                  maxScale: PhotoViewComputedScale.covered * 4.0,
+                  initialScale: PhotoViewComputedScale.contained,
+                  backgroundDecoration:
+                      const BoxDecoration(color: Colors.black),
+                  loadingBuilder: (context, event) => const Center(
+                    child: CircularProgressIndicator(color: Colors.white),
+                  ),
+                ),
+                Positioned(
+                  top: 40,
+                  right: 16,
+                  child: IconButton(
+                    icon:
+                        const Icon(Icons.close, color: Colors.white, size: 36),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
       },
       child: FutureBuilder<bool>(
         future: file.exists(),
@@ -121,15 +154,20 @@ class MessageBubbleWidget extends StatelessWidget {
 
           return Stack(
             children: [
-              Image.file(
-                file,
-                fit: BoxFit.cover,
-                width: double.infinity,
-                height: 200,
-                errorBuilder: (context, error, stackTrace) =>
-                    _buildPhotoPlaceholder(),
+              // Main change here
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12), // ← looks nicer
+                child: Image.file(
+                  file,
+                  fit: BoxFit.cover,
+                  width: double.infinity,
+                  height: 200,
+                  errorBuilder: (context, error, stackTrace) =>
+                      _buildPhotoPlaceholder(),
+                ),
               ),
-              // Loading overlay for pending messages
+
+              // Your pending overlay
               if (message.status == MessageStatus.pending)
                 Positioned.fill(
                   child: Container(
