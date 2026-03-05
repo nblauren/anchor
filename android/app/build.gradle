@@ -23,7 +23,7 @@ if (flutterVersionName == null) {
 }
 
 android {
-    namespace "com.anchor.anchor"
+    namespace "dev.nikkothe.anchor"
     compileSdk flutter.compileSdkVersion
     ndkVersion flutter.ndkVersion
 
@@ -41,7 +41,7 @@ android {
     }
 
     defaultConfig {
-        applicationId "com.anchor.anchor"
+        applicationId "dev.nikkothe.anchor"
         minSdk 26
         targetSdk flutter.targetSdkVersion
         versionCode flutterVersionCode.toInteger()

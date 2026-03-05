@@ -1,5 +1,13 @@
 include: package:flutter_lints/flutter.yaml
 
+analyzer:
+  exclude:
+    - "**/*.g.dart"
+    - "**/*.freezed.dart"
+    - "**/*.gen.dart"
+    - "**/*.config.dart"
+    - "**/*.mocks.dart"
+
 linter:
   rules:
     - prefer_const_constructors

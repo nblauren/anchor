@@ -212,7 +212,7 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
                     const SizedBox(height: 8),
                     Row(
                       children: [
-                        Icon(
+                        const Icon(
                           Icons.signal_cellular_alt,
                           size: 16,
                           color: AppTheme.textSecondary,
@@ -220,7 +220,7 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
                         const SizedBox(width: 4),
                         Text(
                           '${_peer.signalStrengthText} signal',
-                          style: TextStyle(
+                          style: const TextStyle(
                             color: AppTheme.textSecondary,
                             fontSize: 14,
                           ),

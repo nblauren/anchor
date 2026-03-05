@@ -1,4 +1,4 @@
-package com.anchor.anchor
+package dev.nikkothe.anchor
 
 import io.flutter.embedding.android.FlutterActivity
 

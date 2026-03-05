@@ -1,7 +1,5 @@
 import 'dart:typed_data';
 
-import 'package:uuid/uuid.dart';
-
 /// Utilities for chunking photos for BLE transfer
 /// BLE has limited MTU, so photos must be sent in chunks
 class PhotoChunker {
@@ -10,7 +8,6 @@ class PhotoChunker {
   });
 
   final int chunkSize;
-  static const _uuid = Uuid();
 
   /// Split photo data into chunks for transfer
   List<PhotoChunk> chunkPhoto(Uint8List photoData, String messageId) {
@@ -180,7 +177,8 @@ class _PendingPhoto {
 
   bool get isComplete => _receivedCount == totalChunks;
 
-  double get progress => PhotoChunker.calculateProgress(_receivedCount, totalChunks);
+  double get progress =>
+      PhotoChunker.calculateProgress(_receivedCount, totalChunks);
 
   Uint8List reassemble() {
     final buffer = BytesBuilder();

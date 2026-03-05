@@ -9,6 +9,7 @@
 /// - [BleConfig] - Configuration for service selection
 /// - [PhotoChunker] - Utilities for chunking photos for BLE transfer
 /// - Data models for BLE communication
+library;
 
 export 'ble_config.dart';
 export 'ble_connection_bloc.dart';
