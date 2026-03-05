@@ -2,7 +2,7 @@
 
 ## Overview
 
-Anchor now uses **flutter_blue_plus** for direct peer-to-peer Bluetooth Low Energy communication, replacing the previous Bridgefy mesh networking approach.
+Anchor uses **flutter_blue_plus** for direct peer-to-peer Bluetooth Low Energy communication.
 
 ## What's Implemented ✅
 

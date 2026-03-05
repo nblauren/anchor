@@ -142,7 +142,8 @@ class _PhotoItem extends StatelessWidget {
                       fit: BoxFit.cover,
                       errorBuilder: (_, __, ___) => Container(
                         color: AppTheme.darkCard,
-                        child: const Icon(Icons.broken_image, color: AppTheme.textSecondary),
+                        child: const Icon(Icons.broken_image,
+                            color: AppTheme.textSecondary),
                       ),
                     ),
                   ),
@@ -156,7 +157,8 @@ class _PhotoItem extends StatelessWidget {
                     children: [
                       if (photo.isPrimary)
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 4),
                           decoration: BoxDecoration(
                             color: AppTheme.primaryColor,
                             borderRadius: BorderRadius.circular(4),
@@ -226,7 +228,7 @@ class _AddPhotoButton extends StatelessWidget {
             color: AppTheme.darkCard,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: AppTheme.primaryColor.withOpacity(0.5),
+              color: AppTheme.primaryColor.withValues(alpha: 0.5),
               width: 2,
               strokeAlign: BorderSide.strokeAlignInside,
             ),

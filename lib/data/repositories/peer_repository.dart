@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import 'package:drift/drift.dart';
 
 import '../local_database/database.dart';
@@ -13,7 +11,8 @@ class PeerRepository {
   // ==================== Peer CRUD ====================
 
   /// Get all discovered peers (excluding blocked)
-  Future<List<DiscoveredPeerEntry>> getAllPeers({bool includeBlocked = false}) async {
+  Future<List<DiscoveredPeerEntry>> getAllPeers(
+      {bool includeBlocked = false}) async {
     final query = _db.select(_db.discoveredPeers);
     if (!includeBlocked) {
       query.where((t) => t.isBlocked.equals(false));
@@ -33,7 +32,9 @@ class PeerRepository {
   Future<List<DiscoveredPeerEntry>> getRecentPeers(Duration window) async {
     final cutoff = DateTime.now().subtract(window);
     return await (_db.select(_db.discoveredPeers)
-          ..where((t) => t.lastSeenAt.isBiggerOrEqualValue(cutoff) & t.isBlocked.equals(false))
+          ..where((t) =>
+              t.lastSeenAt.isBiggerOrEqualValue(cutoff) &
+              t.isBlocked.equals(false))
           ..orderBy([(t) => OrderingTerm.desc(t.lastSeenAt)]))
         .get();
   }
@@ -58,12 +59,14 @@ class PeerRepository {
         name: Value(name),
         age: Value(age),
         bio: Value(bio),
-        thumbnailData: thumbnailData != null ? Value(thumbnailData) : const Value.absent(),
+        thumbnailData:
+            thumbnailData != null ? Value(thumbnailData) : const Value.absent(),
         lastSeenAt: Value(now),
         rssi: rssi != null ? Value(rssi) : const Value.absent(),
       );
 
-      await (_db.update(_db.discoveredPeers)..where((t) => t.peerId.equals(peerId)))
+      await (_db.update(_db.discoveredPeers)
+            ..where((t) => t.peerId.equals(peerId)))
           .write(companion);
 
       return DiscoveredPeerEntry(
@@ -106,7 +109,8 @@ class PeerRepository {
 
   /// Update peer's last seen time and RSSI
   Future<void> updatePeerPresence(String peerId, {int? rssi}) async {
-    await (_db.update(_db.discoveredPeers)..where((t) => t.peerId.equals(peerId)))
+    await (_db.update(_db.discoveredPeers)
+          ..where((t) => t.peerId.equals(peerId)))
         .write(DiscoveredPeersCompanion(
       lastSeenAt: Value(DateTime.now()),
       rssi: rssi != null ? Value(rssi) : const Value.absent(),
@@ -128,15 +132,18 @@ class PeerRepository {
       }
 
       // Delete conversations
-      await (_db.delete(_db.conversations)..where((t) => t.peerId.equals(peerId)))
+      await (_db.delete(_db.conversations)
+            ..where((t) => t.peerId.equals(peerId)))
           .go();
 
       // Delete from blocked users if present
-      await (_db.delete(_db.blockedUsers)..where((t) => t.peerId.equals(peerId)))
+      await (_db.delete(_db.blockedUsers)
+            ..where((t) => t.peerId.equals(peerId)))
           .go();
 
       // Delete peer
-      await (_db.delete(_db.discoveredPeers)..where((t) => t.peerId.equals(peerId)))
+      await (_db.delete(_db.discoveredPeers)
+            ..where((t) => t.peerId.equals(peerId)))
           .go();
     });
   }
@@ -158,14 +165,15 @@ class PeerRepository {
     await _db.transaction(() async {
       // Add to blocked users table
       await _db.into(_db.blockedUsers).insertOnConflictUpdate(
-        BlockedUsersCompanion.insert(
-          peerId: peerId,
-          blockedAt: DateTime.now(),
-        ),
-      );
+            BlockedUsersCompanion.insert(
+              peerId: peerId,
+              blockedAt: DateTime.now(),
+            ),
+          );
 
       // Update peer's blocked status
-      await (_db.update(_db.discoveredPeers)..where((t) => t.peerId.equals(peerId)))
+      await (_db.update(_db.discoveredPeers)
+            ..where((t) => t.peerId.equals(peerId)))
           .write(const DiscoveredPeersCompanion(isBlocked: Value(true)));
     });
   }
@@ -174,11 +182,13 @@ class PeerRepository {
   Future<void> unblockPeer(String peerId) async {
     await _db.transaction(() async {
       // Remove from blocked users table
-      await (_db.delete(_db.blockedUsers)..where((t) => t.peerId.equals(peerId)))
+      await (_db.delete(_db.blockedUsers)
+            ..where((t) => t.peerId.equals(peerId)))
           .go();
 
       // Update peer's blocked status
-      await (_db.update(_db.discoveredPeers)..where((t) => t.peerId.equals(peerId)))
+      await (_db.update(_db.discoveredPeers)
+            ..where((t) => t.peerId.equals(peerId)))
           .write(const DiscoveredPeersCompanion(isBlocked: Value(false)));
     });
   }
@@ -230,7 +240,9 @@ class PeerRepository {
   Future<int> clearOldPeers(Duration olderThan) async {
     final cutoff = DateTime.now().subtract(olderThan);
     return await (_db.delete(_db.discoveredPeers)
-          ..where((t) => t.lastSeenAt.isSmallerThanValue(cutoff) & t.isBlocked.equals(false)))
+          ..where((t) =>
+              t.lastSeenAt.isSmallerThanValue(cutoff) &
+              t.isBlocked.equals(false)))
         .go();
   }
 

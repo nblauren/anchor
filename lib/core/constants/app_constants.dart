@@ -24,7 +24,7 @@ class AppConstants {
   static const int maxMessageLength = 1000;
   static const int messagePageSize = 20;
 
-  // BLE (placeholder for future Bridgefy integration)
+  // BLE
   static const Duration bleScanDuration = Duration(seconds: 10);
   static const Duration bleAdvertiseDuration = Duration(seconds: 30);
 

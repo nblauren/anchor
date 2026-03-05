@@ -39,8 +39,12 @@ class MessageBubbleWidget extends StatelessWidget {
           borderRadius: BorderRadius.only(
             topLeft: const Radius.circular(16),
             topRight: const Radius.circular(16),
-            bottomLeft: isSentByMe ? const Radius.circular(16) : const Radius.circular(4),
-            bottomRight: isSentByMe ? const Radius.circular(4) : const Radius.circular(16),
+            bottomLeft: isSentByMe
+                ? const Radius.circular(16)
+                : const Radius.circular(4),
+            bottomRight: isSentByMe
+                ? const Radius.circular(4)
+                : const Radius.circular(16),
           ),
         ),
         clipBehavior: Clip.antiAlias,
@@ -122,7 +126,8 @@ class MessageBubbleWidget extends StatelessWidget {
                 fit: BoxFit.cover,
                 width: double.infinity,
                 height: 200,
-                errorBuilder: (context, error, stackTrace) => _buildPhotoPlaceholder(),
+                errorBuilder: (context, error, stackTrace) =>
+                    _buildPhotoPlaceholder(),
               ),
               // Loading overlay for pending messages
               if (message.status == MessageStatus.pending)

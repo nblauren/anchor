@@ -71,7 +71,6 @@ lib/
 │   │   ├── ble_service_interface.dart  # Abstract BLE interface
 │   │   ├── flutter_blue_plus_ble_service.dart  # Production BLE implementation
 │   │   ├── mock_ble_service.dart               # Testing mock
-│   │   ├── bridgefy_ble_service.dart           # Legacy (deprecated)
 │   │   ├── ble_models.dart     # Data models (DiscoveredPeer, BleMessage)
 │   │   ├── ble_status_bloc.dart        # BLE state management
 │   │   ├── ble_connection_bloc.dart    # BLE lifecycle management

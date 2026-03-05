@@ -56,7 +56,8 @@ class _ChatListScreenState extends State<ChatListScreen> {
       ),
       body: BlocBuilder<ChatBloc, ChatState>(
         builder: (context, state) {
-          if (state.status == ChatStatus.loading && state.conversations.isEmpty) {
+          if (state.status == ChatStatus.loading &&
+              state.conversations.isEmpty) {
             return const Center(child: CircularProgressIndicator());
           }
 
@@ -120,7 +121,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
       key: Key(conv.conversation.id),
       direction: DismissDirection.endToStart,
       background: Container(
-        color: AppTheme.errorColor,
+        color: AppTheme.error,
         alignment: Alignment.centerRight,
         padding: const EdgeInsets.only(right: 16),
         child: const Icon(Icons.delete, color: Colors.white),
@@ -139,7 +140,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
               ),
               TextButton(
                 onPressed: () => Navigator.pop(context, true),
-                style: TextButton.styleFrom(foregroundColor: AppTheme.errorColor),
+                style: TextButton.styleFrom(foregroundColor: AppTheme.error),
                 child: const Text('Delete'),
               ),
             ],
@@ -155,7 +156,9 @@ class _ChatListScreenState extends State<ChatListScreen> {
             fontWeight: hasUnread ? FontWeight.bold : FontWeight.normal,
           ),
         ),
-        subtitle: lastMessage != null ? _buildLastMessage(lastMessage, hasUnread) : null,
+        subtitle: lastMessage != null
+            ? _buildLastMessage(lastMessage, hasUnread)
+            : null,
         trailing: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.end,
@@ -196,11 +199,13 @@ class _ChatListScreenState extends State<ChatListScreen> {
     final colorIndex = name.hashCode.abs() % _avatarColors.length;
     final color = _avatarColors[colorIndex];
 
-    if (thumbnailData != null && thumbnailData is List<int> && thumbnailData.isNotEmpty) {
+    if (thumbnailData != null &&
+        thumbnailData is List<int> &&
+        thumbnailData.isNotEmpty) {
       return CircleAvatar(
         radius: 28,
         backgroundImage: MemoryImage(
-          thumbnailData is List<int> ? List<int>.from(thumbnailData) as dynamic : thumbnailData,
+          List<int>.from(thumbnailData) as dynamic,
         ),
       );
     }

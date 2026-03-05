@@ -80,7 +80,7 @@ class _AppShellState extends State<AppShell> {
 
   bool _isLoadingProfile(ProfileState state) {
     return state.status == ProfileStatus.initial ||
-           state.status == ProfileStatus.loading;
+        state.status == ProfileStatus.loading;
   }
 
   Widget _buildSetupFlow(BuildContext context) {
@@ -105,8 +105,8 @@ class _AppShellState extends State<AppShell> {
 
   bool _needsBlePermissions(BleConnectionStatus status) {
     return status == BleConnectionStatus.initial ||
-           status == BleConnectionStatus.noPermission ||
-           status == BleConnectionStatus.disabled;
+        status == BleConnectionStatus.noPermission ||
+        status == BleConnectionStatus.disabled;
   }
 }
 

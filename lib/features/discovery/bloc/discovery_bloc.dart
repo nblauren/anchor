@@ -10,6 +10,15 @@ import '../../../services/ble/ble.dart' as ble;
 import 'discovery_event.dart';
 import 'discovery_state.dart';
 
+/// Private event used to apply debounced state updates safely via add()
+class _ApplyDebouncedState extends DiscoveryEvent {
+  const _ApplyDebouncedState(this.newState);
+  final DiscoveryState newState;
+
+  @override
+  List<Object?> get props => [newState];
+}
+
 class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
   DiscoveryBloc({
     required PeerRepository peerRepository,
@@ -28,6 +37,7 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
     on<RefreshPeers>(_onRefreshPeers);
     on<LoadMockPeers>(_onLoadMockPeers);
     on<ClearDiscoveryError>(_onClearError);
+    on<_ApplyDebouncedState>((event, emit) => emit(event.newState));
 
     // Subscribe to BLE peer discovery stream
     _peerDiscoveredSubscription = _bleService.peerDiscoveredStream.listen(
@@ -144,7 +154,8 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
 
       // Update state with debouncing
       _scheduleUpdate(emit, () {
-        final existingIndex = state.peers.indexWhere((p) => p.peerId == event.peerId);
+        final existingIndex =
+            state.peers.indexWhere((p) => p.peerId == event.peerId);
         List<DiscoveredPeer> updatedPeers;
 
         if (existingIndex >= 0) {
@@ -160,7 +171,8 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
         );
       });
     } catch (e) {
-      Logger.error('Failed to process discovered peer', e, null, 'DiscoveryBloc');
+      Logger.error(
+          'Failed to process discovered peer', e, null, 'DiscoveryBloc');
     }
   }
 
@@ -272,7 +284,8 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
       await _bleService.startScanning();
       emit(state.copyWith(isScanning: true));
     } catch (e) {
-      Logger.warning('Could not start BLE scan during refresh: $e', 'DiscoveryBloc');
+      Logger.warning(
+          'Could not start BLE scan during refresh: $e', 'DiscoveryBloc');
     }
 
     // Load existing peers from database
@@ -339,29 +352,32 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
     emit(state.copyWith(errorMessage: null));
   }
 
-  /// Debounce UI updates to batch rapid changes
+  /// Debounce UI updates to batch rapid changes.
+  /// Uses add() for the timer callback to avoid calling emit after the
+  /// event handler has completed (which would throw an AssertionError).
   void _scheduleUpdate(
     Emitter<DiscoveryState> emit,
     DiscoveryState Function() stateBuilder,
   ) {
+    // Emit immediately for the first update while the handler is still active
+    if (state.status != DiscoveryStatus.loaded) {
+      emit(stateBuilder());
+      return;
+    }
+
     _pendingUpdate = true;
     _debounceTimer?.cancel();
     _debounceTimer = Timer(const Duration(milliseconds: 500), () {
-      if (_pendingUpdate) {
-        emit(stateBuilder());
+      if (_pendingUpdate && !isClosed) {
+        add(_ApplyDebouncedState(stateBuilder()));
         _pendingUpdate = false;
       }
     });
-
-    // Also emit immediately for first update
-    if (state.status != DiscoveryStatus.loaded) {
-      emit(stateBuilder());
-    }
   }
 
   /// Generate mock peer data for testing
   List<DiscoveredPeer> _generateMockPeers() {
-    final uuid = const Uuid();
+    const uuid = Uuid();
     final random = Random();
     final now = DateTime.now();
 

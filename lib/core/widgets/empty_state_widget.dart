@@ -36,13 +36,13 @@ class EmptyStateWidget extends StatelessWidget {
               width: 120,
               height: 120,
               decoration: BoxDecoration(
-                color: AppTheme.primaryColor.withOpacity(0.1),
+                color: AppTheme.primaryColor.withValues(alpha: 0.1),
                 shape: BoxShape.circle,
               ),
               child: Icon(
                 icon,
                 size: 64,
-                color: AppTheme.primaryColor.withOpacity(0.6),
+                color: AppTheme.primaryColor.withValues(alpha: 0.6),
               ),
             ),
             const SizedBox(height: 24),
@@ -124,7 +124,8 @@ class EmptyListState extends StatelessWidget {
   }
 
   /// Wrap in a scrollable for pull-to-refresh support
-  Widget inScrollView(BuildContext context, {Future<void> Function()? onRefresh}) {
+  Widget inScrollView(BuildContext context,
+      {Future<void> Function()? onRefresh}) {
     if (onRefresh != null) {
       return RefreshIndicator(
         onRefresh: onRefresh,
@@ -143,7 +144,7 @@ class EmptyListState extends StatelessWidget {
                     onAction: onAction,
                   ),
                   if (showPullHint) ...[
-                    Row(
+                    const Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Icon(
@@ -151,7 +152,7 @@ class EmptyListState extends StatelessWidget {
                           size: 16,
                           color: AppTheme.textHint,
                         ),
-                        const SizedBox(width: 8),
+                        SizedBox(width: 8),
                         Text(
                           'Pull down to refresh',
                           style: TextStyle(

@@ -31,7 +31,6 @@ class ImageService {
   final Uuid _uuid = const Uuid();
 
   // Thumbnail constraints for BLE broadcast
-  static const int _thumbnailMaxSize = 100; // 100x100 px
   static const int _thumbnailMaxBytes = 15 * 1024; // 15KB
   static const int _thumbnailInitialQuality = 70;
 
@@ -96,7 +95,7 @@ class ImageService {
 
       // Generate and save thumbnail
       final thumbnailBytes = await _generateThumbnail(imageFile);
-      final thumbnailPath = '${thumbsDir.path}/$fileId_thumb.jpg';
+      final thumbnailPath = '${thumbsDir.path}/${fileId}_thumb.jpg';
       await File(thumbnailPath).writeAsBytes(thumbnailBytes);
 
       Logger.info(
@@ -122,7 +121,7 @@ class ImageService {
       rawBytes: await imageFile.readAsBytes(),
     );
 
-    final config = Configuration(
+    const config = Configuration(
       outputType: ImageOutputType.jpg,
       quality: AppConstants.imageQuality,
     );
@@ -174,7 +173,7 @@ class ImageService {
       rawBytes: inputBytes,
     );
 
-    final config = Configuration(
+    const config = Configuration(
       outputType: ImageOutputType.jpg,
       quality: 10,
     );
@@ -275,7 +274,7 @@ class ImageService {
         rawBytes: inputBytes,
       );
 
-      final config = Configuration(
+      const config = Configuration(
         outputType: ImageOutputType.jpg,
         quality: 60,
       );
@@ -346,7 +345,8 @@ class ImageService {
         await for (final entity in thumbsDir.list()) {
           if (entity is File && !validPaths.contains(entity.path)) {
             await entity.delete();
-            Logger.info('Cleaned up orphaned thumbnail: ${entity.path}', 'Image');
+            Logger.info(
+                'Cleaned up orphaned thumbnail: ${entity.path}', 'Image');
           }
         }
       }

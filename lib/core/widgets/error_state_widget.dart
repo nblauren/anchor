@@ -43,7 +43,7 @@ class ErrorStateWidget extends StatelessWidget {
               Icon(
                 icon,
                 size: 64,
-                color: AppTheme.errorColor,
+                color: AppTheme.error,
               ),
               const SizedBox(height: 16),
             ],
@@ -57,7 +57,7 @@ class ErrorStateWidget extends StatelessWidget {
             Text(
               message,
               textAlign: TextAlign.center,
-              style: TextStyle(color: AppTheme.textSecondary),
+              style: const TextStyle(color: AppTheme.textSecondary),
             ),
             if (onRetry != null) ...[
               const SizedBox(height: 24),
@@ -93,24 +93,24 @@ class ErrorBanner extends StatelessWidget {
       margin: const EdgeInsets.all(16),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: AppTheme.errorColor.withOpacity(0.1),
+        color: AppTheme.error.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: AppTheme.errorColor.withOpacity(0.3),
+          color: AppTheme.error.withValues(alpha: 0.3),
         ),
       ),
       child: Row(
         children: [
-          Icon(
+          const Icon(
             Icons.warning_amber_rounded,
-            color: AppTheme.errorColor,
+            color: AppTheme.error,
             size: 20,
           ),
           const SizedBox(width: 12),
           Expanded(
             child: Text(
               message,
-              style: TextStyle(
+              style: const TextStyle(
                 color: AppTheme.textPrimary,
                 fontSize: 14,
               ),
@@ -120,7 +120,7 @@ class ErrorBanner extends StatelessWidget {
             TextButton(
               onPressed: onRetry,
               style: TextButton.styleFrom(
-                foregroundColor: AppTheme.errorColor,
+                foregroundColor: AppTheme.error,
                 padding: const EdgeInsets.symmetric(horizontal: 8),
                 minimumSize: Size.zero,
               ),

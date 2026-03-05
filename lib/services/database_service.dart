@@ -84,8 +84,8 @@ class DatabaseService {
       await _database.delete(_database.conversations).go();
       await _database.delete(_database.blockedUsers).go();
       await _database.delete(_database.discoveredPeers).go();
-      await _database.delete(_database.profilePhotos).go();
-      await _database.delete(_database.userProfile).go();
+      await _database.delete(_database.userPhotos).go();
+      await _database.delete(_database.userProfiles).go();
     });
 
     Logger.info('DatabaseService: All data cleared', 'Database');

@@ -90,7 +90,7 @@ class SettingsScreen extends StatelessWidget {
             title: 'Clear All Data',
             subtitle: 'Delete profile and all app data',
             onTap: () => _showClearAllDialog(context),
-            textColor: AppTheme.errorColor,
+            textColor: AppTheme.error,
           ),
 
           const Divider(height: 32),
@@ -133,7 +133,7 @@ class SettingsScreen extends StatelessWidget {
                 Icon(
                   Icons.anchor,
                   size: 32,
-                  color: AppTheme.primaryColor.withOpacity(0.5),
+                  color: AppTheme.primaryColor.withValues(alpha: 0.5),
                 ),
                 const SizedBox(height: 8),
                 Text(
@@ -187,7 +187,7 @@ class SettingsScreen extends StatelessWidget {
       leading: Container(
         padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
-          color: (textColor ?? AppTheme.primaryColor).withOpacity(0.1),
+          color: (textColor ?? AppTheme.primaryColor).withValues(alpha: 0.1),
           borderRadius: BorderRadius.circular(8),
         ),
         child: Icon(
@@ -239,7 +239,7 @@ class SettingsScreen extends StatelessWidget {
       leading: Container(
         padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
-          color: AppTheme.primaryColor.withOpacity(0.1),
+          color: AppTheme.primaryColor.withValues(alpha: 0.1),
           borderRadius: BorderRadius.circular(8),
         ),
         child: Icon(
@@ -364,7 +364,7 @@ class SettingsScreen extends StatelessWidget {
                 Navigator.of(context).popUntil((route) => route.isFirst);
               }
             },
-            style: TextButton.styleFrom(foregroundColor: AppTheme.errorColor),
+            style: TextButton.styleFrom(foregroundColor: AppTheme.error),
             child: const Text('Delete Everything'),
           ),
         ],

@@ -6,7 +6,6 @@ import '../../../injection.dart';
 import '../../chat/bloc/chat_bloc.dart';
 import '../../chat/screens/chat_screen.dart';
 import '../../profile/bloc/profile_bloc.dart';
-import '../../profile/bloc/profile_state.dart';
 import '../bloc/discovery_bloc.dart';
 import '../bloc/discovery_event.dart';
 import '../bloc/discovery_state.dart';
@@ -27,7 +26,6 @@ class PeerDetailScreen extends StatefulWidget {
 class _PeerDetailScreenState extends State<PeerDetailScreen> {
   late DiscoveredPeer _peer;
   final PageController _pageController = PageController();
-  int _currentPhotoIndex = 0;
 
   @override
   void initState() {
@@ -61,7 +59,7 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
               Navigator.pop(context);
               _blockPeer();
             },
-            style: TextButton.styleFrom(foregroundColor: AppTheme.errorColor),
+            style: TextButton.styleFrom(foregroundColor: AppTheme.error),
             child: const Text('Block'),
           ),
         ],
@@ -128,7 +126,7 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
                     value: 'block',
                     child: Row(
                       children: [
-                        Icon(Icons.block, color: AppTheme.errorColor),
+                        Icon(Icons.block, color: AppTheme.error),
                         SizedBox(width: 12),
                         Text('Block user'),
                       ],
@@ -154,7 +152,10 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
                           _peer.age != null
                               ? '${_peer.name}, ${_peer.age}'
                               : _peer.name,
-                          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                          style: Theme.of(context)
+                              .textTheme
+                              .headlineSmall
+                              ?.copyWith(
                                 fontWeight: FontWeight.bold,
                               ),
                         ),
@@ -241,9 +242,7 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    _peer.bio?.isNotEmpty == true
-                        ? _peer.bio!
-                        : 'No bio yet',
+                    _peer.bio?.isNotEmpty == true ? _peer.bio! : 'No bio yet',
                     style: TextStyle(
                       color: _peer.bio?.isNotEmpty == true
                           ? AppTheme.textPrimary
@@ -276,8 +275,8 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
                         child: OutlinedButton(
                           onPressed: _showBlockConfirmation,
                           style: OutlinedButton.styleFrom(
-                            foregroundColor: AppTheme.errorColor,
-                            side: const BorderSide(color: AppTheme.errorColor),
+                            foregroundColor: AppTheme.error,
+                            side: const BorderSide(color: AppTheme.error),
                             padding: const EdgeInsets.symmetric(vertical: 14),
                           ),
                           child: const Icon(Icons.block),
@@ -299,7 +298,8 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
   Widget _buildPhotoCarousel() {
     // For now, we only have thumbnail data (single image)
     // In future, this would show multiple photos received via BLE
-    final hasPhoto = _peer.thumbnailData != null && _peer.thumbnailData!.isNotEmpty;
+    final hasPhoto =
+        _peer.thumbnailData != null && _peer.thumbnailData!.isNotEmpty;
 
     if (!hasPhoto) {
       return _buildPlaceholder();
@@ -312,9 +312,7 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
         PageView.builder(
           controller: _pageController,
           onPageChanged: (index) {
-            setState(() {
-              _currentPhotoIndex = index;
-            });
+            // TODO: Update photo indicator when multiple photos supported
           },
           itemCount: 1, // Would be photos.length when we have multiple
           itemBuilder: (context, index) {

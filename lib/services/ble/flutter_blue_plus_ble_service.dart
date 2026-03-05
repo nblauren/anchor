@@ -1,11 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:flutter_ble_peripheral/flutter_ble_peripheral.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:uuid/uuid.dart';
 
 import '../../core/utils/logger.dart';
 import 'ble_config.dart';
@@ -13,23 +14,37 @@ import 'ble_models.dart';
 import 'ble_service_interface.dart';
 import 'photo_chunker.dart';
 
-/// BLE service implementation using flutter_blue_plus for direct peer-to-peer communication
+/// BLE service implementation using flutter_blue_plus (central/scan) +
+/// flutter_ble_peripheral (peripheral/advertise) for direct peer-to-peer
+/// communication.
+///
+/// **Discovery approach:**
+///   - Each device advertises the Anchor service UUID so scanners can filter.
+///   - On Android: profile data is encoded in manufacturer data.
+///   - On iOS: only service UUID and local name are advertised (iOS drops
+///     manufacturer data from CBPeripheralManager advertisements).
+///   - The scanner uses `withServices` on iOS (required for overflow area
+///     discovery) and no filter on Android (128-bit UUID may overflow to
+///     scan response which the OS filter ignores).
 class FlutterBluePlusBleService implements BleServiceInterface {
   FlutterBluePlusBleService({
     required this.config,
-  })  : _photoChunker = PhotoChunker(chunkSize: config.photoChunkSize),
-        _photoReassembler = PhotoReassembler();
+  })  : _photoReassembler = PhotoReassembler(),
+        _peripheral = FlutterBlePeripheral();
 
   final BleConfig config;
-  final PhotoChunker _photoChunker;
   final PhotoReassembler _photoReassembler;
-  final _uuid = const Uuid();
+  final FlutterBlePeripheral _peripheral;
 
   // UUIDs for Anchor BLE service
-  static final _serviceUuid = Guid('0000fff0-0000-1000-8000-00805f9b34fb');
-  static final _profileMetadataChar = Guid('0000fff1-0000-1000-8000-00805f9b34fb');
-  static final _thumbnailDataChar = Guid('0000fff2-0000-1000-8000-00805f9b34fb');
+  static const _serviceUuidStr = '0000fff0-0000-1000-8000-00805f9b34fb';
+  static final _serviceUuid = Guid(_serviceUuidStr);
   static final _messagingChar = Guid('0000fff3-0000-1000-8000-00805f9b34fb');
+
+  // Manufacturer company ID — 0xFFFF is reserved for internal/testing use.
+  static const _manufacturerId = 0xFFFF;
+  // Magic bytes that prefix manufacturer data so we can identify Anchor payloads.
+  static const _anchorMagic = [0xAC, 0x01]; // "Anchor v1"
 
   // Status
   BleStatus _status = BleStatus.disabled;
@@ -39,28 +54,30 @@ class FlutterBluePlusBleService implements BleServiceInterface {
 
   // Stream controllers
   final _statusController = StreamController<BleStatus>.broadcast();
-  final _peerDiscoveredController = StreamController<DiscoveredPeer>.broadcast();
+  final _peerDiscoveredController =
+      StreamController<DiscoveredPeer>.broadcast();
   final _peerLostController = StreamController<String>.broadcast();
-  final _messageReceivedController = StreamController<ReceivedMessage>.broadcast();
-  final _photoProgressController = StreamController<PhotoTransferProgress>.broadcast();
+  final _messageReceivedController =
+      StreamController<ReceivedMessage>.broadcast();
+  final _photoProgressController =
+      StreamController<PhotoTransferProgress>.broadcast();
   final _photoReceivedController = StreamController<ReceivedPhoto>.broadcast();
 
   // Peer tracking
   final Map<String, DiscoveredPeer> _visiblePeers = {};
   final Map<String, Timer> _peerTimeoutTimers = {};
-  final Map<String, BluetoothDevice> _discoveredDevices = {};
   final Map<String, BluetoothDevice> _connectedDevices = {};
 
   // Connection management
   final Map<String, StreamSubscription> _connectionSubscriptions = {};
-  static const _maxConnections = 5;
-  static const _connectionTimeout = Duration(seconds: 30);
-  static const _idleTimeout = Duration(seconds: 60);
 
-  // Current profile broadcast data
-  BroadcastPayload? _currentProfile;
+  // Pending broadcast payload (for retry when peripheral becomes ready)
+  BroadcastPayload? _pendingPayload;
 
-  // Subscriptions
+  // Scan lifecycle
+  Timer? _scanRestartTimer;
+  static const _scanDuration = Duration(seconds: 8);
+  static const _scanPause = Duration(seconds: 4);
   StreamSubscription? _scanSubscription;
   StreamSubscription? _adapterStateSubscription;
 
@@ -73,26 +90,23 @@ class FlutterBluePlusBleService implements BleServiceInterface {
     Logger.info('FlutterBluePlusBleService: Initializing...', 'BLE');
 
     try {
-      // Check if Bluetooth is available
-      if (!await FlutterBluePlus.isAvailable) {
-        _setStatus(BleStatus.unavailable);
+      if (!await FlutterBluePlus.isSupported) {
+        _setStatus(BleStatus.disabled);
         throw StateError('Bluetooth is not available on this device');
       }
 
-      // Listen to adapter state changes
-      _adapterStateSubscription = FlutterBluePlus.adapterState.listen((state) {
-        _onAdapterStateChanged(state);
-      });
+      _adapterStateSubscription =
+          FlutterBluePlus.adapterState.listen(_onAdapterStateChanged);
 
       _isInitialized = true;
 
-      // Check initial state
       final adapterState = await FlutterBluePlus.adapterState.first;
       _onAdapterStateChanged(adapterState);
 
       Logger.info('FlutterBluePlusBleService: Initialized successfully', 'BLE');
     } catch (e) {
-      Logger.error('FlutterBluePlusBleService: Initialization failed', e, null, 'BLE');
+      Logger.error(
+          'FlutterBluePlusBleService: Initialization failed', e, null, 'BLE');
       _setStatus(BleStatus.error);
       rethrow;
     }
@@ -104,10 +118,7 @@ class FlutterBluePlusBleService implements BleServiceInterface {
     Logger.info('FlutterBluePlusBleService: Starting...', 'BLE');
 
     try {
-      // Start scanning
       await startScanning();
-
-      // Broadcasting starts when broadcastProfile is called
       _setStatus(BleStatus.ready);
     } catch (e) {
       Logger.error('FlutterBluePlusBleService: Start failed', e, null, 'BLE');
@@ -122,17 +133,15 @@ class FlutterBluePlusBleService implements BleServiceInterface {
     await stopScanning();
     await stopBroadcasting();
 
-    // Disconnect all devices
     for (final device in _connectedDevices.values) {
       try {
         await device.disconnect();
       } catch (e) {
-        Logger.error('FlutterBluePlusBleService: Disconnect failed', e, null, 'BLE');
+        Logger.error(
+            'FlutterBluePlusBleService: Disconnect failed', e, null, 'BLE');
       }
     }
-
     _connectedDevices.clear();
-    _discoveredDevices.clear();
     _setStatus(BleStatus.ready);
   }
 
@@ -145,13 +154,13 @@ class FlutterBluePlusBleService implements BleServiceInterface {
     for (final timer in _peerTimeoutTimers.values) {
       timer.cancel();
     }
-
     for (final sub in _connectionSubscriptions.values) {
       await sub.cancel();
     }
 
     await _scanSubscription?.cancel();
     await _adapterStateSubscription?.cancel();
+    await _peripheralStateSubscription?.cancel();
 
     await _statusController.close();
     await _peerDiscoveredController.close();
@@ -166,12 +175,14 @@ class FlutterBluePlusBleService implements BleServiceInterface {
 
   void _ensureInitialized() {
     if (!_isInitialized) {
-      throw StateError('FlutterBluePlusBleService not initialized. Call initialize() first.');
+      throw StateError(
+          'FlutterBluePlusBleService not initialized. Call initialize() first.');
     }
   }
 
   void _onAdapterStateChanged(BluetoothAdapterState state) {
-    Logger.info('FlutterBluePlusBleService: Adapter state changed to ${state.name}', 'BLE');
+    Logger.info(
+        'FlutterBluePlusBleService: Adapter state: ${state.name}', 'BLE');
 
     switch (state) {
       case BluetoothAdapterState.on:
@@ -185,7 +196,7 @@ class FlutterBluePlusBleService implements BleServiceInterface {
         _isBroadcasting = false;
         break;
       case BluetoothAdapterState.unavailable:
-        _setStatus(BleStatus.unavailable);
+        _setStatus(BleStatus.disabled);
         break;
       case BluetoothAdapterState.unauthorized:
         _setStatus(BleStatus.noPermission);
@@ -205,13 +216,14 @@ class FlutterBluePlusBleService implements BleServiceInterface {
 
   @override
   Future<bool> isBluetoothAvailable() async {
-    return await FlutterBluePlus.isAvailable;
+    return await FlutterBluePlus.isSupported;
   }
 
   @override
   Future<bool> isBluetoothEnabled() async {
     final state = await FlutterBluePlus.adapterState.first;
-    return state == BluetoothAdapterState.on;
+    return state == BluetoothAdapterState.on ||
+        state == BluetoothAdapterState.unknown;
   }
 
   @override
@@ -220,7 +232,6 @@ class FlutterBluePlusBleService implements BleServiceInterface {
       final permissions = <Permission>[];
 
       if (Platform.isAndroid) {
-        // Android 12+ requires new permissions
         if (await Permission.bluetoothScan.isDenied) {
           permissions.add(Permission.bluetoothScan);
         }
@@ -232,19 +243,17 @@ class FlutterBluePlusBleService implements BleServiceInterface {
         }
       }
 
-      // Location permission required for BLE on both platforms
       if (await Permission.locationWhenInUse.isDenied) {
         permissions.add(Permission.locationWhenInUse);
       }
 
-      if (permissions.isEmpty) {
-        return true;
-      }
+      if (permissions.isEmpty) return true;
 
       final statuses = await permissions.request();
       return statuses.values.every((status) => status.isGranted);
     } catch (e) {
-      Logger.error('FlutterBluePlusBleService: Permission request failed', e, null, 'BLE');
+      Logger.error('FlutterBluePlusBleService: Permission request failed', e,
+          null, 'BLE');
       return false;
     }
   }
@@ -256,8 +265,9 @@ class FlutterBluePlusBleService implements BleServiceInterface {
           await Permission.bluetoothConnect.isGranted &&
           await Permission.locationWhenInUse.isGranted;
     } else if (Platform.isIOS) {
-      return await Permission.bluetooth.isGranted &&
-          await Permission.locationWhenInUse.isGranted;
+      final adapterState = await FlutterBluePlus.adapterState.first;
+      return adapterState != BluetoothAdapterState.unauthorized &&
+          adapterState != BluetoothAdapterState.unknown;
     }
     return false;
   }
@@ -274,35 +284,220 @@ class FlutterBluePlusBleService implements BleServiceInterface {
   @override
   Future<void> broadcastProfile(BroadcastPayload payload) async {
     _ensureInitialized();
-    Logger.info('FlutterBluePlusBleService: Broadcasting profile for ${payload.name}', 'BLE');
-
-    _currentProfile = payload;
-    _isBroadcasting = true;
-
-    // Note: flutter_blue_plus doesn't support peripheral mode easily on all devices
-    // This is a limitation - we'll rely on connections from scanning
-    // Real advertising would require platform channels or different approach
+    _pendingPayload = payload;
 
     Logger.info(
-      'FlutterBluePlusBleService: Profile cached for connections (${payload.name})',
-      'BLE',
-    );
+        'FlutterBluePlusBleService: Broadcasting profile for ${payload.name} (platform: ${Platform.operatingSystem})',
+        'BLE');
+
+    // Wait for peripheral manager to be ready (poweredOn).
+    // On iOS, CBPeripheralManager silently drops startAdvertising calls
+    // if it hasn't reached poweredOn yet.
+    final isReady = await _peripheral.isBluetoothOn;
+    if (!isReady) {
+      Logger.warning(
+        'FlutterBluePlusBleService: Peripheral not ready yet, will retry when ready',
+        'BLE',
+      );
+      _startPeripheralStateListener();
+      return;
+    }
+
+    await _startAdvertising(payload);
+  }
+
+  /// Actually start the BLE advertisement.
+  Future<void> _startAdvertising(BroadcastPayload payload) async {
+    try {
+      if (_isBroadcasting) {
+        await _peripheral.stop();
+        _isBroadcasting = false;
+      }
+
+      if (Platform.isIOS) {
+        // iOS: CBPeripheralManager silently drops manufacturer data.
+        // Only service UUID and local name are supported.
+        final compactName = _encodeLocalName(payload);
+
+        Logger.info(
+          'FlutterBluePlusBleService: iOS advertising with localName="$compactName", serviceUuid=$_serviceUuidStr',
+          'BLE',
+        );
+
+        await _peripheral.start(
+          advertiseData: AdvertiseData(
+            serviceUuid: _serviceUuidStr,
+            localName: compactName,
+          ),
+        );
+      } else {
+        // Android: use manufacturer data for full profile encoding.
+        final mfgData = _encodeManufacturerData(payload);
+
+        Logger.info(
+          'FlutterBluePlusBleService: Android advertising with ${mfgData.length} bytes mfg data',
+          'BLE',
+        );
+
+        await _peripheral.start(
+          advertiseData: AdvertiseData(
+            serviceUuid: _serviceUuidStr,
+            manufacturerId: _manufacturerId,
+            manufacturerData: mfgData,
+            includeDeviceName: false,
+          ),
+          advertiseSettings: AdvertiseSettings(
+            advertiseMode: AdvertiseMode.advertiseModeBalanced,
+            txPowerLevel: AdvertiseTxPower.advertiseTxPowerMedium,
+            connectable: true,
+            timeout: 0,
+          ),
+        );
+      }
+
+      _isBroadcasting = true;
+
+      // Verify advertising actually started on iOS
+      final isAdvertising = await _peripheral.isAdvertising;
+      Logger.info(
+        'FlutterBluePlusBleService: Advertising started. isAdvertising=$isAdvertising',
+        'BLE',
+      );
+    } catch (e, stack) {
+      Logger.error(
+          'FlutterBluePlusBleService: Advertising FAILED', e, stack, 'BLE');
+      _isBroadcasting = false;
+    }
+  }
+
+  /// Listen for peripheral manager state changes to retry advertising
+  /// when Bluetooth becomes ready.
+  StreamSubscription? _peripheralStateSubscription;
+
+  void _startPeripheralStateListener() {
+    _peripheralStateSubscription?.cancel();
+    _peripheralStateSubscription =
+        _peripheral.onPeripheralStateChanged?.listen((state) {
+      Logger.info(
+        'FlutterBluePlusBleService: Peripheral state changed: $state',
+        'BLE',
+      );
+      if (state == PeripheralState.idle && _pendingPayload != null) {
+        // idle = poweredOn and ready
+        _startAdvertising(_pendingPayload!);
+        _peripheralStateSubscription?.cancel();
+        _peripheralStateSubscription = null;
+      }
+    });
   }
 
   @override
   Future<void> stopBroadcasting() async {
     Logger.info('FlutterBluePlusBleService: Stopped broadcasting', 'BLE');
+    try {
+      await _peripheral.stop();
+    } catch (e) {
+      Logger.error(
+          'FlutterBluePlusBleService: Stop advertising failed', e, null, 'BLE');
+    }
     _isBroadcasting = false;
-    _currentProfile = null;
   }
 
   @override
   bool get isBroadcasting => _isBroadcasting;
 
+  /// Encode a compact local name for iOS advertisements.
+  /// Format: "A:<name>:<age>" — kept short to fit BLE advertisement limits.
+  /// "A:" prefix identifies this as an Anchor device.
+  String _encodeLocalName(BroadcastPayload payload) {
+    final name =
+        payload.name.length > 8 ? payload.name.substring(0, 8) : payload.name;
+    final age = payload.age ?? 0;
+    return 'A:$name:$age';
+  }
+
+  /// Decode a compact local name from iOS advertisements.
+  /// Returns (name, age) or null if not an Anchor local name.
+  ({String name, int? age})? _decodeLocalName(String advName) {
+    if (!advName.startsWith('A:')) return null;
+    final parts = advName.split(':');
+    if (parts.length < 3) return null;
+    final name = parts[1];
+    final age = int.tryParse(parts[2]);
+    return (
+      name: name.isEmpty ? 'Anchor User' : name,
+      age: age == 0 ? null : age
+    );
+  }
+
+  /// Encode profile as manufacturer data (Android only).
+  ///
+  /// Format: [magic:2][age:1][nameLen:1][name:N][userId:16]
+  Uint8List _encodeManufacturerData(BroadcastPayload payload) {
+    final nameBytes =
+        utf8.encode(payload.name.substring(0, min(payload.name.length, 8)));
+
+    final userIdHex = payload.userId.replaceAll('-', '');
+    final userIdBytes = Uint8List(16);
+    for (int i = 0; i < 16; i++) {
+      userIdBytes[i] =
+          int.parse(userIdHex.substring(i * 2, i * 2 + 2), radix: 16);
+    }
+
+    final result = BytesBuilder();
+    result.add(_anchorMagic); // 2 bytes magic
+    result.addByte(payload.age ?? 0); // 1 byte age
+    result.addByte(nameBytes.length); // 1 byte name length
+    result.add(nameBytes); // N bytes name
+    result.add(userIdBytes); // 16 bytes userId
+    return result.toBytes(); // Total: 20 + nameLen (max 28)
+  }
+
+  /// Decode profile from manufacturer data (Android advertisers).
+  DiscoveredPeer? _decodeManufacturerData(
+      int companyId, List<int> bytes, int rssi) {
+    if (companyId != _manufacturerId) return null;
+    if (bytes.length < 20) return null;
+    if (bytes[0] != _anchorMagic[0] || bytes[1] != _anchorMagic[1]) {
+      return null;
+    }
+
+    try {
+      final age = bytes[2] == 0 ? null : bytes[2] as int?;
+      final nameLen = bytes[3];
+      if (4 + nameLen + 16 > bytes.length) return null;
+
+      final name = utf8.decode(bytes.sublist(4, 4 + nameLen));
+      final userIdBytes = bytes.sublist(4 + nameLen, 4 + nameLen + 16);
+      final userId = _bytesToUuid(userIdBytes);
+
+      return DiscoveredPeer(
+        peerId: userId,
+        name: name.isEmpty ? 'Anchor User' : name,
+        age: age,
+        bio: null,
+        thumbnailBytes: null,
+        rssi: rssi,
+        timestamp: DateTime.now(),
+      );
+    } catch (e) {
+      Logger.error('FlutterBluePlusBleService: Manufacturer data decode failed',
+          e, null, 'BLE');
+      return null;
+    }
+  }
+
+  String _bytesToUuid(List<int> bytes) {
+    final hex = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+    return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-'
+        '${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20)}';
+  }
+
   // ==================== Discovery ====================
 
   @override
-  Stream<DiscoveredPeer> get peerDiscoveredStream => _peerDiscoveredController.stream;
+  Stream<DiscoveredPeer> get peerDiscoveredStream =>
+      _peerDiscoveredController.stream;
 
   @override
   Stream<String> get peerLostStream => _peerLostController.stream;
@@ -312,38 +507,71 @@ class FlutterBluePlusBleService implements BleServiceInterface {
     if (_isScanning) return;
     _ensureInitialized();
 
-    Logger.info('FlutterBluePlusBleService: Starting scan...', 'BLE');
+    Logger.info('FlutterBluePlusBleService: Starting periodic scan...', 'BLE');
+
+    _isScanning = true;
+    _setStatus(BleStatus.scanning);
+
+    // Set up the scan result listener once.
+    await _scanSubscription?.cancel();
+    _scanSubscription = FlutterBluePlus.onScanResults.listen(
+      (results) {
+        Logger.info(
+          'FlutterBluePlusBleService: onScanResults fired with ${results.length} result(s)',
+          'BLE',
+        );
+        for (final result in results) {
+          Logger.info(
+            'FlutterBluePlusBleService: Scan result: '
+            'name="${result.advertisementData.advName}", '
+            'remoteId=${result.device.remoteId}, '
+            'serviceUuids=${result.advertisementData.serviceUuids.map((u) => u.toString()).toList()}, '
+            'mfgData=${result.advertisementData.manufacturerData.keys.toList()}, '
+            'rssi=${result.rssi}',
+            'BLE',
+          );
+          _onDeviceDiscovered(result);
+        }
+      },
+      onError: (e) {
+        Logger.error('FlutterBluePlusBleService: Scan error', e, null, 'BLE');
+      },
+    );
+
+    // Run the first scan cycle immediately.
+    _runScanCycle();
+  }
+
+  /// One scan cycle: scan for [_scanDuration], pause for [_scanPause], repeat.
+  void _runScanCycle() async {
+    if (!_isScanning) return;
 
     try {
-      // Cancel existing scan
-      await _scanSubscription?.cancel();
+      Logger.info('FlutterBluePlusBleService: Scan cycle starting...', 'BLE');
 
-      _isScanning = true;
-      _setStatus(BleStatus.scanning);
-
-      // Start scanning for devices with our service UUID
-      _scanSubscription = FlutterBluePlus.onScanResults.listen(
-        (results) {
-          for (final result in results) {
-            _onDeviceDiscovered(result);
-          }
-        },
-        onError: (e) {
-          Logger.error('FlutterBluePlusBleService: Scan error', e, null, 'BLE');
-        },
-      );
-
+      // Don't use withServices filter — on Android, 128-bit UUIDs may
+      // overflow to scan response which the OS filter ignores. On iOS,
+      // the filter can also miss devices if advertising hasn't fully
+      // started. We identify Anchor devices in _onDeviceDiscovered.
       await FlutterBluePlus.startScan(
-        withServices: [_serviceUuid],
-        timeout: const Duration(seconds: 10),
+        timeout: _scanDuration,
         androidUsesFineLocation: true,
       );
 
-      Logger.info('FlutterBluePlusBleService: Scan started', 'BLE');
+      // startScan returns after the timeout. Schedule the next cycle.
+      if (_isScanning) {
+        _scanRestartTimer?.cancel();
+        _scanRestartTimer = Timer(_scanPause, _runScanCycle);
+      }
     } catch (e) {
-      Logger.error('FlutterBluePlusBleService: Scan start failed', e, null, 'BLE');
-      _isScanning = false;
-      rethrow;
+      Logger.error(
+          'FlutterBluePlusBleService: Scan cycle failed', e, null, 'BLE');
+
+      // Retry after pause.
+      if (_isScanning) {
+        _scanRestartTimer?.cancel();
+        _scanRestartTimer = Timer(_scanPause, _runScanCycle);
+      }
     }
   }
 
@@ -353,167 +581,87 @@ class FlutterBluePlusBleService implements BleServiceInterface {
 
     Logger.info('FlutterBluePlusBleService: Stopping scan...', 'BLE');
 
+    _isScanning = false;
+    _scanRestartTimer?.cancel();
+    _scanRestartTimer = null;
+
     try {
       await FlutterBluePlus.stopScan();
       await _scanSubscription?.cancel();
       _scanSubscription = null;
     } catch (e) {
-      Logger.error('FlutterBluePlusBleService: Scan stop failed', e, null, 'BLE');
+      Logger.error(
+          'FlutterBluePlusBleService: Scan stop failed', e, null, 'BLE');
     }
-
-    _isScanning = false;
   }
 
   @override
   bool get isScanning => _isScanning;
 
-  Future<void> _onDeviceDiscovered(ScanResult result) async {
+  void _onDeviceDiscovered(ScanResult result) {
     final device = result.device;
     final deviceId = device.remoteId.toString();
+    final advData = result.advertisementData;
 
-    // Skip if already processing this device
-    if (_discoveredDevices.containsKey(deviceId)) {
-      return;
+    // ---- Try manufacturer data (works when advertiser is Android) ----
+    for (final entry in advData.manufacturerData.entries) {
+      final peer = _decodeManufacturerData(entry.key, entry.value, result.rssi);
+      if (peer != null) {
+        Logger.info(
+          'FlutterBluePlusBleService: Discovered Android peer "${peer.name}" via mfg data (RSSI: ${result.rssi})',
+          'BLE',
+        );
+        _emitPeer(peer);
+        return;
+      }
     }
 
-    _discoveredDevices[deviceId] = device;
+    // ---- Check for Anchor service UUID ----
+    final hasAnchorService = advData.serviceUuids.any(
+      (uuid) => uuid.toString().toLowerCase() == _serviceUuidStr.toLowerCase(),
+    );
+
+    // ---- Check for Anchor local name prefix ("A:name:age") ----
+    // This is the primary identifier for iOS-to-iOS discovery, because
+    // flutter_ble_peripheral on iOS may not reliably include the service
+    // UUID in the advertisement packet.
+    final advName = advData.advName;
+    final decoded = advName.isNotEmpty ? _decodeLocalName(advName) : null;
+
+    // Not an Anchor device if neither marker is present
+    if (!hasAnchorService && decoded == null) return;
+
+    final name = decoded?.name ?? (advName.isNotEmpty ? advName : 'Anchor User');
+    final age = decoded?.age;
 
     Logger.info(
-      'FlutterBluePlusBleService: Discovered device ${device.platformName} (RSSI: ${result.rssi})',
+      'FlutterBluePlusBleService: Discovered peer "$name" '
+      '(advName: "$advName", hasService: $hasAnchorService, '
+      'RSSI: ${result.rssi}, deviceId: $deviceId)',
       'BLE',
     );
 
-    // Connect and read profile
-    await _connectAndReadProfile(device, result.rssi);
+    final peer = DiscoveredPeer(
+      peerId: deviceId,
+      name: name,
+      age: age,
+      bio: null,
+      thumbnailBytes: null,
+      rssi: result.rssi,
+      timestamp: DateTime.now(),
+    );
+    _emitPeer(peer);
   }
 
-  Future<void> _connectAndReadProfile(BluetoothDevice device, int rssi) async {
-    final deviceId = device.remoteId.toString();
+  void _emitPeer(DiscoveredPeer peer) {
+    _visiblePeers[peer.peerId] = peer;
+    _peerDiscoveredController.add(peer);
 
-    try {
-      // Check connection limit
-      if (_connectedDevices.length >= _maxConnections) {
-        Logger.info('FlutterBluePlusBleService: Connection limit reached, skipping ${device.platformName}', 'BLE');
-        return;
-      }
-
-      // Connect with timeout
-      await device.connect(timeout: _connectionTimeout);
-      _connectedDevices[deviceId] = device;
-
-      Logger.info('FlutterBluePlusBleService: Connected to ${device.platformName}', 'BLE');
-
-      // Discover services
-      final services = await device.discoverServices();
-
-      // Find our service
-      final service = services.where((s) => s.serviceUuid == _serviceUuid).firstOrNull;
-      if (service == null) {
-        Logger.info('FlutterBluePlusBleService: Anchor service not found on ${device.platformName}', 'BLE');
-        await device.disconnect();
-        _connectedDevices.remove(deviceId);
-        return;
-      }
-
-      // Read profile metadata
-      final metadataChar = service.characteristics
-          .where((c) => c.characteristicUuid == _profileMetadataChar)
-          .firstOrNull;
-
-      if (metadataChar == null) {
-        Logger.info('FlutterBluePlusBleService: Metadata characteristic not found', 'BLE');
-        await device.disconnect();
-        _connectedDevices.remove(deviceId);
-        return;
-      }
-
-      final metadataBytes = await metadataChar.read();
-      final metadata = jsonDecode(utf8.decode(metadataBytes)) as Map<String, dynamic>;
-
-      // Read thumbnail if available
-      Uint8List? thumbnailBytes;
-      final thumbnailChar = service.characteristics
-          .where((c) => c.characteristicUuid == _thumbnailDataChar)
-          .firstOrNull;
-
-      if (thumbnailChar != null) {
-        try {
-          thumbnailBytes = Uint8List.fromList(await thumbnailChar.read());
-        } catch (e) {
-          Logger.error('FlutterBluePlusBleService: Thumbnail read failed', e, null, 'BLE');
-        }
-      }
-
-      // Create discovered peer
-      final peer = DiscoveredPeer(
-        peerId: metadata['user_id'] as String,
-        name: metadata['name'] as String,
-        age: metadata['age'] as int?,
-        bio: metadata['bio'] as String?,
-        thumbnailBytes: thumbnailBytes,
-        rssi: rssi,
-        timestamp: DateTime.now(),
-      );
-
-      _visiblePeers[peer.peerId] = peer;
-      _peerDiscoveredController.add(peer);
-
-      // Set up peer timeout
-      _peerTimeoutTimers[peer.peerId]?.cancel();
-      _peerTimeoutTimers[peer.peerId] = Timer(
-        config.peerLostTimeout,
-        () => _onPeerLost(peer.peerId),
-      );
-
-      // Set up message subscription for this device
-      await _subscribeToMessages(device, service);
-
-      Logger.info(
-        'FlutterBluePlusBleService: Discovered peer ${peer.name} (RSSI: $rssi)',
-        'BLE',
-      );
-
-      // Disconnect after reading (or keep connected for priority peers)
-      // For now, disconnect to save resources
-      Timer(_idleTimeout, () async {
-        try {
-          await device.disconnect();
-          _connectedDevices.remove(deviceId);
-        } catch (e) {
-          Logger.error('FlutterBluePlusBleService: Disconnect failed', e, null, 'BLE');
-        }
-      });
-    } catch (e) {
-      Logger.error('FlutterBluePlusBleService: Profile read failed for ${device.platformName}', e, null, 'BLE');
-      try {
-        await device.disconnect();
-        _connectedDevices.remove(deviceId);
-      } catch (_) {}
-    }
-  }
-
-  Future<void> _subscribeToMessages(BluetoothDevice device, BluetoothService service) async {
-    try {
-      final messageChar = service.characteristics
-          .where((c) => c.characteristicUuid == _messagingChar)
-          .firstOrNull;
-
-      if (messageChar == null) return;
-
-      // Enable notifications
-      await messageChar.setNotifyValue(true);
-
-      // Listen for messages
-      final subscription = messageChar.lastValueStream.listen((value) {
-        if (value.isNotEmpty) {
-          _onMessageDataReceived(device.remoteId.toString(), value);
-        }
-      });
-
-      _connectionSubscriptions[device.remoteId.toString()] = subscription;
-    } catch (e) {
-      Logger.error('FlutterBluePlusBleService: Message subscription failed', e, null, 'BLE');
-    }
+    _peerTimeoutTimers[peer.peerId]?.cancel();
+    _peerTimeoutTimers[peer.peerId] = Timer(
+      config.peerLostTimeout,
+      () => _onPeerLost(peer.peerId),
+    );
   }
 
   void _onPeerLost(String peerId) {
@@ -537,20 +685,20 @@ class FlutterBluePlusBleService implements BleServiceInterface {
     );
 
     try {
-      // Find device for this peer
       final device = _connectedDevices.values
           .where((d) => _visiblePeers[peerId] != null)
           .firstOrNull;
 
       if (device == null) {
-        Logger.info('FlutterBluePlusBleService: Peer not connected: $peerId', 'BLE');
+        Logger.info(
+            'FlutterBluePlusBleService: Peer not connected: $peerId', 'BLE');
         // TODO: Queue message for later delivery
         return false;
       }
 
-      // Get service and characteristic
       final services = await device.discoverServices();
-      final service = services.where((s) => s.serviceUuid == _serviceUuid).firstOrNull;
+      final service =
+          services.where((s) => s.serviceUuid == _serviceUuid).firstOrNull;
       if (service == null) return false;
 
       final messageChar = service.characteristics
@@ -558,20 +706,22 @@ class FlutterBluePlusBleService implements BleServiceInterface {
           .firstOrNull;
       if (messageChar == null) return false;
 
-      // Serialize and send
       final data = _serializeMessagePayload(payload);
       await messageChar.write(data, withoutResponse: true);
 
-      Logger.info('FlutterBluePlusBleService: Message sent successfully', 'BLE');
+      Logger.info(
+          'FlutterBluePlusBleService: Message sent successfully', 'BLE');
       return true;
     } catch (e) {
-      Logger.error('FlutterBluePlusBleService: Message send failed', e, null, 'BLE');
+      Logger.error(
+          'FlutterBluePlusBleService: Message send failed', e, null, 'BLE');
       return false;
     }
   }
 
   @override
-  Stream<ReceivedMessage> get messageReceivedStream => _messageReceivedController.stream;
+  Stream<ReceivedMessage> get messageReceivedStream =>
+      _messageReceivedController.stream;
 
   Uint8List _serializeMessagePayload(MessagePayload payload) {
     final json = {
@@ -579,41 +729,16 @@ class FlutterBluePlusBleService implements BleServiceInterface {
       'message_type': payload.type.index,
       'message_id': payload.messageId,
       'content': payload.content,
-      'timestamp': payload.timestamp.toIso8601String(),
+      'timestamp': DateTime.now().toIso8601String(),
     };
-
-    final jsonStr = jsonEncode(json);
-    return Uint8List.fromList(utf8.encode(jsonStr));
-  }
-
-  void _onMessageDataReceived(String fromDeviceId, List<int> data) {
-    try {
-      final json = jsonDecode(utf8.decode(data)) as Map<String, dynamic>;
-
-      if (json['type'] == 'message') {
-        final message = ReceivedMessage(
-          fromPeerId: json['sender_id'] as String? ?? fromDeviceId,
-          messageId: json['message_id'] as String,
-          type: MessageType.values[json['message_type'] as int],
-          content: json['content'] as String?,
-          timestamp: DateTime.parse(json['timestamp'] as String),
-        );
-
-        _messageReceivedController.add(message);
-        Logger.info(
-          'FlutterBluePlusBleService: Received ${message.type.name}',
-          'BLE',
-        );
-      }
-    } catch (e) {
-      Logger.error('FlutterBluePlusBleService: Message parse failed', e, null, 'BLE');
-    }
+    return Uint8List.fromList(utf8.encode(jsonEncode(json)));
   }
 
   // ==================== Photo Transfer ====================
 
   @override
-  Future<bool> sendPhoto(String peerId, Uint8List photoData, String messageId) async {
+  Future<bool> sendPhoto(
+      String peerId, Uint8List photoData, String messageId) async {
     _ensureInitialized();
 
     if (photoData.length > config.maxPhotoSize) {
@@ -627,7 +752,7 @@ class FlutterBluePlusBleService implements BleServiceInterface {
     }
 
     Logger.info(
-      'FlutterBluePlusBleService: Photo transfer not yet fully implemented',
+      'FlutterBluePlusBleService: Photo transfer not yet implemented',
       'BLE',
     );
 
@@ -636,14 +761,18 @@ class FlutterBluePlusBleService implements BleServiceInterface {
   }
 
   @override
-  Stream<PhotoTransferProgress> get photoProgressStream => _photoProgressController.stream;
+  Stream<PhotoTransferProgress> get photoProgressStream =>
+      _photoProgressController.stream;
 
   @override
-  Stream<ReceivedPhoto> get photoReceivedStream => _photoReceivedController.stream;
+  Stream<ReceivedPhoto> get photoReceivedStream =>
+      _photoReceivedController.stream;
 
   @override
   Future<void> cancelPhotoTransfer(String messageId) async {
-    Logger.info('FlutterBluePlusBleService: Cancelling photo transfer $messageId', 'BLE');
+    Logger.info(
+        'FlutterBluePlusBleService: Cancelling photo transfer $messageId',
+        'BLE');
     _photoReassembler.cancel(messageId);
   }
 

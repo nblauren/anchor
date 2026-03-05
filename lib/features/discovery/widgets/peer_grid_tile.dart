@@ -63,7 +63,9 @@ class PeerGridTile extends StatelessWidget {
                     children: [
                       Expanded(
                         child: Text(
-                          peer.age != null ? '${peer.name}, ${peer.age}' : peer.name,
+                          peer.age != null
+                              ? '${peer.name}, ${peer.age}'
+                              : peer.name,
                           style: const TextStyle(
                             color: Colors.white,
                             fontSize: 16,

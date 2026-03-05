@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -119,7 +117,8 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
       return const EmptyStateWidget(
         icon: Icons.check_circle_outline,
         title: 'No Blocked Users',
-        subtitle: 'People you block will appear here.\nThey won\'t be able to discover you or message you.',
+        subtitle:
+            'People you block will appear here.\nThey won\'t be able to discover you or message you.',
       );
     }
 
@@ -167,7 +166,7 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
 
     return CircleAvatar(
       radius: 24,
-      backgroundColor: color.withOpacity(0.3),
+      backgroundColor: color.withValues(alpha: 0.3),
       child: Text(
         name.isNotEmpty ? name[0].toUpperCase() : '?',
         style: TextStyle(

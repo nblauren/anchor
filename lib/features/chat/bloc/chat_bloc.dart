@@ -367,7 +367,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       final conversation = await _chatRepository.getOrCreateConversation(photo.fromPeerId);
 
       // Save photo to file
-      final photoPath = await _imageService.saveReceivedPhoto(photo.photoData);
+      final photoPath = await _imageService.saveReceivedPhoto(photo.photoBytes);
 
       // Save received photo message to database
       final message = await _chatRepository.receiveMessage(
@@ -447,8 +447,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
 
       emit(state.copyWith(messages: updatedMessages));
 
-      // Simulate retry
-      _simulateSend(event.messageId);
+      // TODO: Implement actual retry logic with BLE service
     } catch (e) {
       Logger.error('Failed to retry message', e, null, 'ChatBloc');
     }

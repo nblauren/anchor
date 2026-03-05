@@ -16,7 +16,7 @@ final getIt = GetIt.instance;
 ///
 /// [bleConfig] controls whether to use mock or real BLE service.
 /// Defaults to [BleConfig.fromEnvironment()] which reads from
-/// environment variables (BRIDGEFY_API_KEY, USE_MOCK_BLE).
+/// environment variables (USE_MOCK_BLE).
 Future<void> initializeDependencies({
   BleConfig? bleConfig,
 }) async {

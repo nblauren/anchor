@@ -109,3 +109,4 @@ class LoadMockPeers extends DiscoveryEvent {
 class ClearDiscoveryError extends DiscoveryEvent {
   const ClearDiscoveryError();
 }
+

@@ -2,8 +2,8 @@ import 'dart:typed_data';
 
 import 'ble_models.dart';
 
-/// Abstract BLE service interface for mesh networking
-/// This will be implemented by MockBleService (testing) and BridgefyBleService (production)
+/// Abstract BLE service interface for peer-to-peer communication
+/// Implemented by MockBleService (testing) and FlutterBluePlusBleService (production)
 abstract class BleServiceInterface {
   // ==================== Lifecycle ====================
 

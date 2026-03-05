@@ -39,7 +39,8 @@ class _ChatScreenState extends State<ChatScreen> {
     context.read<ChatBloc>().add(const MarkMessagesRead());
 
     _scrollController.addListener(() {
-      if (_scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 200) {
+      if (_scrollController.position.pixels >=
+          _scrollController.position.maxScrollExtent - 200) {
         final state = context.read<ChatBloc>().state;
         if (state.hasMoreMessages && state.status != ChatStatus.loading) {
           context.read<ChatBloc>().add(const LoadMessages(loadMore: true));
@@ -213,7 +214,8 @@ class _ChatScreenState extends State<ChatScreen> {
                             children: [
                               if (showDate)
                                 Padding(
-                                  padding: const EdgeInsets.symmetric(vertical: 16),
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 16),
                                   child: Text(
                                     _formatDate(message.createdAt),
                                     style: const TextStyle(

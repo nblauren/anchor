@@ -1,8 +1,7 @@
 /// Configuration for BLE service
 class BleConfig {
   const BleConfig({
-    this.useMockService = true,
-    this.bridgefyApiKey,
+    this.useMockService = false,
     this.enableMeshRelay = true,
     this.meshTtl = 3,
     this.photoChunkSize = 4096,
@@ -14,17 +13,13 @@ class BleConfig {
     this.maxPhotoSize = 500 * 1024, // 500KB max for transfer
   });
 
-  /// Whether to use MockBleService (for testing) or real Bridgefy
+  /// Whether to use MockBleService (for testing) or real BLE service
   final bool useMockService;
-
-  /// Bridgefy API key (required for production)
-  /// Can be set via environment variable BRIDGEFY_API_KEY
-  final String? bridgefyApiKey;
 
   /// Enable mesh relay (messages hop through intermediate devices)
   final bool enableMeshRelay;
 
-  /// Time-to-live for mesh messages (number of hops)
+  /// Time-to-live for relay messages (number of hops)
   final int meshTtl;
 
   /// Size of photo chunks for transfer (4-8KB recommended)
@@ -50,12 +45,10 @@ class BleConfig {
 
   /// Create config from environment variables
   factory BleConfig.fromEnvironment() {
-    const apiKey = String.fromEnvironment('BRIDGEFY_API_KEY');
-    const useMock = bool.fromEnvironment('USE_MOCK_BLE', defaultValue: true);
+    const useMock = bool.fromEnvironment('USE_MOCK_BLE', defaultValue: false);
 
-    return BleConfig(
-      useMockService: useMock || apiKey.isEmpty,
-      bridgefyApiKey: apiKey.isNotEmpty ? apiKey : null,
+    return const BleConfig(
+      useMockService: useMock,
     );
   }
 
@@ -64,18 +57,13 @@ class BleConfig {
     useMockService: true,
   );
 
-  /// Production config (uses Bridgefy if API key available)
-  static BleConfig production({required String apiKey}) => BleConfig(
-        useMockService: false,
-        bridgefyApiKey: apiKey,
-      );
-
-  /// Check if Bridgefy can be used
-  bool get canUseBridgefy =>
-      !useMockService && bridgefyApiKey != null && bridgefyApiKey!.isNotEmpty;
+  /// Production config
+  static const BleConfig production = BleConfig(
+    useMockService: false,
+  );
 
   @override
   String toString() {
-    return 'BleConfig(useMock: $useMockService, hasBridgefyKey: ${bridgefyApiKey != null})';
+    return 'BleConfig(useMock: $useMockService)';
   }
 }

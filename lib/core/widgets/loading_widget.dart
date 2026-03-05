@@ -24,7 +24,7 @@ class LoadingWidget extends StatelessWidget {
             const SizedBox(height: 16),
             Text(
               message!,
-              style: TextStyle(
+              style: const TextStyle(
                 color: AppTheme.textSecondary,
                 fontSize: 14,
               ),
@@ -85,7 +85,7 @@ class _SkeletonLoaderState extends State<SkeletonLoader>
           width: widget.width,
           height: widget.height,
           decoration: BoxDecoration(
-            color: AppTheme.darkCard.withOpacity(_animation.value),
+            color: AppTheme.darkCard.withValues(alpha: _animation.value),
             borderRadius: BorderRadius.circular(widget.borderRadius),
           ),
         );
@@ -112,9 +112,9 @@ class SkeletonCard extends StatelessWidget {
           Expanded(
             flex: 3,
             child: Container(
-              decoration: BoxDecoration(
+              decoration: const BoxDecoration(
                 color: AppTheme.darkSurface,
-                borderRadius: const BorderRadius.vertical(
+                borderRadius: BorderRadius.vertical(
                   top: Radius.circular(16),
                 ),
               ),
@@ -124,16 +124,16 @@ class SkeletonCard extends StatelessWidget {
             ),
           ),
           // Text placeholders
-          Expanded(
+          const Expanded(
             flex: 1,
             child: Padding(
-              padding: const EdgeInsets.all(12),
+              padding: EdgeInsets.all(12),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const SkeletonLoader(width: 80, height: 14),
-                  const SizedBox(height: 8),
+                  SkeletonLoader(width: 80, height: 14),
+                  SizedBox(height: 8),
                   SkeletonLoader(
                     width: 50,
                     height: 12,
@@ -162,19 +162,19 @@ class SkeletonListTile extends StatelessWidget {
           Container(
             width: 56,
             height: 56,
-            decoration: BoxDecoration(
+            decoration: const BoxDecoration(
               color: AppTheme.darkCard,
               shape: BoxShape.circle,
             ),
           ),
           const SizedBox(width: 16),
           // Text lines
-          Expanded(
+          const Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const SkeletonLoader(width: 120, height: 16),
-                const SizedBox(height: 8),
+                SkeletonLoader(width: 120, height: 16),
+                SizedBox(height: 8),
                 SkeletonLoader(
                   width: double.infinity,
                   height: 12,
@@ -255,7 +255,7 @@ class LoadingOverlay extends StatelessWidget {
         child,
         if (isLoading)
           Container(
-            color: AppTheme.darkBackground.withOpacity(0.7),
+            color: AppTheme.darkBackground.withValues(alpha: 0.7),
             child: LoadingWidget(message: message),
           ),
       ],

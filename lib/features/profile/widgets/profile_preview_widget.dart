@@ -39,7 +39,8 @@ class ProfilePreviewWidget extends StatelessWidget {
             padding: const EdgeInsets.all(16),
             child: Row(
               children: [
-                const Icon(Icons.visibility, color: AppTheme.textSecondary, size: 20),
+                const Icon(Icons.visibility,
+                    color: AppTheme.textSecondary, size: 20),
                 const SizedBox(width: 8),
                 Text(
                   'Profile Preview',
@@ -60,7 +61,7 @@ class ProfilePreviewWidget extends StatelessWidget {
                   borderRadius: BorderRadius.circular(16),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.2),
+                      color: Colors.black.withValues(alpha: 0.2),
                       blurRadius: 8,
                       offset: const Offset(0, 4),
                     ),
@@ -89,7 +90,7 @@ class ProfilePreviewWidget extends StatelessWidget {
                             end: Alignment.bottomCenter,
                             colors: [
                               Colors.transparent,
-                              Colors.black.withOpacity(0.8),
+                              Colors.black.withValues(alpha: 0.8),
                             ],
                             stops: const [0.5, 1.0],
                           ),
@@ -120,7 +121,7 @@ class ProfilePreviewWidget extends StatelessWidget {
                               Text(
                                 bio!,
                                 style: TextStyle(
-                                  color: Colors.white.withOpacity(0.8),
+                                  color: Colors.white.withValues(alpha: 0.8),
                                   fontSize: 12,
                                 ),
                                 maxLines: 2,
@@ -142,7 +143,7 @@ class ProfilePreviewWidget extends StatelessWidget {
                               vertical: 4,
                             ),
                             decoration: BoxDecoration(
-                              color: Colors.black.withOpacity(0.6),
+                              color: Colors.black.withValues(alpha: 0.6),
                               borderRadius: BorderRadius.circular(12),
                             ),
                             child: Row(

@@ -61,6 +61,9 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
         bio: profile.bio,
         photos: photoList,
       ));
+
+      // Broadcast profile via BLE so this device is discoverable
+      add(const BroadcastProfile());
     } catch (e) {
       Logger.error('Failed to load profile', e, null, 'ProfileBloc');
       emit(state.copyWith(

@@ -29,7 +29,6 @@ class Logger {
   }
 
   static void _log(String level, String message, String? tag) {
-    final timestamp = DateTime.now().toIso8601String();
     developer.log(
       '[$level] $message',
       time: DateTime.now(),

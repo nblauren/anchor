@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -44,7 +42,7 @@ class _DebugMenuScreenState extends State<DebugMenuScreen> {
     setState(() {
       _logs = 'Debug logs will appear here...\n\n'
           'App started at ${DateTime.now()}\n'
-          'BLE Service: ${_isMockBle ? 'Mock' : 'Bridgefy'}';
+          'BLE Service: ${_isMockBle ? 'Mock' : 'FlutterBluePlus'}';
     });
   }
 
@@ -67,7 +65,7 @@ class _DebugMenuScreenState extends State<DebugMenuScreen> {
           _buildSection(
             'BLE Status',
             [
-              _buildInfoRow('Service Type', _isMockBle ? 'Mock' : 'Bridgefy'),
+              _buildInfoRow('Service Type', _isMockBle ? 'Mock' : 'FlutterBluePlus'),
               _buildBleStatusRow(),
             ],
           ),
@@ -278,7 +276,7 @@ class _DebugMenuScreenState extends State<DebugMenuScreen> {
       case BleConnectionStatus.starting:
         return AppTheme.warning;
       default:
-        return AppTheme.errorColor;
+        return AppTheme.error;
     }
   }
 
@@ -294,12 +292,12 @@ class _DebugMenuScreenState extends State<DebugMenuScreen> {
       child: ListTile(
         leading: Icon(
           icon,
-          color: isDestructive ? AppTheme.errorColor : AppTheme.primaryColor,
+          color: isDestructive ? AppTheme.error : AppTheme.primaryColor,
         ),
         title: Text(
           title,
           style: TextStyle(
-            color: isDestructive ? AppTheme.errorColor : null,
+            color: isDestructive ? AppTheme.error : null,
             fontWeight: FontWeight.w500,
           ),
         ),
@@ -338,11 +336,7 @@ class _DebugMenuScreenState extends State<DebugMenuScreen> {
     final peer = peers.first;
 
     // Get or create conversation
-    var conv = await db.chatRepository.getConversationByPeerId(peer.peerId);
-    conv ??= await db.chatRepository.getOrCreateConversation(
-      peerId: peer.peerId,
-      peerName: peer.name,
-    );
+    final conv = await db.chatRepository.getOrCreateConversation(peer.peerId);
 
     // Add a test message
     await db.chatRepository.addMessage(
@@ -407,9 +401,11 @@ class _DebugMenuScreenState extends State<DebugMenuScreen> {
   Future<void> _showDatabaseStats() async {
     final db = getIt<DatabaseService>();
 
-    final peerCount = await db.peerRepository.getPeerCount(includeBlocked: true);
+    final peerCount =
+        await db.peerRepository.getPeerCount(includeBlocked: true);
     final blockedCount = (await db.peerRepository.getBlockedPeers()).length;
-    final convCount = (await db.chatRepository.getConversationsWithPeers()).length;
+    final convCount =
+        (await db.chatRepository.getConversationsWithPeers()).length;
 
     final stats = '''
 Database Statistics:
@@ -504,7 +500,7 @@ Database Statistics:
               ),
               TextButton(
                 onPressed: () => Navigator.pop(context, true),
-                style: TextButton.styleFrom(foregroundColor: AppTheme.errorColor),
+                style: TextButton.styleFrom(foregroundColor: AppTheme.error),
                 child: const Text('Confirm'),
               ),
             ],

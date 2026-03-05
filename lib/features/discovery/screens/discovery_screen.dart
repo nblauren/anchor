@@ -65,7 +65,8 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
               if (state.hasPeers)
                 Container(
                   margin: const EdgeInsets.only(right: 8),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   decoration: BoxDecoration(
                     color: AppTheme.primaryColor.withValues(alpha: 0.2),
                     borderRadius: BorderRadius.circular(16),
@@ -73,7 +74,7 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(
+                      const Icon(
                         Icons.people,
                         size: 16,
                         color: AppTheme.primaryColor,
@@ -81,7 +82,7 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                       const SizedBox(width: 4),
                       Text(
                         '${state.peerCount}',
-                        style: TextStyle(
+                        style: const TextStyle(
                           color: AppTheme.primaryColor,
                           fontWeight: FontWeight.bold,
                         ),
@@ -191,7 +192,7 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                     ),
                     const SizedBox(height: 32),
                     // Pull to refresh hint
-                    Row(
+                    const Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Icon(
@@ -199,7 +200,7 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                           size: 16,
                           color: AppTheme.textHint,
                         ),
-                        const SizedBox(width: 8),
+                        SizedBox(width: 8),
                         Text(
                           'Pull down to scan',
                           style: TextStyle(
@@ -233,10 +234,10 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
+            const Icon(
               Icons.error_outline,
               size: 64,
-              color: AppTheme.errorColor,
+              color: AppTheme.error,
             ),
             const SizedBox(height: 16),
             Text(
@@ -247,7 +248,7 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
             Text(
               state.errorMessage ?? 'Please try again',
               textAlign: TextAlign.center,
-              style: TextStyle(color: AppTheme.textSecondary),
+              style: const TextStyle(color: AppTheme.textSecondary),
             ),
             const SizedBox(height: 24),
             ElevatedButton.icon(

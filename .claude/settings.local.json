@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__ide__getDiagnostics",
+      "Bash(flutter analyze:*)",
+      "Bash(dart run build_runner:*)",
+      "Bash(find:*)",
+      "Bash(cd /Users/nblaurenciana/Documents/GitHub/anchor/ios && pod install 2>&1)"
+    ]
+  }
+}
