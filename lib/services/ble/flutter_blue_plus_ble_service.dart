@@ -1088,36 +1088,6 @@ class FlutterBluePlusBleService implements BleServiceInterface {
           }
         }
 
-        // Added by Nikko: Subscribe to thumbnail notifications immediately so the peripheral can start pushing the thumbnail in chunks while we read the profile — this can speed up the overall profile+
-        final thumbnailChar = _thumbnailChars[peerId];
-        if (thumbnailChar != null) {
-          try {
-            await _central.setCharacteristicNotifyState(
-              peripheral,
-              thumbnailChar,
-              state: true,
-            );
-            Logger.info(
-              'BleService: Subscribed to thumbnail notifications from $peerId',
-              'BLE',
-            );
-
-            // ──────────────── ADD THE DELAY HERE ────────────────
-            await Future.delayed(
-                const Duration(milliseconds: 60)); // ← this line
-          } catch (e) {
-            Logger.warning(
-              'BleService: Failed to subscribe to thumbnail notifications from $peerId: $e',
-              'BLE',
-            );
-          }
-        } else {
-          Logger.warning(
-            'BleService: No thumbnail char found for $peerId '
-                '— peer may be running old code without fff2',
-            'BLE',
-          );
-        }
       } catch (e) {
         Logger.warning(
           'BleService: Connect to $peerId failed: $e',
@@ -1167,12 +1137,27 @@ class FlutterBluePlusBleService implements BleServiceInterface {
       );
     }
 
-    // Subscribe to thumbnail char notifications so the peripheral can push the
-    // thumbnail in chunks.  The profile JSON includes thumbnail_size so we know
-    // how many bytes to accumulate before the thumbnail is fully received.
+    // Subscribe to thumbnail char notifications AFTER the profile read so that
+    // _thumbnailExpectedSizes[peerId] is already set when chunks arrive.
+    // Unsubscribe first to guarantee the peripheral sees a state-change event
+    // (false → true) and re-pushes the thumbnail, even if we were already
+    // subscribed from a prior attempt.
     final thumbnailChar = _thumbnailChars[peerId];
     if (thumbnailChar != null) {
       try {
+        // Clear any stale buffer so we accumulate a fresh delivery.
+        _thumbnailBuffers.remove(peerId);
+
+        try {
+          await _central.setCharacteristicNotifyState(
+            peripheral,
+            thumbnailChar,
+            state: false,
+          );
+        } catch (_) {
+          // Ignore — may not have been subscribed yet
+        }
+
         await _central.setCharacteristicNotifyState(
           peripheral,
           thumbnailChar,
@@ -1209,11 +1194,22 @@ class FlutterBluePlusBleService implements BleServiceInterface {
       final thumbnailSize = json['thumbnail_size'] as int?;
       if (thumbnailSize != null && thumbnailSize > 0) {
         _thumbnailExpectedSizes[peerId] = thumbnailSize;
-        _thumbnailBuffers[peerId] = [];
+        // Preserve any chunks already buffered — they may have arrived before
+        // this profile read completed. Only create the buffer if absent.
+        final buffer = _thumbnailBuffers.putIfAbsent(peerId, () => []);
         Logger.info(
-          'BleService: Expecting ${thumbnailSize}B thumbnail from $peerId via notifications',
+          'BleService: Expecting ${thumbnailSize}B thumbnail from $peerId '
+              '(${buffer.length}B already buffered)',
           'BLE',
         );
+        // If chunks arrived early and we already have everything, reassemble now.
+        if (buffer.length >= thumbnailSize) {
+          final thumbnailBytes =
+              Uint8List.fromList(buffer.sublist(0, thumbnailSize));
+          _thumbnailBuffers.remove(peerId);
+          _thumbnailExpectedSizes.remove(peerId);
+          _updatePeerThumbnail(peerId, thumbnailBytes);
+        }
       }
 
       final userId = json['userId'] as String?;
