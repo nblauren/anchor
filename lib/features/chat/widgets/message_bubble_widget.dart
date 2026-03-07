@@ -14,11 +14,15 @@ class MessageBubbleWidget extends StatelessWidget {
     required this.message,
     required this.isSentByMe,
     this.onRetry,
+    this.isRelayedPeer = false,
   });
 
   final MessageEntry message;
   final bool isSentByMe;
   final VoidCallback? onRetry;
+  /// When true and message is sent by us, show a relay indicator in the
+  /// timestamp row to signal the message was forwarded through the mesh.
+  final bool isRelayedPeer;
 
   @override
   Widget build(BuildContext context) {
@@ -74,6 +78,14 @@ class MessageBubbleWidget extends StatelessWidget {
                       fontSize: 11,
                     ),
                   ),
+                  if (isSentByMe && isRelayedPeer) ...[
+                    const SizedBox(width: 4),
+                    const Icon(
+                      Icons.hub_outlined,
+                      size: 11,
+                      color: Colors.white38,
+                    ),
+                  ],
                   if (isSentByMe) ...[
                     const SizedBox(width: 4),
                     _buildStatusIcon(),

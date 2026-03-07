@@ -87,6 +87,7 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
             peerId: _peer.peerId,
             peerName: _peer.name,
             peerThumbnail: _peer.thumbnailData,
+            isRelayedPeer: _peer.isRelayed,
           ),
         ),
       ),

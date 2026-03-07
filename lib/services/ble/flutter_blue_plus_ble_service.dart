@@ -6,6 +6,7 @@ import 'dart:typed_data';
 
 import 'package:bluetooth_low_energy/bluetooth_low_energy.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:uuid/uuid.dart';
 
 import '../../core/utils/logger.dart';
 import 'ble_config.dart';
@@ -95,6 +96,20 @@ class FlutterBluePlusBleService implements BleServiceInterface {
   // from being processed twice if the transport retransmits it.
   final Set<String> _seenMessageIds = {};
 
+  // Throttle peer_announce broadcasts: don't re-announce the same peer
+  // more than once every 5 minutes to avoid flooding connected peers.
+  final Map<String, DateTime> _lastAnnouncedAt = {};
+
+  // Mesh relay toggle (mutable at runtime via setMeshRelayMode)
+  late bool _meshRelayEnabled;
+
+  // Routing table: sender userId → set of peer IDs they directly see.
+  // Built from incoming neighbor_list messages.
+  final Map<String, Set<String>> _neighborMap = {};
+
+  // Timer that periodically broadcasts this device's neighbor list.
+  Timer? _neighborListTimer;
+
   // GATT characteristics (server side)
   GATTCharacteristic? _serverProfileChar;
   GATTCharacteristic? _serverThumbnailChar;
@@ -135,6 +150,7 @@ class FlutterBluePlusBleService implements BleServiceInterface {
   @override
   Future<void> initialize() async {
     if (_isInitialized) return;
+    _meshRelayEnabled = _meshRelayEnabled;
 
     Logger.info('BleService: Initializing...', 'BLE');
 
@@ -207,6 +223,10 @@ class FlutterBluePlusBleService implements BleServiceInterface {
     _thumbnailBuffers.clear();
     _thumbnailExpectedSizes.clear();
     _peerPhotoSizes.clear();
+    _lastAnnouncedAt.clear();
+    _neighborMap.clear();
+    _neighborListTimer?.cancel();
+    _neighborListTimer = null;
     _setStatus(BleStatus.ready);
   }
 
@@ -468,6 +488,10 @@ class FlutterBluePlusBleService implements BleServiceInterface {
         _handlePhotoStart(json, fromPeerId);
       } else if (type == 'photo_chunk') {
         _handleReceivedPhotoChunk(json, fromPeerId);
+      } else if (type == 'peer_announce') {
+        _handlePeerAnnounce(json, fromPeerId);
+      } else if (type == 'neighbor_list') {
+        _handleNeighborList(json);
       } else {
         _handleReceivedMessage(json, fromPeerId);
       }
@@ -504,21 +528,335 @@ class FlutterBluePlusBleService implements BleServiceInterface {
           const Duration(minutes: 5), () => _seenMessageIds.remove(messageId));
     }
 
-    final message = ReceivedMessage(
-      fromPeerId: fromPeerId,
-      messageId: messageId,
-      type: MessageType.values[json['message_type'] as int? ?? 0],
-      content: json['content'] as String? ?? '',
-      timestamp: DateTime.now(),
-    );
+    // Mesh routing: check if this message is addressed to us
+    final destinationId = json['destination_id'] as String?;
+    final ownUserId = _pendingPayload?.userId ?? '';
+    final isForUs = destinationId == null ||
+        destinationId.isEmpty ||
+        destinationId == ownUserId;
 
-    _messageReceivedController.add(message);
+    if (isForUs) {
+      final message = ReceivedMessage(
+        fromPeerId: fromPeerId,
+        messageId: messageId,
+        type: MessageType.values[json['message_type'] as int? ?? 0],
+        content: json['content'] as String? ?? '',
+        timestamp: DateTime.now(),
+      );
+      _messageReceivedController.add(message);
+      Logger.info(
+        'BleService: Received message from '
+            '${fromPeerId.substring(0, min(8, fromPeerId.length))}',
+        'BLE',
+      );
+    } else {
+      // Not for us — attempt to relay toward the destination
+      _maybeRelayMessage(json, fromPeerId);
+    }
+  }
+
+  /// Forward a mesh message to all currently-connected peers except the one
+  /// we received it from.  Decrements TTL and appends our userId to
+  /// relay_path for loop detection.
+  void _maybeRelayMessage(Map<String, dynamic> json, String receivedFromPeerId) {
+    if (!_meshRelayEnabled) return;
+
+    final ttl = json['ttl'] as int? ?? 0;
+    if (ttl <= 0) {
+      Logger.info('BleService: Mesh TTL exhausted, dropping relay', 'BLE');
+      return;
+    }
+
+    final ownUserId = _pendingPayload?.userId ?? '';
+    final relayPath =
+        List<String>.from((json['relay_path'] as List<dynamic>? ?? []));
+
+    // Loop guard: don't relay if we've already forwarded this message
+    if (relayPath.contains(ownUserId)) {
+      Logger.info('BleService: Already in relay path, dropping', 'BLE');
+      return;
+    }
+
+    final relayJson = Map<String, dynamic>.from(json);
+    relayJson['ttl'] = ttl - 1;
+    relayJson['relay_path'] = [...relayPath, ownUserId];
+
+    final data = Uint8List.fromList(utf8.encode(jsonEncode(relayJson)));
+
+    // Directed routing: if we know which connected peer can reach the
+    // destination directly, send only to that peer instead of flooding.
+    final destinationId = json['destination_id'] as String? ?? '';
+    if (destinationId.isNotEmpty) {
+      final bestRelay = _findBestRelayPeer(destinationId, receivedFromPeerId);
+      if (bestRelay != null) {
+        _writeRelayData(data, bestRelay);
+        Logger.info(
+            'BleService: Directed relay to best peer (TTL ${ttl - 1})', 'BLE');
+        return;
+      }
+    }
+
+    // Fallback: flood to all connected peers except sender
+    int relayCount = 0;
+    for (final entry in _messagingChars.entries) {
+      final targetPeerId = entry.key;
+      if (targetPeerId == receivedFromPeerId) continue;
+      final peripheral = _discoveredPeripherals[targetPeerId];
+      if (peripheral == null) continue;
+      _writeRelayData(data, targetPeerId);
+      relayCount++;
+    }
 
     Logger.info(
-      'BleService: Received message from '
-          '${fromPeerId.substring(0, min(8, fromPeerId.length))}',
+      'BleService: Flooded message to $relayCount peers '
+          '(TTL remaining: ${ttl - 1})',
       'BLE',
     );
+  }
+
+  /// Returns the app userId for a given BLE peripheral UUID, or null if
+  /// the mapping hasn't been established yet (peer profile not yet read).
+  String? _getAppUserIdForPeer(String blePeerId) {
+    for (final entry in _userIdToPeerId.entries) {
+      if (entry.value == blePeerId) return entry.key;
+    }
+    return null;
+  }
+
+  // ==================== Mesh Utilities ====================
+
+  @override
+  Future<void> setMeshRelayMode(bool enabled) async {
+    _meshRelayEnabled = enabled;
+    Logger.info(
+        'BleService: Mesh relay ${enabled ? "enabled" : "disabled"}', 'BLE');
+  }
+
+  @override
+  bool get isMeshRelayEnabled => _meshRelayEnabled;
+
+  @override
+  int get meshRelayedPeerCount =>
+      _visiblePeers.values.where((p) => p.isRelayed).length;
+
+  @override
+  int get meshRoutingTableSize => _neighborMap.length;
+
+  /// Returns the BLE peerId of the connected peer most likely to forward
+  /// a message toward [destinationUserId], or null if no routing info exists.
+  String? _findBestRelayPeer(String destinationUserId, String excludePeerId) {
+    for (final entry in _messagingChars.entries) {
+      if (entry.key == excludePeerId) continue;
+      final peerUserId = _getAppUserIdForPeer(entry.key);
+      if (peerUserId == null) continue;
+      final neighbors = _neighborMap[peerUserId] ?? const {};
+      if (neighbors.contains(destinationUserId)) return entry.key;
+    }
+    return null;
+  }
+
+  /// Write pre-serialised relay data to a specific connected peer.
+  void _writeRelayData(Uint8List data, String targetPeerId) {
+    final char = _messagingChars[targetPeerId];
+    final peripheral = _discoveredPeripherals[targetPeerId];
+    if (char == null || peripheral == null) return;
+    _central
+        .writeCharacteristic(
+          peripheral,
+          char,
+          value: data,
+          type: GATTCharacteristicWriteType.withResponse,
+        )
+        .catchError((Object e) => Logger.warning(
+            'BleService: Relay write failed to $targetPeerId: $e', 'BLE'));
+  }
+
+  // ==================== Mesh Peer Discovery ====================
+
+  /// Broadcast a `peer_announce` for a directly-discovered peer so that
+  /// devices connected to us can learn about peers beyond their direct range.
+  ///
+  /// Throttled to once per 5 minutes per peer to avoid excessive traffic.
+  /// Only fires after the peer's thumbnail is available (richest data).
+  void _announcePeerToMesh(DiscoveredPeer peer) {
+    if (!_meshRelayEnabled) return;
+    if (_messagingChars.isEmpty) return;
+    if (peer.isRelayed) return; // never re-announce relayed peers
+
+    final now = DateTime.now();
+    final lastAnnounced = _lastAnnouncedAt[peer.peerId];
+    if (lastAnnounced != null &&
+        now.difference(lastAnnounced).inMinutes < 5) {
+      return;
+    }
+    _lastAnnouncedAt[peer.peerId] = now;
+
+    final ownUserId = _pendingPayload?.userId ?? '';
+    final thumbnailB64 = peer.thumbnailBytes != null
+        ? base64Encode(peer.thumbnailBytes!)
+        : null;
+
+    final msgId = const Uuid().v4();
+    final json = <String, dynamic>{
+      'type': 'peer_announce',
+      'message_id': msgId,
+      'peer_id': peer.peerId,
+      'peer_user_id': _getAppUserIdForPeer(peer.peerId) ?? '',
+      'name': peer.name,
+      if (peer.age != null) 'age': peer.age,
+      if (peer.bio != null) 'bio': peer.bio,
+      if (thumbnailB64 != null) 'thumbnail_b64': thumbnailB64,
+      // TTL starts at meshTtl - 1 because this device counts as hop 1
+      'ttl': config.meshTtl - 1,
+      'relay_path': <String>[ownUserId],
+    };
+
+    // Mark as seen so our own announce doesn't get re-relayed back to us
+    _seenMessageIds.add(msgId);
+    Future.delayed(
+        const Duration(minutes: 5), () => _seenMessageIds.remove(msgId));
+
+    final data = Uint8List.fromList(utf8.encode(jsonEncode(json)));
+    int count = 0;
+    for (final entry in _messagingChars.entries) {
+      final peripheral = _discoveredPeripherals[entry.key];
+      if (peripheral == null) continue;
+      _central
+          .writeCharacteristic(
+            peripheral,
+            entry.value,
+            value: data,
+            type: GATTCharacteristicWriteType.withResponse,
+          )
+          .catchError((Object e) => Logger.warning(
+              'BleService: Peer announce write failed to ${entry.key}: $e',
+              'BLE'));
+      count++;
+    }
+
+    Logger.info(
+        'BleService: Announced "${peer.name}" to $count mesh peers', 'BLE');
+  }
+
+  /// Handle an incoming `peer_announce` — emit the announced peer to the
+  /// discovery stream (marked as relayed) and forward further if TTL allows.
+  void _handlePeerAnnounce(Map<String, dynamic> json, String fromPeerId) {
+    final messageId = json['message_id'] as String? ?? '';
+
+    // Dedup
+    if (messageId.isNotEmpty) {
+      if (_seenMessageIds.contains(messageId)) return;
+      _seenMessageIds.add(messageId);
+      Future.delayed(
+          const Duration(minutes: 5), () => _seenMessageIds.remove(messageId));
+    }
+
+    final announcedPeerId = json['peer_id'] as String? ?? '';
+    if (announcedPeerId.isEmpty) return;
+
+    // Don't emit ourselves as a discovered peer
+    final announcedUserid = json['peer_user_id'] as String? ?? '';
+    final ownUserId = _pendingPayload?.userId ?? '';
+    if (announcedUserid.isNotEmpty && announcedUserid == ownUserId) return;
+
+    // Don't overwrite a directly-seen peer with a relayed version
+    final existing = _visiblePeers[announcedPeerId];
+    if (existing != null && !existing.isRelayed) {
+      // Still relay onward so others can benefit, but skip the local emit
+      _relayPeerAnnounce(json, fromPeerId);
+      return;
+    }
+
+    // Decode thumbnail
+    Uint8List? thumbnail;
+    final thumbB64 = json['thumbnail_b64'] as String?;
+    if (thumbB64 != null && thumbB64.isNotEmpty) {
+      try {
+        thumbnail = base64Decode(thumbB64);
+      } catch (_) {}
+    }
+
+    final relayPath =
+        List<String>.from(json['relay_path'] as List<dynamic>? ?? []);
+    final hopCount = relayPath.length;
+
+    final peer = DiscoveredPeer(
+      peerId: announcedPeerId,
+      name: json['name'] as String? ?? 'Unknown',
+      age: json['age'] as int?,
+      bio: json['bio'] as String?,
+      thumbnailBytes: thumbnail,
+      rssi: null, // no RSSI for relayed peers
+      timestamp: DateTime.now(),
+      isRelayed: true,
+      hopCount: hopCount,
+    );
+
+    // Update visible peers map and restart timeout timer
+    _visiblePeers[announcedPeerId] = peer;
+    _peerTimeoutTimers[announcedPeerId]?.cancel();
+    _peerTimeoutTimers[announcedPeerId] = Timer(
+      config.peerLostTimeout,
+      () => _onPeerLost(announcedPeerId),
+    );
+
+    // Record userId→peerId mapping for mesh message routing
+    if (announcedUserid.isNotEmpty) {
+      _userIdToPeerId[announcedUserid] = announcedPeerId;
+    }
+
+    _peerDiscoveredController.add(peer);
+    Logger.info(
+      'BleService: Mesh-discovered "${peer.name}" ($hopCount hops away)',
+      'BLE',
+    );
+
+    _relayPeerAnnounce(json, fromPeerId);
+  }
+
+  /// Forward a `peer_announce` to all connected peers except the sender.
+  void _relayPeerAnnounce(Map<String, dynamic> json, String excludePeerId) {
+    final ttl = json['ttl'] as int? ?? 0;
+    if (ttl <= 0) return;
+
+    final ownUserId = _pendingPayload?.userId ?? '';
+    final relayPath =
+        List<String>.from(json['relay_path'] as List<dynamic>? ?? []);
+    if (relayPath.contains(ownUserId)) return;
+
+    final relayJson = Map<String, dynamic>.from(json);
+    relayJson['ttl'] = ttl - 1;
+    relayJson['relay_path'] = [...relayPath, ownUserId];
+
+    final data = Uint8List.fromList(utf8.encode(jsonEncode(relayJson)));
+
+    // Directed: prefer a peer who already knows the announced peer
+    final announcedPeerId = json['peer_id'] as String? ?? '';
+    final announcedUserId = json['peer_user_id'] as String? ?? '';
+    final targetId = announcedUserId.isNotEmpty ? announcedUserId : announcedPeerId;
+    if (targetId.isNotEmpty) {
+      final best = _findBestRelayPeer(targetId, excludePeerId);
+      if (best != null) {
+        _writeRelayData(data, best);
+        return;
+      }
+    }
+
+    // Fallback: flood
+    for (final entry in _messagingChars.entries) {
+      if (entry.key == excludePeerId) continue;
+      final peripheral = _discoveredPeripherals[entry.key];
+      if (peripheral == null) continue;
+      _central
+          .writeCharacteristic(
+            peripheral,
+            entry.value,
+            value: data,
+            type: GATTCharacteristicWriteType.withResponse,
+          )
+          .catchError((Object e) => Logger.warning(
+              'BleService: Peer announce relay failed: $e', 'BLE'));
+    }
   }
 
   void _handleReceivedPhotoChunk(Map<String, dynamic> json, String fromPeerId) {
@@ -931,6 +1269,13 @@ class FlutterBluePlusBleService implements BleServiceInterface {
     await _discoveredSubscription?.cancel();
     _discoveredSubscription = _central.discovered.listen(_onDeviceDiscovered);
 
+    // Periodic neighbor-list broadcast for routing table maintenance
+    _neighborListTimer?.cancel();
+    _neighborListTimer = Timer.periodic(
+      const Duration(seconds: 60),
+      (_) => _broadcastNeighborList(),
+    );
+
     // Start first scan cycle
     _runScanCycle();
   }
@@ -975,6 +1320,8 @@ class FlutterBluePlusBleService implements BleServiceInterface {
     _isScanning = false;
     _scanRestartTimer?.cancel();
     _scanRestartTimer = null;
+    _neighborListTimer?.cancel();
+    _neighborListTimer = null;
 
     try {
       await _central.stopDiscovery();
@@ -1325,6 +1672,7 @@ class FlutterBluePlusBleService implements BleServiceInterface {
       timestamp: DateTime.now(),
     );
     _emitPeer(updatedPeer);
+    _announcePeerToMesh(updatedPeer);
     Logger.info(
       'BleService: Updated ${photos.length} photo(s) for "${updatedPeer.name}" '
           '(total: ${photos.fold(0, (s, b) => s + b.length)}B)',
@@ -1343,6 +1691,7 @@ class FlutterBluePlusBleService implements BleServiceInterface {
       timestamp: DateTime.now(),
     );
     _emitPeer(updatedPeer);
+    _announcePeerToMesh(updatedPeer);
     Logger.info(
       'BleService: Updated thumbnail for "${updatedPeer.name}" '
           '(${thumbnailBytes.length}B)',
@@ -1452,8 +1801,68 @@ class FlutterBluePlusBleService implements BleServiceInterface {
       _thumbnailExpectedSizes.remove(peerId);
       _peerPhotoSizes.remove(peerId);
       _userIdToPeerId.removeWhere((_, v) => v == peerId);
+      _lastAnnouncedAt.remove(peerId);
       Logger.info('BleService: Lost peer ${peer?.name}', 'BLE');
     }
+  }
+
+  // ==================== Routing Table ====================
+
+  /// Store the sender's neighbor list in our routing table.
+  void _handleNeighborList(Map<String, dynamic> json) {
+    final senderId = json['sender_id'] as String? ?? '';
+    if (senderId.isEmpty) return;
+    final peers = List<String>.from(json['peers'] as List<dynamic>? ?? []);
+    _neighborMap[senderId] = Set<String>.from(peers);
+    Logger.info(
+      'BleService: Updated routing table for $senderId '
+          '(${peers.length} neighbors)',
+      'BLE',
+    );
+  }
+
+  /// Broadcast our directly-visible peer userId list to all connected peers
+  /// so they can build a routing table entry for us.
+  void _broadcastNeighborList() {
+    if (!_meshRelayEnabled || _messagingChars.isEmpty) return;
+
+    final ownUserId = _pendingPayload?.userId ?? '';
+    final directPeerUserIds = _visiblePeers.entries
+        .where((e) => !e.value.isRelayed)
+        .map((e) => _getAppUserIdForPeer(e.key))
+        .whereType<String>()
+        .where((uid) => uid.isNotEmpty)
+        .toList();
+
+    if (directPeerUserIds.isEmpty) return;
+
+    final json = <String, dynamic>{
+      'type': 'neighbor_list',
+      'sender_id': ownUserId,
+      'peers': directPeerUserIds,
+      'ttl': 1, // neighbor lists are never relayed further
+    };
+
+    final data = Uint8List.fromList(utf8.encode(jsonEncode(json)));
+    for (final entry in _messagingChars.entries) {
+      final peripheral = _discoveredPeripherals[entry.key];
+      if (peripheral == null) continue;
+      _central
+          .writeCharacteristic(
+            peripheral,
+            entry.value,
+            value: data,
+            type: GATTCharacteristicWriteType.withResponse,
+          )
+          .catchError((Object e) => Logger.warning(
+              'BleService: Neighbor list broadcast failed: $e', 'BLE'));
+    }
+
+    Logger.info(
+      'BleService: Broadcast neighbor list '
+          '(${directPeerUserIds.length} peers to ${_messagingChars.length} nodes)',
+      'BLE',
+    );
   }
 
   // ==================== Messaging ====================
@@ -1483,7 +1892,10 @@ class FlutterBluePlusBleService implements BleServiceInterface {
         return false;
       }
 
-      final data = _serializeMessagePayload(payload);
+      final data = _serializeMessagePayload(
+        payload,
+        destinationUserId: _getAppUserIdForPeer(peerId),
+      );
       await _central.writeCharacteristic(
         peripheral,
         msgChar,
@@ -1505,15 +1917,23 @@ class FlutterBluePlusBleService implements BleServiceInterface {
   Stream<ReceivedMessage> get messageReceivedStream =>
       _messageReceivedController.stream;
 
-  Uint8List _serializeMessagePayload(MessagePayload payload) {
-    final json = {
+  Uint8List _serializeMessagePayload(MessagePayload payload,
+      {String? destinationUserId}) {
+    final ownUserId = _pendingPayload?.userId ?? '';
+    final json = <String, dynamic>{
       'type': 'message',
-      'sender_id': _pendingPayload?.userId ?? '',
+      'sender_id': ownUserId,
       'message_type': payload.type.index,
       'message_id': payload.messageId,
       'content': payload.content,
       'timestamp': DateTime.now().toIso8601String(),
     };
+    if (_meshRelayEnabled) {
+      json['origin_id'] = ownUserId;
+      json['destination_id'] = destinationUserId ?? '';
+      json['ttl'] = config.meshTtl;
+      json['relay_path'] = <String>[ownUserId];
+    }
     return Uint8List.fromList(utf8.encode(jsonEncode(json)));
   }
 

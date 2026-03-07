@@ -104,4 +104,18 @@ abstract class BleServiceInterface {
 
   /// Get list of currently visible peer IDs
   List<String> get visiblePeerIds;
+
+  // ==================== Mesh ====================
+
+  /// Enable or disable mesh relay (message forwarding between devices)
+  Future<void> setMeshRelayMode(bool enabled);
+
+  /// Whether mesh relay is currently enabled
+  bool get isMeshRelayEnabled;
+
+  /// Number of peers currently visible only via mesh relay (not direct BLE)
+  int get meshRelayedPeerCount;
+
+  /// Number of peers whose neighbor lists are known (routing table size)
+  int get meshRoutingTableSize;
 }

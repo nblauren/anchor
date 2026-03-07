@@ -109,12 +109,42 @@ class PeerGridTile extends StatelessWidget {
               ),
             ),
 
-            // Signal strength indicator (top right)
+            // Signal strength indicator (top right) — direct peers only
             if (peer.rssi != null)
               Positioned(
                 top: 8,
                 right: 8,
                 child: _buildSignalIndicator(),
+              ),
+
+            // Mesh relay indicator (top right) — relayed peers only
+            if (peer.isRelayed)
+              Positioned(
+                top: 8,
+                right: 8,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.55),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.hub_outlined, size: 11, color: Colors.white70),
+                      SizedBox(width: 3),
+                      Text(
+                        'Relay',
+                        style: TextStyle(
+                          color: Colors.white70,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
 
             // Unread message badge (top left)

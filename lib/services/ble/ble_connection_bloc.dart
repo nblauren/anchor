@@ -65,6 +65,15 @@ class SetBatterySaver extends BleConnectionEvent {
   List<Object?> get props => [enabled];
 }
 
+/// Toggle mesh relay (message forwarding through intermediate devices)
+class SetMeshRelay extends BleConnectionEvent {
+  const SetMeshRelay(this.enabled);
+  final bool enabled;
+
+  @override
+  List<Object?> get props => [enabled];
+}
+
 /// BLE status changed (internal)
 class _BleStatusChanged extends BleConnectionEvent {
   const _BleStatusChanged(this.status);
@@ -116,6 +125,7 @@ class BleConnectionState extends Equatable {
     this.isInForeground = true,
     this.isVisible = true,
     this.isBatterySaver = false,
+    this.isMeshRelay = true,
     this.errorMessage,
   });
 
@@ -128,6 +138,7 @@ class BleConnectionState extends Equatable {
   final bool isInForeground;
   final bool isVisible;
   final bool isBatterySaver;
+  final bool isMeshRelay;
   final String? errorMessage;
 
   /// Whether BLE is ready to use
@@ -182,6 +193,7 @@ class BleConnectionState extends Equatable {
     bool? isInForeground,
     bool? isVisible,
     bool? isBatterySaver,
+    bool? isMeshRelay,
     String? errorMessage,
   }) {
     return BleConnectionState(
@@ -194,6 +206,7 @@ class BleConnectionState extends Equatable {
       isInForeground: isInForeground ?? this.isInForeground,
       isVisible: isVisible ?? this.isVisible,
       isBatterySaver: isBatterySaver ?? this.isBatterySaver,
+      isMeshRelay: isMeshRelay ?? this.isMeshRelay,
       errorMessage: errorMessage,
     );
   }
@@ -209,6 +222,7 @@ class BleConnectionState extends Equatable {
         isInForeground,
         isVisible,
         isBatterySaver,
+        isMeshRelay,
         errorMessage,
       ];
 }
@@ -228,6 +242,7 @@ class BleConnectionBloc extends Bloc<BleConnectionEvent, BleConnectionState> {
     on<AppPaused>(_onAppPaused);
     on<SetVisibility>(_onSetVisibility);
     on<SetBatterySaver>(_onSetBatterySaver);
+    on<SetMeshRelay>(_onSetMeshRelay);
     on<_BleStatusChanged>(_onStatusChanged);
 
     // Listen to BLE status changes
@@ -241,6 +256,7 @@ class BleConnectionBloc extends Bloc<BleConnectionEvent, BleConnectionState> {
 
   static const _prefVisible = 'ble_visible';
   static const _prefBatterySaver = 'ble_battery_saver';
+  static const _prefMeshRelay = 'ble_mesh_relay';
 
   Future<void> _onInitialize(
     InitializeBleConnection event,
@@ -252,8 +268,13 @@ class BleConnectionBloc extends Bloc<BleConnectionEvent, BleConnectionState> {
     final prefs = await SharedPreferences.getInstance();
     final isVisible = prefs.getBool(_prefVisible) ?? true;
     final isBatterySaver = prefs.getBool(_prefBatterySaver) ?? false;
-    emit(state.copyWith(isVisible: isVisible, isBatterySaver: isBatterySaver));
+    final isMeshRelay = prefs.getBool(_prefMeshRelay) ?? true;
+    emit(state.copyWith(
+        isVisible: isVisible,
+        isBatterySaver: isBatterySaver,
+        isMeshRelay: isMeshRelay));
     if (isBatterySaver) await _bleService.setBatterySaverMode(true);
+    if (!isMeshRelay) await _bleService.setMeshRelayMode(false);
 
     try {
       final available = await _bleService.isBluetoothAvailable();
@@ -431,6 +452,17 @@ class BleConnectionBloc extends Bloc<BleConnectionEvent, BleConnectionState> {
     await _bleService.setBatterySaverMode(event.enabled);
     emit(state.copyWith(isBatterySaver: event.enabled));
     Logger.info('Battery saver set to ${event.enabled}', 'BLE');
+  }
+
+  Future<void> _onSetMeshRelay(
+    SetMeshRelay event,
+    Emitter<BleConnectionState> emit,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_prefMeshRelay, event.enabled);
+    await _bleService.setMeshRelayMode(event.enabled);
+    emit(state.copyWith(isMeshRelay: event.enabled));
+    Logger.info('Mesh relay set to ${event.enabled}', 'BLE');
   }
 
   void _onStatusChanged(

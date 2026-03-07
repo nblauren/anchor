@@ -18,12 +18,15 @@ class ChatScreen extends StatefulWidget {
     required this.peerName,
     this.peerThumbnail,
     this.onViewProfile,
+    this.isRelayedPeer = false,
   });
 
   final String peerId;
   final String peerName;
   final Uint8List? peerThumbnail;
   final VoidCallback? onViewProfile;
+  /// Whether this peer is only reachable via mesh relay (not direct BLE).
+  final bool isRelayedPeer;
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -172,7 +175,23 @@ class _ChatScreenState extends State<ChatScreen> {
                           style: const TextStyle(fontSize: 16),
                           overflow: TextOverflow.ellipsis,
                         ),
-                        if (widget.onViewProfile != null)
+                        if (widget.isRelayedPeer)
+                          const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.hub_outlined,
+                                  size: 11, color: AppTheme.textSecondary),
+                              SizedBox(width: 3),
+                              Text(
+                                'Via relay',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: AppTheme.textSecondary,
+                                ),
+                              ),
+                            ],
+                          )
+                        else if (widget.onViewProfile != null)
                           const Text(
                             'Tap for info',
                             style: TextStyle(
@@ -236,6 +255,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                 message: message,
                                 isSentByMe: isSentByMe,
                                 onRetry: () => _retryMessage(message.id),
+                                isRelayedPeer: widget.isRelayedPeer,
                               ),
                             ],
                           );

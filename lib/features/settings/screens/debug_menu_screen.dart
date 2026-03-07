@@ -72,6 +72,16 @@ class _DebugMenuScreenState extends State<DebugMenuScreen> {
 
           const SizedBox(height: 24),
 
+          // Mesh Stats section
+          _buildSection(
+            'Mesh Network',
+            [
+              _buildMeshStatsRow(),
+            ],
+          ),
+
+          const SizedBox(height: 24),
+
           // Mock Data section
           _buildSection(
             'Mock Data',
@@ -265,6 +275,29 @@ class _DebugMenuScreenState extends State<DebugMenuScreen> {
           ),
         );
       },
+    );
+  }
+
+  Widget _buildMeshStatsRow() {
+    final bleService = getIt<BleServiceInterface>();
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Column(
+        children: [
+          _buildInfoRow(
+            'Mesh Relay',
+            bleService.isMeshRelayEnabled ? 'Enabled' : 'Disabled',
+          ),
+          _buildInfoRow(
+            'Relayed Peers',
+            '${bleService.meshRelayedPeerCount}',
+          ),
+          _buildInfoRow(
+            'Routing Table',
+            '${bleService.meshRoutingTableSize} nodes',
+          ),
+        ],
+      ),
     );
   }
 

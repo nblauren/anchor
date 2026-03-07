@@ -85,6 +85,8 @@ class DiscoveredPeer extends Equatable {
     this.photoThumbnails,
     this.rssi,
     required this.timestamp,
+    this.isRelayed = false,
+    this.hopCount = 0,
   });
 
   final String peerId;
@@ -96,6 +98,10 @@ class DiscoveredPeer extends Equatable {
   final List<Uint8List>? photoThumbnails;
   final int? rssi; // Signal strength
   final DateTime timestamp;
+  /// True when this peer was discovered via mesh relay rather than direct BLE.
+  final bool isRelayed;
+  /// Number of relay hops from the origin device (0 = direct).
+  final int hopCount;
 
   /// Estimated distance based on RSSI
   String? get distanceEstimate {
@@ -124,6 +130,8 @@ class DiscoveredPeer extends Equatable {
     List<Uint8List>? photoThumbnails,
     int? rssi,
     DateTime? timestamp,
+    bool? isRelayed,
+    int? hopCount,
   }) {
     return DiscoveredPeer(
       peerId: peerId ?? this.peerId,
@@ -134,12 +142,16 @@ class DiscoveredPeer extends Equatable {
       photoThumbnails: photoThumbnails ?? this.photoThumbnails,
       rssi: rssi ?? this.rssi,
       timestamp: timestamp ?? this.timestamp,
+      isRelayed: isRelayed ?? this.isRelayed,
+      hopCount: hopCount ?? this.hopCount,
     );
   }
 
   @override
-  List<Object?> get props =>
-      [peerId, name, age, bio, thumbnailBytes, photoThumbnails, rssi, timestamp];
+  List<Object?> get props => [
+        peerId, name, age, bio, thumbnailBytes, photoThumbnails,
+        rssi, timestamp, isRelayed, hopCount,
+      ];
 }
 
 /// Message type for BLE transmission

@@ -409,4 +409,20 @@ class MockBleService implements BleServiceInterface {
 
   @override
   Future<void> setBatterySaverMode(bool enabled) async {}
+
+  bool _meshRelayEnabled = true;
+
+  @override
+  Future<void> setMeshRelayMode(bool enabled) async {
+    _meshRelayEnabled = enabled;
+  }
+
+  @override
+  bool get isMeshRelayEnabled => _meshRelayEnabled;
+
+  @override
+  int get meshRelayedPeerCount => 0;
+
+  @override
+  int get meshRoutingTableSize => 0;
 }

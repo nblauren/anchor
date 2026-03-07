@@ -73,6 +73,7 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
           thumbnailData: peer.thumbnailBytes,
           photoThumbnails: peer.photoThumbnails,
           rssi: peer.rssi,
+          isRelayed: peer.isRelayed,
         ));
       }
     });
@@ -141,25 +142,47 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
     Emitter<DiscoveryState> emit,
   ) async {
     try {
-      // Save to database
-      final entry = await _peerRepository.upsertPeer(
-        peerId: event.peerId,
-        name: event.name,
-        age: event.age,
-        bio: event.bio,
-        thumbnailData: event.thumbnailData,
-        rssi: event.rssi,
-      );
+      DiscoveredPeer peer;
 
-      // Merge in-memory photo thumbnails (not persisted to DB) from the event
-      var peer = DiscoveredPeer.fromEntry(entry);
-      if (event.photoThumbnails != null) {
-        peer = peer.copyWith(photoThumbnails: event.photoThumbnails);
+      if (event.isRelayed) {
+        // Relayed peers are not persisted — in-memory only.
+        // Don't overwrite a directly-seen peer with a stale relayed version.
+        final existing =
+            state.peers.where((p) => p.peerId == event.peerId).firstOrNull;
+        if (existing != null && !existing.isRelayed) return;
+
+        peer = DiscoveredPeer(
+          peerId: event.peerId,
+          name: event.name,
+          age: event.age,
+          bio: event.bio,
+          thumbnailData: event.thumbnailData,
+          photoThumbnails: event.photoThumbnails,
+          lastSeenAt: DateTime.now(),
+          rssi: null,
+          isRelayed: true,
+        );
       } else {
-        // Preserve any previously received photoThumbnails for this peer
-        final existing = state.peers.where((p) => p.peerId == event.peerId).firstOrNull;
-        if (existing?.photoThumbnails != null) {
-          peer = peer.copyWith(photoThumbnails: existing!.photoThumbnails);
+        // Direct peer: persist to database
+        final entry = await _peerRepository.upsertPeer(
+          peerId: event.peerId,
+          name: event.name,
+          age: event.age,
+          bio: event.bio,
+          thumbnailData: event.thumbnailData,
+          rssi: event.rssi,
+        );
+
+        peer = DiscoveredPeer.fromEntry(entry);
+        if (event.photoThumbnails != null) {
+          peer = peer.copyWith(photoThumbnails: event.photoThumbnails);
+        } else {
+          // Preserve any previously received photoThumbnails for this peer
+          final existing =
+              state.peers.where((p) => p.peerId == event.peerId).firstOrNull;
+          if (existing?.photoThumbnails != null) {
+            peer = peer.copyWith(photoThumbnails: existing!.photoThumbnails);
+          }
         }
       }
 

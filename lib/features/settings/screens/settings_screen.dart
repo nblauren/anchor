@@ -76,6 +76,20 @@ class SettingsScreen extends StatelessWidget {
               },
             ),
           ),
+          BlocBuilder<BleConnectionBloc, BleConnectionState>(
+            builder: (context, bleState) => _buildSwitchTile(
+              context,
+              icon: Icons.hub,
+              title: 'Mesh Relay',
+              subtitle:
+                  'Extend range by forwarding messages through nearby devices',
+              value: bleState.isMeshRelay,
+              onChanged: (value) {
+                HapticFeedback.selectionClick();
+                context.read<BleConnectionBloc>().add(SetMeshRelay(value));
+              },
+            ),
+          ),
 
           const Divider(height: 32),
 

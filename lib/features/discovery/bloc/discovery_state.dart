@@ -23,6 +23,7 @@ class DiscoveredPeer extends Equatable {
     required this.lastSeenAt,
     this.rssi,
     this.isBlocked = false,
+    this.isRelayed = false,
   });
 
   final String peerId;
@@ -35,6 +36,8 @@ class DiscoveredPeer extends Equatable {
   final DateTime lastSeenAt;
   final int? rssi;
   final bool isBlocked;
+  /// True when this peer was discovered via mesh relay, not direct BLE scan.
+  final bool isRelayed;
 
   /// Factory from Drift entry
   factory DiscoveredPeer.fromEntry(DiscoveredPeerEntry entry) {
@@ -96,6 +99,7 @@ class DiscoveredPeer extends Equatable {
     DateTime? lastSeenAt,
     int? rssi,
     bool? isBlocked,
+    bool? isRelayed,
   }) {
     return DiscoveredPeer(
       peerId: peerId ?? this.peerId,
@@ -107,6 +111,7 @@ class DiscoveredPeer extends Equatable {
       lastSeenAt: lastSeenAt ?? this.lastSeenAt,
       rssi: rssi ?? this.rssi,
       isBlocked: isBlocked ?? this.isBlocked,
+      isRelayed: isRelayed ?? this.isRelayed,
     );
   }
 
@@ -121,6 +126,7 @@ class DiscoveredPeer extends Equatable {
         lastSeenAt,
         rssi,
         isBlocked,
+        isRelayed,
       ];
 }
 
