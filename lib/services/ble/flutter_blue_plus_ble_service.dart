@@ -850,15 +850,18 @@ class FlutterBluePlusBleService implements BleServiceInterface {
   }
 
   /// Decode local name "A:<name>:<age>"
+  ///
+  /// Age is optional — BLE ad packets are capped at 31 bytes and the name
+  /// field may arrive truncated, dropping the trailing ":<age>" segment.
   ({String name, int? age})? _decodeLocalName(String advName) {
     if (!advName.startsWith('A:')) return null;
     final parts = advName.split(':');
-    if (parts.length < 3) return null;
+    if (parts.length < 2) return null;
     final name = parts[1];
-    final age = int.tryParse(parts[2]);
+    final age = parts.length >= 3 ? int.tryParse(parts[2]) : null;
     return (
       name: name.isEmpty ? 'Anchor User' : name,
-      age: age == 0 ? null : age
+      age: (age == null || age == 0) ? null : age,
     );
   }
 
@@ -993,8 +996,10 @@ class FlutterBluePlusBleService implements BleServiceInterface {
     // Not an Anchor device if neither marker is present
     if (!hasAnchorService && decoded == null) return;
 
-    final name =
-        decoded?.name ?? (advName.isNotEmpty ? advName : 'Anchor User');
+    // Never fall back to the raw advName — it would expose our internal
+    // "A:<name>:<age>" encoding prefix in the UI and get persisted to the DB.
+    // The GATT profile read will supply the real name shortly after.
+    final name = decoded?.name ?? 'Anchor User';
     final age = decoded?.age;
 
     Logger.info(
