@@ -2,7 +2,7 @@ import UIKit
 import Flutter
 
 @main
-@objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
+@objc class AppDelegate: FlutterAppDelegate {
 
     override func application(
         _ application: UIApplication,
@@ -10,11 +10,5 @@ import Flutter
     ) -> Bool {
         GeneratedPluginRegistrant.register(with: self)
         return super.application(application, didFinishLaunchingWithOptions: launchOptions)
-    }
-
-    // Required for implicit engine initialization (background / scene launches)
-    func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
-        GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
-        // If you have custom plugin registration for background scenarios, add here
     }
 }
