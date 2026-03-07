@@ -121,7 +121,7 @@ SPEC CHECKSUMS:
   bluetooth_low_energy_darwin: 8027d98a11f64f880e4c738157dfe5ca88d28dbc
   Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
   flutter_image_compress_common: 1697a328fd72bfb335507c6bca1a65fa5ad87df1
-  flutter_local_notifications: 643a3eda1ce1c0599413ca31672536d423dee214
+  flutter_local_notifications: a5a732f069baa862e728d839dd2ebb904737effb
   image_compression_flutter: d5024f18de4d279a6accdf7543d4874ac0927239
   image_picker_ios: 7fe1ff8e34c1790d6fff70a32484959f563a928a
   libwebp: 02b23773aedb6ff1fd38cec7a77b81414c6842a8
