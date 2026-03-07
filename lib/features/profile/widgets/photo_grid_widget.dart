@@ -100,7 +100,7 @@ class PhotoGridWidget extends StatelessWidget {
   }
 }
 
-class _PhotoItem extends StatelessWidget {
+class _PhotoItem extends StatefulWidget {
   const _PhotoItem({
     super.key,
     required this.photo,
@@ -115,13 +115,36 @@ class _PhotoItem extends StatelessWidget {
   final VoidCallback onSetPrimary;
 
   @override
+  State<_PhotoItem> createState() => _PhotoItemState();
+}
+
+class _PhotoItemState extends State<_PhotoItem> {
+  late Future<String?> _resolvedPath;
+
+  @override
+  void initState() {
+    super.initState();
+    _resolvedPath = resolvePhotoPath(widget.photo.photoPath);
+  }
+
+  @override
+  void didUpdateWidget(_PhotoItem oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.photo.photoPath != widget.photo.photoPath) {
+      _resolvedPath = resolvePhotoPath(widget.photo.photoPath);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final photo = widget.photo;
+    final index = widget.index;
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: ReorderableDragStartListener(
         index: index,
         child: GestureDetector(
-          onLongPress: photo.isPrimary ? null : onSetPrimary,
+          onLongPress: photo.isPrimary ? null : widget.onSetPrimary,
           child: Container(
             height: 100,
             decoration: BoxDecoration(
@@ -139,7 +162,7 @@ class _PhotoItem extends StatelessWidget {
                     width: 100,
                     height: 100,
                     child: FutureBuilder<String?>(
-                      future: resolvePhotoPath(photo.photoPath),
+                      future: _resolvedPath,
                       builder: (context, snapshot) {
                         final path = snapshot.data;
                         if (path == null) {
@@ -152,6 +175,7 @@ class _PhotoItem extends StatelessWidget {
                         return Image.file(
                           File(path),
                           fit: BoxFit.cover,
+                          gaplessPlayback: true,
                           errorBuilder: (_, __, ___) => Container(
                             color: AppTheme.darkCard,
                             child: const Icon(Icons.broken_image,
@@ -207,7 +231,7 @@ class _PhotoItem extends StatelessWidget {
                 // Actions
                 IconButton(
                   icon: const Icon(Icons.delete_outline, color: AppTheme.error),
-                  onPressed: onRemove,
+                  onPressed: widget.onRemove,
                 ),
                 const Icon(Icons.drag_handle, color: AppTheme.textSecondary),
                 const SizedBox(width: 8),

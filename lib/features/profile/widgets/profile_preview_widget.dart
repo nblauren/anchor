@@ -7,7 +7,7 @@ import '../../../services/image_service.dart' show resolvePhotoPath;
 import '../bloc/profile_state.dart';
 
 /// Preview widget showing how the profile will appear to others
-class ProfilePreviewWidget extends StatelessWidget {
+class ProfilePreviewWidget extends StatefulWidget {
   const ProfilePreviewWidget({
     super.key,
     required this.name,
@@ -22,10 +22,41 @@ class ProfilePreviewWidget extends StatelessWidget {
   final List<ProfilePhoto> photos;
 
   @override
+  State<ProfilePreviewWidget> createState() => _ProfilePreviewWidgetState();
+}
+
+class _ProfilePreviewWidgetState extends State<ProfilePreviewWidget> {
+  Future<String?>? _resolvedPath;
+  String? _lastPhotoPath;
+
+  ProfilePhoto? get _primaryPhoto => widget.photos.isNotEmpty
+      ? widget.photos.firstWhere((p) => p.isPrimary,
+          orElse: () => widget.photos.first)
+      : null;
+
+  @override
+  void initState() {
+    super.initState();
+    _updateResolvedPath();
+  }
+
+  @override
+  void didUpdateWidget(ProfilePreviewWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _updateResolvedPath();
+  }
+
+  void _updateResolvedPath() {
+    final path = _primaryPhoto?.photoPath;
+    if (path != _lastPhotoPath) {
+      _lastPhotoPath = path;
+      _resolvedPath = path != null ? resolvePhotoPath(path) : null;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final primaryPhoto = photos.isNotEmpty
-        ? photos.firstWhere((p) => p.isPrimary, orElse: () => photos.first)
-        : null;
+    final primaryPhoto = _primaryPhoto;
 
     return Container(
       decoration: BoxDecoration(
@@ -76,13 +107,14 @@ class ProfilePreviewWidget extends StatelessWidget {
                       // Photo or placeholder
                       if (primaryPhoto != null)
                         FutureBuilder<String?>(
-                          future: resolvePhotoPath(primaryPhoto.photoPath),
+                          future: _resolvedPath,
                           builder: (context, snapshot) {
                             final path = snapshot.data;
                             if (path == null) return _buildPlaceholder();
                             return Image.file(
                               File(path),
                               fit: BoxFit.cover,
+                              gaplessPlayback: true,
                               errorBuilder: (_, __, ___) => _buildPlaceholder(),
                             );
                           },
@@ -124,10 +156,10 @@ class ProfilePreviewWidget extends StatelessWidget {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
-                            if (bio != null && bio!.isNotEmpty) ...[
+                            if (widget.bio != null && widget.bio!.isNotEmpty) ...[
                               const SizedBox(height: 4),
                               Text(
-                                bio!,
+                                widget.bio!,
                                 style: TextStyle(
                                   color: Colors.white.withValues(alpha: 0.8),
                                   fontSize: 12,
@@ -141,7 +173,7 @@ class ProfilePreviewWidget extends StatelessWidget {
                       ),
 
                       // Photo count indicator
-                      if (photos.length > 1)
+                      if (widget.photos.length > 1)
                         Positioned(
                           top: 8,
                           right: 8,
@@ -164,7 +196,7 @@ class ProfilePreviewWidget extends StatelessWidget {
                                 ),
                                 const SizedBox(width: 4),
                                 Text(
-                                  '${photos.length}',
+                                  '${widget.photos.length}',
                                   style: const TextStyle(
                                     color: Colors.white,
                                     fontSize: 12,
@@ -206,9 +238,10 @@ class ProfilePreviewWidget extends StatelessWidget {
   }
 
   String _formatNameAge() {
-    final displayName = name?.isNotEmpty == true ? name : 'Your Name';
-    if (age != null) {
-      return '$displayName, $age';
+    final displayName =
+        widget.name?.isNotEmpty == true ? widget.name : 'Your Name';
+    if (widget.age != null) {
+      return '$displayName, ${widget.age}';
     }
     return displayName!;
   }
