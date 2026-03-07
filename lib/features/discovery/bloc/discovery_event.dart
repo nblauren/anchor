@@ -32,6 +32,7 @@ class PeerDiscovered extends DiscoveryEvent {
     this.age,
     this.bio,
     this.thumbnailData,
+    this.photoThumbnails,
     this.rssi,
   });
 
@@ -40,10 +41,11 @@ class PeerDiscovered extends DiscoveryEvent {
   final int? age;
   final String? bio;
   final Uint8List? thumbnailData;
+  final List<Uint8List>? photoThumbnails;
   final int? rssi;
 
   @override
-  List<Object?> get props => [peerId, name, age, bio, thumbnailData, rssi];
+  List<Object?> get props => [peerId, name, age, bio, thumbnailData, photoThumbnails, rssi];
 }
 
 /// Peer data updated (signal strength, new info)

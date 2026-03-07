@@ -19,6 +19,7 @@ class DiscoveredPeer extends Equatable {
     this.age,
     this.bio,
     this.thumbnailData,
+    this.photoThumbnails,
     required this.lastSeenAt,
     this.rssi,
     this.isBlocked = false,
@@ -29,6 +30,8 @@ class DiscoveredPeer extends Equatable {
   final int? age;
   final String? bio;
   final Uint8List? thumbnailData;
+  /// All profile photo thumbnails in display order (up to 4). In-memory only — not persisted to DB.
+  final List<Uint8List>? photoThumbnails;
   final DateTime lastSeenAt;
   final int? rssi;
   final bool isBlocked;
@@ -89,6 +92,7 @@ class DiscoveredPeer extends Equatable {
     int? age,
     String? bio,
     Uint8List? thumbnailData,
+    List<Uint8List>? photoThumbnails,
     DateTime? lastSeenAt,
     int? rssi,
     bool? isBlocked,
@@ -99,6 +103,7 @@ class DiscoveredPeer extends Equatable {
       age: age ?? this.age,
       bio: bio ?? this.bio,
       thumbnailData: thumbnailData ?? this.thumbnailData,
+      photoThumbnails: photoThumbnails ?? this.photoThumbnails,
       lastSeenAt: lastSeenAt ?? this.lastSeenAt,
       rssi: rssi ?? this.rssi,
       isBlocked: isBlocked ?? this.isBlocked,
@@ -112,6 +117,7 @@ class DiscoveredPeer extends Equatable {
         age,
         bio,
         thumbnailData,
+        photoThumbnails,
         lastSeenAt,
         rssi,
         isBlocked,

@@ -34,6 +34,7 @@ class BroadcastPayload extends Equatable {
     this.age,
     this.bio,
     this.thumbnailBytes,
+    this.thumbnailsList,
   });
 
   final String userId;
@@ -41,6 +42,9 @@ class BroadcastPayload extends Equatable {
   final int? age;
   final String? bio;
   final Uint8List? thumbnailBytes;
+  /// All profile photo thumbnails in display order (up to 4).
+  /// When set, [thumbnailBytes] should be the first element.
+  final List<Uint8List>? thumbnailsList;
 
   /// Serialize to bytes for BLE transmission
   Map<String, dynamic> toJson() {
@@ -67,7 +71,7 @@ class BroadcastPayload extends Equatable {
   }
 
   @override
-  List<Object?> get props => [userId, name, age, bio, thumbnailBytes];
+  List<Object?> get props => [userId, name, age, bio, thumbnailBytes, thumbnailsList];
 }
 
 /// Discovered peer from BLE scan
@@ -78,6 +82,7 @@ class DiscoveredPeer extends Equatable {
     this.age,
     this.bio,
     this.thumbnailBytes,
+    this.photoThumbnails,
     this.rssi,
     required this.timestamp,
   });
@@ -87,6 +92,8 @@ class DiscoveredPeer extends Equatable {
   final int? age;
   final String? bio;
   final Uint8List? thumbnailBytes;
+  /// All profile photo thumbnails in display order (up to 4).
+  final List<Uint8List>? photoThumbnails;
   final int? rssi; // Signal strength
   final DateTime timestamp;
 
@@ -114,6 +121,7 @@ class DiscoveredPeer extends Equatable {
     int? age,
     String? bio,
     Uint8List? thumbnailBytes,
+    List<Uint8List>? photoThumbnails,
     int? rssi,
     DateTime? timestamp,
   }) {
@@ -123,6 +131,7 @@ class DiscoveredPeer extends Equatable {
       age: age ?? this.age,
       bio: bio ?? this.bio,
       thumbnailBytes: thumbnailBytes ?? this.thumbnailBytes,
+      photoThumbnails: photoThumbnails ?? this.photoThumbnails,
       rssi: rssi ?? this.rssi,
       timestamp: timestamp ?? this.timestamp,
     );
@@ -130,7 +139,7 @@ class DiscoveredPeer extends Equatable {
 
   @override
   List<Object?> get props =>
-      [peerId, name, age, bio, thumbnailBytes, rssi, timestamp];
+      [peerId, name, age, bio, thumbnailBytes, photoThumbnails, rssi, timestamp];
 }
 
 /// Message type for BLE transmission

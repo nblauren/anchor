@@ -89,7 +89,7 @@ class ProfileState extends Equatable {
   }
 
   /// Maximum photos allowed
-  static const int maxPhotos = 5;
+  static const int maxPhotos = 4;
 
   /// Whether more photos can be added
   bool get canAddMorePhotos => photos.length < maxPhotos;

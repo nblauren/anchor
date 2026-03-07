@@ -71,6 +71,7 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
           age: peer.age,
           bio: peer.bio,
           thumbnailData: peer.thumbnailBytes,
+          photoThumbnails: peer.photoThumbnails,
           rssi: peer.rssi,
         ));
       }
@@ -150,7 +151,17 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
         rssi: event.rssi,
       );
 
-      final peer = DiscoveredPeer.fromEntry(entry);
+      // Merge in-memory photo thumbnails (not persisted to DB) from the event
+      var peer = DiscoveredPeer.fromEntry(entry);
+      if (event.photoThumbnails != null) {
+        peer = peer.copyWith(photoThumbnails: event.photoThumbnails);
+      } else {
+        // Preserve any previously received photoThumbnails for this peer
+        final existing = state.peers.where((p) => p.peerId == event.peerId).firstOrNull;
+        if (existing?.photoThumbnails != null) {
+          peer = peer.copyWith(photoThumbnails: existing!.photoThumbnails);
+        }
+      }
 
       final existingIndex =
           state.peers.indexWhere((p) => p.peerId == event.peerId);
@@ -166,10 +177,10 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
         peers: updatedPeers,
       );
 
-      // Thumbnail arrivals must reach the UI immediately — no debounce.
+      // Thumbnail/photo arrivals must reach the UI immediately — no debounce.
       // All other updates (RSSI refresh, profile re-reads) use debouncing
       // to avoid excessive rebuilds when many peers update in rapid succession.
-      if (event.thumbnailData != null) {
+      if (event.thumbnailData != null || event.photoThumbnails != null) {
         emit(newState);
       } else {
         _scheduleUpdate(emit, () => newState);

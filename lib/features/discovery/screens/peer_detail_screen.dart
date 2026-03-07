@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
@@ -305,27 +307,34 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
     );
   }
 
-  Widget _buildPhotoCarousel() {
-    // For now, we only have thumbnail data (single image)
-    // In future, this would show multiple photos received via BLE
-    final hasPhoto =
-        _peer.thumbnailData != null && _peer.thumbnailData!.isNotEmpty;
+  /// Returns all available photo thumbnails for this peer in display order.
+  List<Uint8List> get _photos {
+    if (_peer.photoThumbnails != null && _peer.photoThumbnails!.isNotEmpty) {
+      return _peer.photoThumbnails!;
+    }
+    if (_peer.thumbnailData != null && _peer.thumbnailData!.isNotEmpty) {
+      return [_peer.thumbnailData!];
+    }
+    return [];
+  }
 
-    if (!hasPhoto) {
+  Widget _buildPhotoCarousel() {
+    final photos = _photos;
+
+    if (photos.isEmpty) {
       return _buildPlaceholder();
     }
 
-    // Single photo for now - PageView ready for multiple
     return Stack(
       fit: StackFit.expand,
       children: [
         PageView.builder(
           controller: _pageController,
           onPageChanged: (index) => setState(() => _currentPhotoIndex = index),
-          itemCount: 1, // Would be photos.length when we have multiple
+          itemCount: photos.length,
           itemBuilder: (context, index) {
             return Image.memory(
-              _peer.thumbnailData!,
+              photos[index],
               fit: BoxFit.cover,
               errorBuilder: (context, error, stackTrace) => _buildPlaceholder(),
             );
@@ -333,12 +342,12 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
         ),
 
         // Page indicator (shown when multiple photos)
-        if (1 > 1) // Replace `1` with photos.length when multi-photo supported
+        if (photos.length > 1)
           Positioned(
             bottom: 20,
             left: 0,
             right: 0,
-            child: _buildPageIndicator(1),
+            child: _buildPageIndicator(photos.length),
           ),
 
         // Gradient for back button visibility

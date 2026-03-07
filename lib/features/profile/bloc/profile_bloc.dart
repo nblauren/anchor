@@ -332,30 +332,22 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
     }
 
     try {
-      // Get primary photo thumbnail for broadcasting
-      Uint8List? thumbnailBytes;
-      final primaryPhoto = state.primaryPhoto;
+      // Collect thumbnails for all profile photos (up to maxPhotos) in display order
+      final sortedPhotos = state.sortedPhotos;
+      final List<Uint8List> allThumbnails = [];
 
       Logger.info(
-        'BroadcastProfile: primaryPhoto=${primaryPhoto?.id}, '
-        'photos=${state.photos.length}',
+        'BroadcastProfile: photos=${sortedPhotos.length}',
         'ProfileBloc',
       );
 
-      if (primaryPhoto != null) {
-        Logger.info(
-          'BroadcastProfile: thumbnailPath=${primaryPhoto.thumbnailPath}',
-          'ProfileBloc',
-        );
-        final resolvedPath = await resolvePhotoPath(primaryPhoto.thumbnailPath);
-        Logger.info(
-          'BroadcastProfile: resolvedPath=$resolvedPath',
-          'ProfileBloc',
-        );
+      for (final photo in sortedPhotos) {
+        final resolvedPath = await resolvePhotoPath(photo.thumbnailPath);
         if (resolvedPath != null) {
-          thumbnailBytes = await File(resolvedPath).readAsBytes();
+          final bytes = await File(resolvedPath).readAsBytes();
+          allThumbnails.add(bytes);
           Logger.info(
-            'BroadcastProfile: thumbnailBytes=${thumbnailBytes.length}B',
+            'BroadcastProfile: photo ${photo.orderIndex} thumbnail=${bytes.length}B',
             'ProfileBloc',
           );
         }
@@ -367,14 +359,16 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
         name: state.name!,
         age: state.age,
         bio: state.bio,
-        thumbnailBytes: thumbnailBytes,
+        thumbnailBytes: allThumbnails.isNotEmpty ? allThumbnails.first : null,
+        thumbnailsList: allThumbnails.isNotEmpty ? allThumbnails : null,
       );
 
       // Broadcast via BLE
       await _bleService.broadcastProfile(payload);
 
       Logger.info(
-        'Profile broadcast via BLE (thumbnail: ${thumbnailBytes?.length ?? 0}B)',
+        'Profile broadcast via BLE (${allThumbnails.length} photos, '
+        'primary: ${allThumbnails.isNotEmpty ? allThumbnails.first.length : 0}B)',
         'ProfileBloc',
       );
     } catch (e) {
