@@ -10,7 +10,8 @@
       "Bash(flutter pub add bluetooth_low_energy --dry-run 2>&1 | head -30)",
       "Bash(flutter pub get 2>&1)",
       "Bash(dart analyze lib/features/profile/ lib/services/image_service.dart 2>&1 | tail -5)",
-      "Bash(flutter pub run build_runner build --delete-conflicting-outputs 2>&1)"
+      "Bash(flutter pub run build_runner build --delete-conflicting-outputs 2>&1)",
+      "Bash(dart analyze lib/features/discovery/screens/peer_detail_screen.dart lib/features/discovery/widgets/peer_grid_tile.dart 2>&1)"
     ]
   }
 }

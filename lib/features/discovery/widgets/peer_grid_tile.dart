@@ -38,7 +38,7 @@ class PeerGridTile extends StatelessWidget {
               left: 0,
               right: 0,
               child: Container(
-                height: 80,
+                height: 100,
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     begin: Alignment.topCenter,
@@ -105,6 +105,18 @@ class PeerGridTile extends StatelessWidget {
                       ),
                     ],
                   ),
+                  if (peer.bio != null && peer.bio!.isNotEmpty) ...[
+                    const SizedBox(height: 3),
+                    Text(
+                      peer.bio!,
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.6),
+                        fontSize: 11,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
                 ],
               ),
             ),

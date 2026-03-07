@@ -1011,12 +1011,16 @@ class FlutterBluePlusBleService implements BleServiceInterface {
     // Store the peripheral for later connection
     _discoveredPeripherals[deviceId] = peripheral;
 
+    // Preserve bio and thumbnail already fetched via GATT in a prior scan cycle.
+    // The advertisement never carries this data, so every fresh scan event would
+    // otherwise overwrite the rich GATT data with nulls.
+    final existing = _visiblePeers[deviceId];
     final peer = DiscoveredPeer(
       peerId: deviceId,
       name: name,
       age: age,
-      bio: null,
-      thumbnailBytes: null,
+      bio: existing?.bio,
+      thumbnailBytes: existing?.thumbnailBytes,
       rssi: rssi,
       timestamp: DateTime.now(),
     );

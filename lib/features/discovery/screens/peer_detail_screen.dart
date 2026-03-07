@@ -96,9 +96,20 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: CustomScrollView(
-        slivers: [
+    return BlocListener<DiscoveryBloc, DiscoveryState>(
+      // Keep _peer in sync as BLE delivers bio, thumbnail, etc. after screen opens
+      listenWhen: (_, state) =>
+          state.peers.any((p) => p.peerId == _peer.peerId),
+      listener: (context, state) {
+        final updated =
+            state.peers.firstWhere((p) => p.peerId == _peer.peerId);
+        if (updated != _peer) {
+          setState(() => _peer = updated);
+        }
+      },
+      child: Scaffold(
+        body: CustomScrollView(
+          slivers: [
           // Photo carousel with app bar
           SliverAppBar(
             expandedHeight: MediaQuery.of(context).size.height * 0.5,
@@ -291,7 +302,8 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
               ),
             ),
           ),
-        ],
+          ],
+        ),
       ),
     );
   }
