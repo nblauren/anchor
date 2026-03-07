@@ -43,4 +43,18 @@ post_install do |installer|
       config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '13.0'
     end
   end
+
+  # Add a build phase to fix App.framework missing MinimumOSVersion
+  installer.aggregate_targets.each do |aggregate_target|
+    aggregate_target.user_project.targets.each do |target|
+      next unless target.name == 'Runner'
+
+      # Skip if already added
+      next if target.shell_script_build_phases.any? { |p| p.name == 'Fix App.framework MinimumOSVersion' }
+
+      phase = target.new_shell_script_build_phase('Fix App.framework MinimumOSVersion')
+      phase.shell_script = '/usr/libexec/PlistBuddy -c "Set :MinimumOSVersion ${IPHONEOS_DEPLOYMENT_TARGET}" "${BUILT_PRODUCTS_DIR}/App.framework/Info.plist" 2>/dev/null || true'
+    end
+    aggregate_target.user_project.save
+  end
 end
