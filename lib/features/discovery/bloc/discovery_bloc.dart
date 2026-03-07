@@ -7,6 +7,7 @@ import 'package:uuid/uuid.dart';
 import '../../../core/utils/logger.dart';
 import '../../../data/repositories/peer_repository.dart';
 import '../../../services/ble/ble.dart' as ble;
+import '../../../services/notification_service.dart';
 import 'discovery_event.dart';
 import 'discovery_state.dart';
 
@@ -23,8 +24,10 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
   DiscoveryBloc({
     required PeerRepository peerRepository,
     required ble.BleServiceInterface bleService,
+    NotificationService? notificationService,
   })  : _peerRepository = peerRepository,
         _bleService = bleService,
+        _notificationService = notificationService,
         super(const DiscoveryState()) {
     on<LoadDiscoveredPeers>(_onLoadDiscoveredPeers);
     on<StartDiscovery>(_onStartDiscovery);
@@ -55,6 +58,7 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
 
   final PeerRepository _peerRepository;
   final ble.BleServiceInterface _bleService;
+  final NotificationService? _notificationService;
   Timer? _debounceTimer;
   bool _pendingUpdate = false;
   StreamSubscription<ble.DiscoveredPeer>? _peerDiscoveredSubscription;
@@ -74,6 +78,7 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
           photoThumbnails: peer.photoThumbnails,
           rssi: peer.rssi,
           isRelayed: peer.isRelayed,
+          hopCount: peer.hopCount,
         ));
       }
     });
@@ -161,6 +166,7 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
           lastSeenAt: DateTime.now(),
           rssi: null,
           isRelayed: true,
+          hopCount: event.hopCount,
         );
       } else {
         // Direct peer: persist to database
@@ -188,12 +194,18 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
 
       final existingIndex =
           state.peers.indexWhere((p) => p.peerId == event.peerId);
+      final isNewPeer = existingIndex < 0;
       List<DiscoveredPeer> updatedPeers;
-      if (existingIndex >= 0) {
+      if (!isNewPeer) {
         updatedPeers = [...state.peers];
         updatedPeers[existingIndex] = peer;
       } else {
         updatedPeers = [peer, ...state.peers];
+        // Notify user about new peer (useful when app is backgrounded on iOS)
+        _notificationService?.showPeerDiscoveredNotification(
+          peerId: peer.peerId,
+          peerName: peer.name,
+        );
       }
       final newState = state.copyWith(
         status: DiscoveryStatus.loaded,

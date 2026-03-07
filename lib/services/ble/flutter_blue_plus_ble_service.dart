@@ -82,6 +82,8 @@ class FlutterBluePlusBleService implements BleServiceInterface {
   static const _batteryScanPause = Duration(seconds: 30);
   Duration _scanDuration = _normalScanDuration;
   Duration _scanPause = _normalScanPause;
+  // Whether the user has explicitly enabled battery saver (vs auto-adaptive)
+  bool _explicitBatterySaver = false;
 
   // Subscriptions
   StreamSubscription? _centralStateSubscription;
@@ -558,6 +560,10 @@ class FlutterBluePlusBleService implements BleServiceInterface {
   /// Forward a mesh message to all currently-connected peers except the one
   /// we received it from.  Decrements TTL and appends our userId to
   /// relay_path for loop detection.
+  ///
+  /// Intentionally does NOT queue messages for offline peers — relay packets
+  /// are only forwarded to peers currently connected via GATT.  Queuing relay
+  /// messages would cause stale-message floods when peers reconnect.
   void _maybeRelayMessage(Map<String, dynamic> json, String receivedFromPeerId) {
     if (!_meshRelayEnabled) return;
 
@@ -596,6 +602,13 @@ class FlutterBluePlusBleService implements BleServiceInterface {
       }
     }
 
+    // In high-density mode, apply probabilistic relay to reduce flood traffic.
+    final isHighDensity =
+        _visiblePeers.length >= config.highDensityPeerThreshold;
+    final relayProb =
+        isHighDensity ? config.highDensityRelayProbability : 1.0;
+    final rng = Random();
+
     // Fallback: flood to all connected peers except sender
     int relayCount = 0;
     for (final entry in _messagingChars.entries) {
@@ -603,6 +616,7 @@ class FlutterBluePlusBleService implements BleServiceInterface {
       if (targetPeerId == receivedFromPeerId) continue;
       final peripheral = _discoveredPeripherals[targetPeerId];
       if (peripheral == null) continue;
+      if (rng.nextDouble() > relayProb) continue; // probabilistic drop
       _writeRelayData(data, targetPeerId);
       relayCount++;
     }
@@ -1779,6 +1793,7 @@ class FlutterBluePlusBleService implements BleServiceInterface {
   void _emitPeer(DiscoveredPeer peer) {
     _visiblePeers[peer.peerId] = peer;
     _peerDiscoveredController.add(peer);
+    _updateScanTiming(); // Adapt scan cadence to current density
 
     _peerTimeoutTimers[peer.peerId]?.cancel();
     _peerTimeoutTimers[peer.peerId] = Timer(
@@ -1803,6 +1818,7 @@ class FlutterBluePlusBleService implements BleServiceInterface {
       _userIdToPeerId.removeWhere((_, v) => v == peerId);
       _lastAnnouncedAt.remove(peerId);
       Logger.info('BleService: Lost peer ${peer?.name}', 'BLE');
+      _updateScanTiming(); // Re-evaluate density after peer lost
     }
   }
 
@@ -2138,12 +2154,31 @@ class FlutterBluePlusBleService implements BleServiceInterface {
 
   @override
   Future<void> setBatterySaverMode(bool enabled) async {
-    _scanDuration = enabled ? _batteryScanDuration : _normalScanDuration;
-    _scanPause = enabled ? _batteryScanPause : _normalScanPause;
+    _explicitBatterySaver = enabled;
+    _updateScanTiming();
     Logger.info(
         'BleService: Battery saver ${enabled ? 'enabled' : 'disabled'} '
         '(scan ${_scanDuration.inSeconds}s / pause ${_scanPause.inSeconds}s)',
         'BLE');
+  }
+
+  /// Recalculates scan duration/pause based on explicit battery saver flag
+  /// and current peer density.  Call after peer count changes or after
+  /// toggling battery saver.
+  void _updateScanTiming() {
+    if (_explicitBatterySaver) {
+      _scanDuration = _batteryScanDuration;
+      _scanPause = _batteryScanPause;
+      return;
+    }
+    final isHighDensity = _visiblePeers.length >= config.highDensityPeerThreshold;
+    if (isHighDensity) {
+      _scanDuration = _batteryScanDuration;
+      _scanPause = config.highDensityScanPause;
+    } else {
+      _scanDuration = _normalScanDuration;
+      _scanPause = config.normalScanPause;
+    }
   }
 }
 

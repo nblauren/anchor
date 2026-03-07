@@ -80,24 +80,20 @@ class PeerGridTile extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 4),
-                  // Last seen indicator
+                  // Distance / relay badge
                   Row(
                     children: [
                       Container(
                         width: 8,
                         height: 8,
                         decoration: BoxDecoration(
-                          color: peer.isRecent
-                              ? Colors.greenAccent
-                              : peer.isNearby
-                                  ? Colors.yellowAccent
-                                  : AppTheme.textHint,
+                          color: _badgeColor,
                           shape: BoxShape.circle,
                         ),
                       ),
                       const SizedBox(width: 6),
                       Text(
-                        peer.lastSeenText,
+                        _distanceBadge,
                         style: TextStyle(
                           color: Colors.white.withValues(alpha: 0.7),
                           fontSize: 12,
@@ -195,7 +191,48 @@ class PeerGridTile extends StatelessWidget {
         errorBuilder: (context, error, stackTrace) => _buildPlaceholder(),
       );
     }
+    if (peer.isRelayed) {
+      return _buildRelayedPlaceholder();
+    }
     return _buildPlaceholder();
+  }
+
+  Widget _buildRelayedPlaceholder() {
+    final colorIndex = peer.name.hashCode.abs() % _placeholderColors.length;
+    final color = _placeholderColors[colorIndex];
+
+    return Container(
+      color: color.withValues(alpha: 0.15),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Center(
+            child: Text(
+              peer.name.isNotEmpty ? peer.name[0].toUpperCase() : '?',
+              style: TextStyle(
+                color: color.withValues(alpha: 0.4),
+                fontSize: 48,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          Center(
+            child: Padding(
+              padding: const EdgeInsets.only(top: 44),
+              child: Text(
+                'Get closer\nto see photo',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.5),
+                  fontSize: 9,
+                  height: 1.4,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildPlaceholder() {
@@ -216,6 +253,23 @@ class PeerGridTile extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  /// Human-readable distance label based on RSSI or relay status.
+  String get _distanceBadge {
+    if (peer.isRelayed) return 'Via mesh';
+    final rssi = peer.rssi;
+    if (rssi == null) return peer.isRecent ? 'Nearby' : peer.lastSeenText;
+    if (rssi >= -55) return 'Close';
+    if (rssi >= -70) return 'Nearby';
+    return 'In range';
+  }
+
+  Color get _badgeColor {
+    if (peer.isRelayed) return const Color(0xFF818CF8); // indigo for relay
+    if (peer.isRecent) return Colors.greenAccent;
+    if (peer.isNearby) return Colors.yellowAccent;
+    return AppTheme.textHint;
   }
 
   Widget _buildSignalIndicator() {

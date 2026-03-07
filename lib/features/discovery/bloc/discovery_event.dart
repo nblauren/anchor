@@ -35,6 +35,7 @@ class PeerDiscovered extends DiscoveryEvent {
     this.photoThumbnails,
     this.rssi,
     this.isRelayed = false,
+    this.hopCount = 0,
   });
 
   final String peerId;
@@ -46,10 +47,12 @@ class PeerDiscovered extends DiscoveryEvent {
   final int? rssi;
   /// True when discovered via mesh relay rather than direct BLE.
   final bool isRelayed;
+  /// Number of hops from origin (0 = direct).
+  final int hopCount;
 
   @override
   List<Object?> get props =>
-      [peerId, name, age, bio, thumbnailData, photoThumbnails, rssi, isRelayed];
+      [peerId, name, age, bio, thumbnailData, photoThumbnails, rssi, isRelayed, hopCount];
 }
 
 /// Peer data updated (signal strength, new info)

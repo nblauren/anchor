@@ -38,6 +38,12 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       description:
           'Your data stays on your device. No accounts, no servers, no tracking. Just real connections.',
     ),
+    _OnboardingPage(
+      icon: Icons.phone_iphone,
+      title: 'Keep Anchor Open',
+      description:
+          'For the best experience, keep Anchor open while exploring. iOS limits Bluetooth discovery in the background — you\'ll get a notification when new people appear nearby.',
+    ),
   ];
 
   void _onPageChanged(int page) {

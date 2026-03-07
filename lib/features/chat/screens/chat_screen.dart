@@ -19,6 +19,7 @@ class ChatScreen extends StatefulWidget {
     this.peerThumbnail,
     this.onViewProfile,
     this.isRelayedPeer = false,
+    this.hopCount = 0,
   });
 
   final String peerId;
@@ -27,6 +28,8 @@ class ChatScreen extends StatefulWidget {
   final VoidCallback? onViewProfile;
   /// Whether this peer is only reachable via mesh relay (not direct BLE).
   final bool isRelayedPeer;
+  /// Number of relay hops to reach this peer (0 = direct).
+  final int hopCount;
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -76,6 +79,15 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _showPhotoOptions() {
+    if (widget.isRelayedPeer) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Move closer to send photos'),
+          duration: Duration(seconds: 3),
+        ),
+      );
+      return;
+    }
     showModalBottomSheet(
       context: context,
       backgroundColor: AppTheme.darkCard,
@@ -176,15 +188,17 @@ class _ChatScreenState extends State<ChatScreen> {
                           overflow: TextOverflow.ellipsis,
                         ),
                         if (widget.isRelayedPeer)
-                          const Row(
+                          Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(Icons.hub_outlined,
+                              const Icon(Icons.hub_outlined,
                                   size: 11, color: AppTheme.textSecondary),
-                              SizedBox(width: 3),
+                              const SizedBox(width: 3),
                               Text(
-                                'Via relay',
-                                style: TextStyle(
+                                widget.hopCount > 0
+                                    ? 'Via relay · ${widget.hopCount} ${widget.hopCount == 1 ? 'hop' : 'hops'}'
+                                    : 'Via relay',
+                                style: const TextStyle(
                                   fontSize: 12,
                                   color: AppTheme.textSecondary,
                                 ),

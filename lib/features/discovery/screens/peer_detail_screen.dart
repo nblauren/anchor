@@ -88,6 +88,7 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
             peerName: _peer.name,
             peerThumbnail: _peer.thumbnailData,
             isRelayedPeer: _peer.isRelayed,
+            hopCount: _peer.hopCount,
           ),
         ),
       ),
@@ -320,6 +321,38 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
   }
 
   Widget _buildPhotoCarousel() {
+    // Relayed peers: only show photos if we received a small thumbnail (≤20 KB).
+    // Full photo data is gated to direct range.
+    if (_peer.isRelayed) {
+      final thumb = _peer.thumbnailData;
+      if (thumb != null && thumb.isNotEmpty && thumb.lengthInBytes <= 20 * 1024) {
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            Image.memory(thumb, fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => _buildRelayedPhotoPlaceholder()),
+            Positioned(
+              top: 0, left: 0, right: 0,
+              child: Container(
+                height: 100,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.black.withValues(alpha: 0.5),
+                      Colors.transparent,
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        );
+      }
+      return _buildRelayedPhotoPlaceholder();
+    }
+
     final photos = _photos;
 
     if (photos.isEmpty) {
@@ -371,6 +404,70 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildRelayedPhotoPlaceholder() {
+    final colorIndex = _peer.name.hashCode.abs() % _placeholderColors.length;
+    final color = _placeholderColors[colorIndex];
+
+    return Container(
+      color: color.withValues(alpha: 0.15),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  _peer.name.isNotEmpty ? _peer.name[0].toUpperCase() : '?',
+                  style: TextStyle(
+                    color: color.withValues(alpha: 0.5),
+                    fontSize: 80,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.4),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.hub_outlined, size: 14, color: Colors.white70),
+                      SizedBox(width: 6),
+                      Text(
+                        'Get closer to see photos',
+                        style: TextStyle(color: Colors.white70, fontSize: 13),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Positioned(
+            top: 0, left: 0, right: 0,
+            child: Container(
+              height: 100,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.black.withValues(alpha: 0.5),
+                    Colors.transparent,
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 

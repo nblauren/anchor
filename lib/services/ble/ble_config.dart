@@ -11,6 +11,10 @@ class BleConfig {
     this.peerLostTimeout = const Duration(minutes: 2),
     this.maxThumbnailSize = 15 * 1024, // 15KB max for BLE payload
     this.maxPhotoSize = 500 * 1024, // 500KB max for transfer
+    this.highDensityPeerThreshold = 15,
+    this.highDensityScanPause = const Duration(seconds: 12),
+    this.normalScanPause = const Duration(seconds: 5),
+    this.highDensityRelayProbability = 0.65,
   });
 
   /// Whether to use MockBleService (for testing) or real BLE service
@@ -42,6 +46,19 @@ class BleConfig {
 
   /// Maximum photo size for transfer
   final int maxPhotoSize;
+
+  /// Number of direct peers above which "high density" mode is activated
+  final int highDensityPeerThreshold;
+
+  /// Scan pause duration in high-density mode (longer = less battery drain)
+  final Duration highDensityScanPause;
+
+  /// Scan pause duration in normal mode
+  final Duration normalScanPause;
+
+  /// Probability of relaying a mesh message in high-density mode (0.0–1.0).
+  /// Reduces relay flood when many peers are in range.
+  final double highDensityRelayProbability;
 
   /// Create config from environment variables
   factory BleConfig.fromEnvironment() {

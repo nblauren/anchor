@@ -20,6 +20,8 @@ class DiscoveryScreen extends StatefulWidget {
 }
 
 class _DiscoveryScreenState extends State<DiscoveryScreen> {
+  bool _meshTipDismissed = false;
+
   @override
   void initState() {
     super.initState();
@@ -35,6 +37,15 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
 
   void _loadMockData() {
     context.read<DiscoveryBloc>().add(const LoadMockPeers());
+  }
+
+  String _peerCountLabel(DiscoveryState state) {
+    final direct = state.visiblePeers.where((p) => !p.isRelayed).length;
+    final relayed = state.visiblePeers.where((p) => p.isRelayed).length;
+    if (relayed == 0) {
+      return '$direct nearby';
+    }
+    return '$direct nearby · $relayed via mesh';
   }
 
   Future<void> _openPeerDetail(DiscoveredPeer peer) async {
@@ -89,16 +100,17 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       const Icon(
-                        Icons.people,
+                        Icons.bluetooth_connected,
                         size: 16,
                         color: AppTheme.primaryColor,
                       ),
                       const SizedBox(width: 4),
                       Text(
-                        '${state.peerCount}',
+                        _peerCountLabel(state),
                         style: const TextStyle(
                           color: AppTheme.primaryColor,
                           fontWeight: FontWeight.bold,
+                          fontSize: 13,
                         ),
                       ),
                     ],
@@ -149,28 +161,84 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                     conv.conversation.peerId: conv.unreadCount,
               };
 
-              return GridView.builder(
-                padding: const EdgeInsets.all(12),
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: crossAxisCount,
-                  childAspectRatio: 1,
-                  crossAxisSpacing: 12,
-                  mainAxisSpacing: 12,
-                ),
-                itemCount: state.visiblePeers.length,
-                itemBuilder: (context, index) {
-                  final peer = state.visiblePeers[index];
-                  return PeerGridTile(
-                    key: ValueKey(peer.peerId),
-                    peer: peer,
-                    unreadCount: unreadByPeer[peer.peerId] ?? 0,
-                    onTap: () => _openPeerDetail(peer),
-                  );
-                },
+              final hasRelayedPeers =
+                  state.visiblePeers.any((p) => p.isRelayed);
+
+              return CustomScrollView(
+                slivers: [
+                  // Tip card: shown once when relayed peers appear
+                  if (hasRelayedPeers && !_meshTipDismissed)
+                    SliverToBoxAdapter(
+                      child: _buildMeshTipCard(),
+                    ),
+                  SliverPadding(
+                    padding: const EdgeInsets.all(12),
+                    sliver: SliverGrid(
+                      delegate: SliverChildBuilderDelegate(
+                        (context, index) {
+                          final peer = state.visiblePeers[index];
+                          return PeerGridTile(
+                            key: ValueKey(peer.peerId),
+                            peer: peer,
+                            unreadCount: unreadByPeer[peer.peerId] ?? 0,
+                            onTap: () => _openPeerDetail(peer),
+                          );
+                        },
+                        childCount: state.visiblePeers.length,
+                      ),
+                      gridDelegate:
+                          SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: crossAxisCount,
+                        childAspectRatio: 1,
+                        crossAxisSpacing: 12,
+                        mainAxisSpacing: 12,
+                      ),
+                    ),
+                  ),
+                ],
               );
             },
           );
         },
+      ),
+    );
+  }
+
+  Widget _buildMeshTipCard() {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFF312E81).withValues(alpha: 0.6), // deep indigo
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: const Color(0xFF818CF8).withValues(alpha: 0.4),
+        ),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.hub_outlined, color: Color(0xFF818CF8), size: 18),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Some people are visible via mesh relay. '
+              'Metal walls can reduce range — move closer for direct connection.',
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.8),
+                fontSize: 12,
+                height: 1.4,
+              ),
+            ),
+          ),
+          GestureDetector(
+            onTap: () => setState(() => _meshTipDismissed = true),
+            child: Icon(
+              Icons.close,
+              size: 16,
+              color: Colors.white.withValues(alpha: 0.5),
+            ),
+          ),
+        ],
       ),
     );
   }
