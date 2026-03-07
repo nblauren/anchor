@@ -6,7 +6,6 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../data/local_database/database.dart';
 import '../../../data/repositories/chat_repository.dart';
-import '../../../injection.dart';
 import '../../discovery/bloc/discovery_bloc.dart';
 import '../../discovery/bloc/discovery_state.dart';
 import '../../discovery/screens/peer_detail_screen.dart';
@@ -33,17 +32,17 @@ class _ChatListScreenState extends State<ChatListScreen> {
   Future<void> _openConversation(ConversationWithPeer conv) async {
     final peerName = conv.peer?.name ?? 'Unknown';
     final peerId = conv.conversation.peerId;
-    final ownUserId = context.read<ChatBloc>().ownUserId;
     final thumbnail = conv.peer?.thumbnailData;
     final peer =
         conv.peer != null ? DiscoveredPeer.fromEntry(conv.peer!) : null;
+    final chatBloc = context.read<ChatBloc>();
     final discoveryBloc = context.read<DiscoveryBloc>();
 
     await Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => BlocProvider<ChatBloc>(
-          create: (_) => getIt<ChatBloc>(param1: ownUserId),
+        builder: (_) => BlocProvider.value(
+          value: chatBloc,
           child: ChatScreen(
             peerId: peerId,
             peerName: peerName,
@@ -51,8 +50,11 @@ class _ChatListScreenState extends State<ChatListScreen> {
             onViewProfile: peer != null
                 ? () => Navigator.of(context).push(
                       MaterialPageRoute(
-                        builder: (_) => BlocProvider.value(
-                          value: discoveryBloc,
+                        builder: (_) => MultiBlocProvider(
+                          providers: [
+                            BlocProvider.value(value: discoveryBloc),
+                            BlocProvider.value(value: chatBloc),
+                          ],
                           child: PeerDetailScreen(peer: peer),
                         ),
                       ),

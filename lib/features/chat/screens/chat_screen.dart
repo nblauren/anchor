@@ -33,12 +33,14 @@ class _ChatScreenState extends State<ChatScreen> {
   final _messageController = TextEditingController();
   final _scrollController = ScrollController();
   final _imagePicker = ImagePicker();
+  late final ChatBloc _chatBloc;
 
   @override
   void initState() {
     super.initState();
+    _chatBloc = context.read<ChatBloc>();
     // Open conversation for this peer (marks messages as read automatically)
-    context.read<ChatBloc>().add(OpenConversation(
+    _chatBloc.add(OpenConversation(
           peerId: widget.peerId,
           peerName: widget.peerName,
         ));
@@ -56,6 +58,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   void dispose() {
+    _chatBloc.add(const CloseConversation());
     _messageController.dispose();
     _scrollController.dispose();
     super.dispose();

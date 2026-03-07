@@ -57,10 +57,11 @@ class PeerRepository {
       // Update existing peer
       final companion = DiscoveredPeersCompanion(
         name: Value(name),
-        age: Value(age),
-        // Only overwrite bio/thumbnail when we actually have a new value.
-        // Advertisement scans emit null for both — we must not let them wipe
-        // the richer data that the GATT profile read stored previously.
+        // Only overwrite age/bio/thumbnail when we actually have a new value.
+        // Advertisement scans can arrive with null age (truncated ad packet)
+        // or null bio/thumbnail — we must not let them wipe the richer data
+        // that the GATT profile read stored previously.
+        age: age != null ? Value(age) : const Value.absent(),
         bio: bio != null ? Value(bio) : const Value.absent(),
         thumbnailData:
             thumbnailData != null ? Value(thumbnailData) : const Value.absent(),
@@ -75,8 +76,8 @@ class PeerRepository {
       return DiscoveredPeerEntry(
         peerId: peerId,
         name: name,
-        age: age,
-        // Mirror the DB write: don't overwrite a stored bio/thumbnail with null.
+        // Mirror the DB write: don't overwrite stored age/bio/thumbnail with null.
+        age: age ?? existing.age,
         bio: bio ?? existing.bio,
         thumbnailData: thumbnailData ?? existing.thumbnailData,
         lastSeenAt: now,

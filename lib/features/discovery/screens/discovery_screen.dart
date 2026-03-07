@@ -38,10 +38,16 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
   }
 
   Future<void> _openPeerDetail(DiscoveredPeer peer) async {
+    final discoveryBloc = context.read<DiscoveryBloc>();
+    final chatBloc = context.read<ChatBloc>();
+
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (context) => BlocProvider.value(
-          value: context.read<DiscoveryBloc>(),
+        builder: (_) => MultiBlocProvider(
+          providers: [
+            BlocProvider.value(value: discoveryBloc),
+            BlocProvider.value(value: chatBloc),
+          ],
           child: PeerDetailScreen(peer: peer),
         ),
       ),

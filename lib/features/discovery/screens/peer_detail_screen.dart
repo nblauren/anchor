@@ -2,10 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../core/theme/app_theme.dart';
-import '../../../injection.dart';
 import '../../chat/bloc/chat_bloc.dart';
 import '../../chat/screens/chat_screen.dart';
-import '../../profile/bloc/profile_bloc.dart';
 import '../bloc/discovery_bloc.dart';
 import '../bloc/discovery_event.dart';
 import '../bloc/discovery_state.dart';
@@ -77,14 +75,12 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
   }
 
   Future<void> _openChat() async {
-    // Get the current user's profile ID for ChatBloc
-    final profileState = context.read<ProfileBloc>().state;
-    final ownUserId = profileState.profileId ?? '';
+    final chatBloc = context.read<ChatBloc>();
 
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => BlocProvider<ChatBloc>(
-          create: (_) => getIt<ChatBloc>(param1: ownUserId),
+        builder: (_) => BlocProvider.value(
+          value: chatBloc,
           child: ChatScreen(
             peerId: _peer.peerId,
             peerName: _peer.name,
