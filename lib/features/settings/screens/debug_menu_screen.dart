@@ -38,11 +38,11 @@ class _DebugMenuScreenState extends State<DebugMenuScreen> {
   }
 
   void _loadLogs() {
-    // TODO: Implement log retrieval from Logger
+    final recent = Logger.getRecentLogs();
     setState(() {
-      _logs = 'Debug logs will appear here...\n\n'
-          'App started at ${DateTime.now()}\n'
-          'BLE Service: ${_isMockBle ? 'Mock' : 'FlutterBluePlus'}';
+      _logs = recent.isNotEmpty
+          ? recent
+          : 'No logs yet.\n\nBLE Service: ${_isMockBle ? 'Mock' : 'FlutterBluePlus'}';
     });
   }
 
@@ -364,6 +364,7 @@ class _DebugMenuScreenState extends State<DebugMenuScreen> {
       rssi: -50 - (DateTime.now().second % 40),
     );
 
+    if (!mounted) return;
     context.read<DiscoveryBloc>().add(const LoadDiscoveredPeers());
     _showSnackBar('Discovered: $name');
     _appendLog('Peer discovered: $name ($peerId)');
@@ -378,6 +379,7 @@ class _DebugMenuScreenState extends State<DebugMenuScreen> {
     if (confirmed) {
       final db = getIt<DatabaseService>();
       await db.peerRepository.clearOldPeers(Duration.zero);
+      if (!mounted) return;
       context.read<DiscoveryBloc>().add(const LoadDiscoveredPeers());
       _showSnackBar('All peers cleared');
       _appendLog('Cleared all peers');
@@ -440,6 +442,7 @@ Database Statistics:
   }
 
   void _clearLogs() {
+    Logger.clearBuffer();
     setState(() {
       _logs = 'Logs cleared at ${DateTime.now()}';
     });

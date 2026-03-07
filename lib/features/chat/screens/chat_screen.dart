@@ -122,10 +122,11 @@ class _ChatScreenState extends State<ChatScreen> {
         imageQuality: 80,
       );
 
-      if (image != null) {
+      if (image != null && mounted) {
         context.read<ChatBloc>().add(SendPhotoMessage(image.path));
       }
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Failed to pick photo')),
       );

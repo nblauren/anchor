@@ -93,6 +93,9 @@ abstract class BleServiceInterface {
 
   // ==================== Utilities ====================
 
+  /// Enable or disable battery saver mode (reduces scan frequency)
+  Future<void> setBatterySaverMode(bool enabled);
+
   /// Get signal strength to a specific peer (if available)
   int? getSignalStrength(String peerId);
 

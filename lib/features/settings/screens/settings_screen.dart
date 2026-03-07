@@ -4,6 +4,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../injection.dart';
+import '../../../services/ble/ble_connection_bloc.dart';
 import '../../../services/database_service.dart';
 import '../../profile/bloc/profile_bloc.dart';
 import '../../profile/bloc/profile_event.dart';
@@ -49,27 +50,31 @@ class SettingsScreen extends StatelessWidget {
 
           // Discovery section
           _buildSectionHeader('Discovery'),
-          _buildSwitchTile(
-            context,
-            icon: Icons.visibility,
-            title: 'Visible to Others',
-            subtitle: 'Allow nearby people to discover you',
-            value: true, // TODO: Wire to actual setting
-            onChanged: (value) {
-              // TODO: Implement visibility toggle
-              HapticFeedback.selectionClick();
-            },
+          BlocBuilder<BleConnectionBloc, BleConnectionState>(
+            builder: (context, bleState) => _buildSwitchTile(
+              context,
+              icon: Icons.visibility,
+              title: 'Visible to Others',
+              subtitle: 'Allow nearby people to discover you',
+              value: bleState.isVisible,
+              onChanged: (value) {
+                HapticFeedback.selectionClick();
+                context.read<BleConnectionBloc>().add(SetVisibility(value));
+              },
+            ),
           ),
-          _buildSwitchTile(
-            context,
-            icon: Icons.battery_saver,
-            title: 'Battery Saver Mode',
-            subtitle: 'Reduce scanning frequency to save battery',
-            value: false, // TODO: Wire to actual setting
-            onChanged: (value) {
-              // TODO: Implement battery saver
-              HapticFeedback.selectionClick();
-            },
+          BlocBuilder<BleConnectionBloc, BleConnectionState>(
+            builder: (context, bleState) => _buildSwitchTile(
+              context,
+              icon: Icons.battery_saver,
+              title: 'Battery Saver Mode',
+              subtitle: 'Reduce scanning frequency to save battery',
+              value: bleState.isBatterySaver,
+              onChanged: (value) {
+                HapticFeedback.selectionClick();
+                context.read<BleConnectionBloc>().add(SetBatterySaver(value));
+              },
+            ),
           ),
 
           const Divider(height: 32),

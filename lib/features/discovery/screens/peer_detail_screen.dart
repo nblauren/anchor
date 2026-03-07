@@ -26,6 +26,7 @@ class PeerDetailScreen extends StatefulWidget {
 class _PeerDetailScreenState extends State<PeerDetailScreen> {
   late DiscoveredPeer _peer;
   final PageController _pageController = PageController();
+  int _currentPhotoIndex = 0;
 
   @override
   void initState() {
@@ -324,9 +325,7 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
       children: [
         PageView.builder(
           controller: _pageController,
-          onPageChanged: (index) {
-            // TODO: Update photo indicator when multiple photos supported
-          },
+          onPageChanged: (index) => setState(() => _currentPhotoIndex = index),
           itemCount: 1, // Would be photos.length when we have multiple
           itemBuilder: (context, index) {
             return Image.memory(
@@ -338,12 +337,13 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
         ),
 
         // Page indicator (shown when multiple photos)
-        // Positioned(
-        //   bottom: 20,
-        //   left: 0,
-        //   right: 0,
-        //   child: _buildPageIndicator(photoCount),
-        // ),
+        if (1 > 1) // Replace `1` with photos.length when multi-photo supported
+          Positioned(
+            bottom: 20,
+            left: 0,
+            right: 0,
+            child: _buildPageIndicator(1),
+          ),
 
         // Gradient for back button visibility
         Positioned(
@@ -412,25 +412,26 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
     );
   }
 
-  // For future use when we have multiple photos
-  // Widget _buildPageIndicator(int count) {
-  //   return Row(
-  //     mainAxisAlignment: MainAxisAlignment.center,
-  //     children: List.generate(count, (index) {
-  //       return Container(
-  //         width: 8,
-  //         height: 8,
-  //         margin: const EdgeInsets.symmetric(horizontal: 4),
-  //         decoration: BoxDecoration(
-  //           shape: BoxShape.circle,
-  //           color: index == _currentPhotoIndex
-  //               ? Colors.white
-  //               : Colors.white.withValues(alpha: 0.4),
-  //         ),
-  //       );
-  //     }),
-  //   );
-  // }
+  Widget _buildPageIndicator(int count) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: List.generate(count, (index) {
+        final isActive = index == _currentPhotoIndex;
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          width: isActive ? 20 : 8,
+          height: 8,
+          margin: const EdgeInsets.symmetric(horizontal: 4),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(4),
+            color: isActive
+                ? Colors.white
+                : Colors.white.withValues(alpha: 0.4),
+          ),
+        );
+      }),
+    );
+  }
 
   static const _placeholderColors = [
     Color(0xFF6366F1), // Indigo

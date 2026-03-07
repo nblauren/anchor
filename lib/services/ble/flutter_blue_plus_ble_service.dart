@@ -75,8 +75,12 @@ class FlutterBluePlusBleService implements BleServiceInterface {
 
   // Scan lifecycle
   Timer? _scanRestartTimer;
-  static const _scanDuration = Duration(seconds: 5);
-  static const _scanPause = Duration(seconds: 15);
+  static const _normalScanDuration = Duration(seconds: 5);
+  static const _normalScanPause = Duration(seconds: 15);
+  static const _batteryScanDuration = Duration(seconds: 2);
+  static const _batteryScanPause = Duration(seconds: 30);
+  Duration _scanDuration = _normalScanDuration;
+  Duration _scanPause = _normalScanPause;
 
   // Subscriptions
   StreamSubscription? _centralStateSubscription;
@@ -1635,6 +1639,16 @@ class FlutterBluePlusBleService implements BleServiceInterface {
 
   @override
   List<String> get visiblePeerIds => _visiblePeers.keys.toList();
+
+  @override
+  Future<void> setBatterySaverMode(bool enabled) async {
+    _scanDuration = enabled ? _batteryScanDuration : _normalScanDuration;
+    _scanPause = enabled ? _batteryScanPause : _normalScanPause;
+    Logger.info(
+        'BleService: Battery saver ${enabled ? 'enabled' : 'disabled'} '
+        '(scan ${_scanDuration.inSeconds}s / pause ${_scanPause.inSeconds}s)',
+        'BLE');
+  }
 }
 
 /// Tracks an incoming binary photo transfer from a specific peer.

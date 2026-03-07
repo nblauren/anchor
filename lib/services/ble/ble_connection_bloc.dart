@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:equatable/equatable.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/utils/logger.dart';
 import 'ble_models.dart';
@@ -44,6 +45,24 @@ class AppResumed extends BleConnectionEvent {
 /// App moved to background - reduce scanning
 class AppPaused extends BleConnectionEvent {
   const AppPaused();
+}
+
+/// Toggle whether this device is visible to others (scanning + broadcasting)
+class SetVisibility extends BleConnectionEvent {
+  const SetVisibility(this.visible);
+  final bool visible;
+
+  @override
+  List<Object?> get props => [visible];
+}
+
+/// Toggle battery saver mode (reduces scan frequency)
+class SetBatterySaver extends BleConnectionEvent {
+  const SetBatterySaver(this.enabled);
+  final bool enabled;
+
+  @override
+  List<Object?> get props => [enabled];
 }
 
 /// BLE status changed (internal)
@@ -95,6 +114,8 @@ class BleConnectionState extends Equatable {
     this.isScanning = false,
     this.isBroadcasting = false,
     this.isInForeground = true,
+    this.isVisible = true,
+    this.isBatterySaver = false,
     this.errorMessage,
   });
 
@@ -105,6 +126,8 @@ class BleConnectionState extends Equatable {
   final bool isScanning;
   final bool isBroadcasting;
   final bool isInForeground;
+  final bool isVisible;
+  final bool isBatterySaver;
   final String? errorMessage;
 
   /// Whether BLE is ready to use
@@ -157,6 +180,8 @@ class BleConnectionState extends Equatable {
     bool? isScanning,
     bool? isBroadcasting,
     bool? isInForeground,
+    bool? isVisible,
+    bool? isBatterySaver,
     String? errorMessage,
   }) {
     return BleConnectionState(
@@ -167,6 +192,8 @@ class BleConnectionState extends Equatable {
       isScanning: isScanning ?? this.isScanning,
       isBroadcasting: isBroadcasting ?? this.isBroadcasting,
       isInForeground: isInForeground ?? this.isInForeground,
+      isVisible: isVisible ?? this.isVisible,
+      isBatterySaver: isBatterySaver ?? this.isBatterySaver,
       errorMessage: errorMessage,
     );
   }
@@ -180,6 +207,8 @@ class BleConnectionState extends Equatable {
         isScanning,
         isBroadcasting,
         isInForeground,
+        isVisible,
+        isBatterySaver,
         errorMessage,
       ];
 }
@@ -197,6 +226,8 @@ class BleConnectionBloc extends Bloc<BleConnectionEvent, BleConnectionState> {
     on<StopBleService>(_onStop);
     on<AppResumed>(_onAppResumed);
     on<AppPaused>(_onAppPaused);
+    on<SetVisibility>(_onSetVisibility);
+    on<SetBatterySaver>(_onSetBatterySaver);
     on<_BleStatusChanged>(_onStatusChanged);
 
     // Listen to BLE status changes
@@ -208,11 +239,21 @@ class BleConnectionBloc extends Bloc<BleConnectionEvent, BleConnectionState> {
   final BleServiceInterface _bleService;
   StreamSubscription<BleStatus>? _statusSubscription;
 
+  static const _prefVisible = 'ble_visible';
+  static const _prefBatterySaver = 'ble_battery_saver';
+
   Future<void> _onInitialize(
     InitializeBleConnection event,
     Emitter<BleConnectionState> emit,
   ) async {
     emit(state.copyWith(status: BleConnectionStatus.checking));
+
+    // Load persisted settings
+    final prefs = await SharedPreferences.getInstance();
+    final isVisible = prefs.getBool(_prefVisible) ?? true;
+    final isBatterySaver = prefs.getBool(_prefBatterySaver) ?? false;
+    emit(state.copyWith(isVisible: isVisible, isBatterySaver: isBatterySaver));
+    if (isBatterySaver) await _bleService.setBatterySaverMode(true);
 
     try {
       final available = await _bleService.isBluetoothAvailable();
@@ -257,8 +298,8 @@ class BleConnectionBloc extends Bloc<BleConnectionEvent, BleConnectionState> {
 
       Logger.info('BleConnectionBloc: Initialized successfully', 'BLE');
 
-      // Auto-start if in foreground
-      if (state.isInForeground) {
+      // Auto-start if in foreground and visible
+      if (state.isInForeground && state.isVisible) {
         add(const StartBleService());
       }
     } catch (e) {
@@ -361,6 +402,35 @@ class BleConnectionBloc extends Bloc<BleConnectionEvent, BleConnectionState> {
     // Keep running in background but at reduced rate
     // (The platform handles actual background behavior)
     Logger.info('BleConnectionBloc: App paused - background mode', 'BLE');
+  }
+
+  Future<void> _onSetVisibility(
+    SetVisibility event,
+    Emitter<BleConnectionState> emit,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_prefVisible, event.visible);
+    emit(state.copyWith(isVisible: event.visible));
+
+    if (event.visible) {
+      if (state.isReady || state.status == BleConnectionStatus.active) {
+        add(const StartBleService());
+      }
+    } else {
+      add(const StopBleService());
+    }
+    Logger.info('BLE visibility set to ${event.visible}', 'BLE');
+  }
+
+  Future<void> _onSetBatterySaver(
+    SetBatterySaver event,
+    Emitter<BleConnectionState> emit,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_prefBatterySaver, event.enabled);
+    await _bleService.setBatterySaverMode(event.enabled);
+    emit(state.copyWith(isBatterySaver: event.enabled));
+    Logger.info('Battery saver set to ${event.enabled}', 'BLE');
   }
 
   void _onStatusChanged(

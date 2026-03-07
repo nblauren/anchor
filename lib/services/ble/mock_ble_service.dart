@@ -406,4 +406,7 @@ class MockBleService implements BleServiceInterface {
 
   @override
   List<String> get visiblePeerIds => _visiblePeers.keys.toList();
+
+  @override
+  Future<void> setBatterySaverMode(bool enabled) async {}
 }
