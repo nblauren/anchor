@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
@@ -5,6 +7,9 @@ import '../../../core/theme/app_theme.dart';
 import '../../../data/local_database/database.dart';
 import '../../../data/repositories/chat_repository.dart';
 import '../../../injection.dart';
+import '../../discovery/bloc/discovery_bloc.dart';
+import '../../discovery/bloc/discovery_state.dart';
+import '../../discovery/screens/peer_detail_screen.dart';
 import '../bloc/chat_bloc.dart';
 import '../bloc/chat_event.dart';
 import '../bloc/chat_state.dart';
@@ -25,12 +30,16 @@ class _ChatListScreenState extends State<ChatListScreen> {
     context.read<ChatBloc>().add(const LoadConversations());
   }
 
-  void _openConversation(ConversationWithPeer conv) {
+  Future<void> _openConversation(ConversationWithPeer conv) async {
     final peerName = conv.peer?.name ?? 'Unknown';
     final peerId = conv.conversation.peerId;
     final ownUserId = context.read<ChatBloc>().ownUserId;
+    final thumbnail = conv.peer?.thumbnailData;
+    final peer =
+        conv.peer != null ? DiscoveredPeer.fromEntry(conv.peer!) : null;
+    final discoveryBloc = context.read<DiscoveryBloc>();
 
-    Navigator.push(
+    await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => BlocProvider<ChatBloc>(
@@ -38,10 +47,26 @@ class _ChatListScreenState extends State<ChatListScreen> {
           child: ChatScreen(
             peerId: peerId,
             peerName: peerName,
+            peerThumbnail: thumbnail,
+            onViewProfile: peer != null
+                ? () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => BlocProvider.value(
+                          value: discoveryBloc,
+                          child: PeerDetailScreen(peer: peer),
+                        ),
+                      ),
+                    )
+                : null,
           ),
         ),
       ),
     );
+
+    // Refresh parent bloc so unread badges update after returning from chat
+    if (mounted) {
+      context.read<ChatBloc>().add(const LoadConversations());
+    }
   }
 
   void _deleteConversation(String conversationId) {
@@ -205,7 +230,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
       return CircleAvatar(
         radius: 28,
         backgroundImage: MemoryImage(
-          List<int>.from(thumbnailData) as dynamic,
+          Uint8List.fromList(thumbnailData),
         ),
       );
     }

@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../services/image_service.dart' show resolvePhotoPath;
 import '../bloc/profile_state.dart';
 
 /// Grid widget for displaying and managing profile photos with drag and drop reordering
@@ -137,14 +138,27 @@ class _PhotoItem extends StatelessWidget {
                   child: SizedBox(
                     width: 100,
                     height: 100,
-                    child: Image.file(
-                      File(photo.photoPath),
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => Container(
-                        color: AppTheme.darkCard,
-                        child: const Icon(Icons.broken_image,
-                            color: AppTheme.textSecondary),
-                      ),
+                    child: FutureBuilder<String?>(
+                      future: resolvePhotoPath(photo.photoPath),
+                      builder: (context, snapshot) {
+                        final path = snapshot.data;
+                        if (path == null) {
+                          return Container(
+                            color: AppTheme.darkCard,
+                            child: const Icon(Icons.broken_image,
+                                color: AppTheme.textSecondary),
+                          );
+                        }
+                        return Image.file(
+                          File(path),
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => Container(
+                            color: AppTheme.darkCard,
+                            child: const Icon(Icons.broken_image,
+                                color: AppTheme.textSecondary),
+                          ),
+                        );
+                      },
                     ),
                   ),
                 ),

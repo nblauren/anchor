@@ -6,7 +6,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../core/utils/logger.dart';
 import '../../../services/ble/ble.dart' as ble;
 import '../../../services/database_service.dart';
-import '../../../services/image_service.dart';
+import '../../../services/image_service.dart' show ImageService, resolvePhotoPath;
 import 'profile_event.dart';
 import 'profile_state.dart';
 
@@ -191,6 +191,9 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
       ));
 
       Logger.info('Photo added: ${photo.id}', 'ProfileBloc');
+
+      // Rebroadcast so other devices see the updated profile photo
+      add(const BroadcastProfile());
     } catch (e) {
       Logger.error('Failed to add photo', e, null, 'ProfileBloc');
       emit(state.copyWith(
@@ -332,10 +335,29 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
       // Get primary photo thumbnail for broadcasting
       Uint8List? thumbnailBytes;
       final primaryPhoto = state.primaryPhoto;
+
+      Logger.info(
+        'BroadcastProfile: primaryPhoto=${primaryPhoto?.id}, '
+        'photos=${state.photos.length}',
+        'ProfileBloc',
+      );
+
       if (primaryPhoto != null) {
-        final thumbnailFile = File(primaryPhoto.thumbnailPath);
-        if (await thumbnailFile.exists()) {
-          thumbnailBytes = await thumbnailFile.readAsBytes();
+        Logger.info(
+          'BroadcastProfile: thumbnailPath=${primaryPhoto.thumbnailPath}',
+          'ProfileBloc',
+        );
+        final resolvedPath = await resolvePhotoPath(primaryPhoto.thumbnailPath);
+        Logger.info(
+          'BroadcastProfile: resolvedPath=$resolvedPath',
+          'ProfileBloc',
+        );
+        if (resolvedPath != null) {
+          thumbnailBytes = await File(resolvedPath).readAsBytes();
+          Logger.info(
+            'BroadcastProfile: thumbnailBytes=${thumbnailBytes.length}B',
+            'ProfileBloc',
+          );
         }
       }
 
@@ -351,7 +373,10 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
       // Broadcast via BLE
       await _bleService.broadcastProfile(payload);
 
-      Logger.info('Profile broadcast via BLE', 'ProfileBloc');
+      Logger.info(
+        'Profile broadcast via BLE (thumbnail: ${thumbnailBytes?.length ?? 0}B)',
+        'ProfileBloc',
+      );
     } catch (e) {
       Logger.error('Failed to broadcast profile', e, null, 'ProfileBloc');
       // Don't emit error - broadcasting failure shouldn't block user

@@ -2,12 +2,32 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../bloc/profile_bloc.dart';
+import '../bloc/profile_event.dart';
 import '../bloc/profile_state.dart';
 import '../widgets/profile_preview_widget.dart';
+import 'profile_setup_screen.dart';
 
 /// Screen showing the user's own profile with edit capabilities
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key});
+
+  void _openEditProfile(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => BlocProvider.value(
+          value: context.read<ProfileBloc>(),
+          child: ProfileSetupScreen(
+            isEditing: true,
+            onComplete: () {
+              Navigator.of(context).pop();
+              // Reload profile & rebroadcast after edit
+              context.read<ProfileBloc>().add(const LoadProfile());
+            },
+          ),
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -19,7 +39,6 @@ class ProfileScreen extends StatelessWidget {
           );
         }
 
-        // Check if profile exists
         if (state.profileId == null) {
           return const Scaffold(
             body: Center(child: Text('No profile found')),
@@ -32,15 +51,8 @@ class ProfileScreen extends StatelessWidget {
             actions: [
               IconButton(
                 icon: const Icon(Icons.edit),
-                onPressed: () {
-                  // TODO: Navigate to edit screen or show edit dialog
-                },
-              ),
-              IconButton(
-                icon: const Icon(Icons.settings),
-                onPressed: () {
-                  // TODO: Navigate to settings
-                },
+                tooltip: 'Edit profile',
+                onPressed: () => _openEditProfile(context),
               ),
             ],
           ),
@@ -49,7 +61,6 @@ class ProfileScreen extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Profile preview using the existing widget
                 ProfilePreviewWidget(
                   name: state.name,
                   age: state.age,

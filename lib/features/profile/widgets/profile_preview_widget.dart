@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../services/image_service.dart' show resolvePhotoPath;
 import '../bloc/profile_state.dart';
 
 /// Preview widget showing how the profile will appear to others
@@ -74,10 +75,17 @@ class ProfilePreviewWidget extends StatelessWidget {
                     children: [
                       // Photo or placeholder
                       if (primaryPhoto != null)
-                        Image.file(
-                          File(primaryPhoto.photoPath),
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => _buildPlaceholder(),
+                        FutureBuilder<String?>(
+                          future: resolvePhotoPath(primaryPhoto.photoPath),
+                          builder: (context, snapshot) {
+                            final path = snapshot.data;
+                            if (path == null) return _buildPlaceholder();
+                            return Image.file(
+                              File(path),
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) => _buildPlaceholder(),
+                            );
+                          },
                         )
                       else
                         _buildPlaceholder(),

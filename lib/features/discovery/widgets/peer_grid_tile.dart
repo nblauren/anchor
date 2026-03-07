@@ -9,10 +9,12 @@ class PeerGridTile extends StatelessWidget {
     super.key,
     required this.peer,
     required this.onTap,
+    this.unreadCount = 0,
   });
 
   final DiscoveredPeer peer;
   final VoidCallback onTap;
+  final int unreadCount;
 
   @override
   Widget build(BuildContext context) {
@@ -114,6 +116,40 @@ class PeerGridTile extends StatelessWidget {
                 right: 8,
                 child: _buildSignalIndicator(),
               ),
+
+            // Unread message badge (top left)
+            if (unreadCount > 0)
+              Positioned(
+                top: 8,
+                left: 8,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primaryColor,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        Icons.chat_bubble,
+                        size: 10,
+                        color: Colors.white,
+                      ),
+                      const SizedBox(width: 3),
+                      Text(
+                        '$unreadCount',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
           ],
         ),
       ),
@@ -125,6 +161,7 @@ class PeerGridTile extends StatelessWidget {
       return Image.memory(
         peer.thumbnailData!,
         fit: BoxFit.cover,
+        gaplessPlayback: true,
         errorBuilder: (context, error, stackTrace) => _buildPlaceholder(),
       );
     }

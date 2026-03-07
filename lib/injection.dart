@@ -80,6 +80,7 @@ Future<void> initializeDependencies({
       chatRepository: getIt<DatabaseService>().chatRepository,
       imageService: getIt<ImageService>(),
       bleService: getIt<BleServiceInterface>(),
+      notificationService: getIt<NotificationService>(),
       ownUserId: ownUserId,
     ),
   );

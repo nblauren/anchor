@@ -84,6 +84,10 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         status: ChatStatus.loaded,
         conversations: conversations,
       ));
+      // Keep app icon badge in sync with total unread count
+      final totalUnread =
+          conversations.fold(0, (sum, c) => sum + c.unreadCount);
+      await _notificationService.setBadgeCount(totalUnread);
     } catch (e) {
       Logger.error('Failed to load conversations', e, null, 'ChatBloc');
       emit(state.copyWith(
@@ -103,6 +107,9 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       // Get or create conversation
       final conversationEntry =
           await _chatRepository.getOrCreateConversation(event.peerId);
+
+      // Mark any unread messages as read immediately on open
+      await _chatRepository.markConversationRead(conversationEntry.id);
 
       emit(state.copyWith(
         status: ChatStatus.loaded,
@@ -248,8 +255,11 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
 
       // Compress aggressively for BLE transfer (~50KB) while keeping the
       // higher-quality local copy for display.
+      // compressedPath is a relative path (for DB storage); resolve to absolute.
+      final absolutePath =
+          await resolvePhotoPath(compressedPath) ?? compressedPath;
       final photoBytes =
-          await _imageService.compressForBleTransfer(compressedPath);
+          await _imageService.compressForBleTransfer(absolutePath);
       final success = await _bleService.sendPhoto(
         state.currentConversation!.peerId,
         photoBytes,
@@ -325,11 +335,12 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
             bleMsg.type == ble.MessageType.text ? bleMsg.content : null,
       );
 
-      // If viewing this conversation, add to UI
+      // If viewing this conversation, add to UI and immediately mark as read
       if (state.currentConversation?.peerId == bleMsg.fromPeerId) {
         emit(state.copyWith(
           messages: [message, ...state.messages],
         ));
+        add(const MarkMessagesRead());
       }
 
       // Refresh conversations list
@@ -445,12 +456,18 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     RetryFailedMessage event,
     Emitter<ChatState> emit,
   ) async {
+    if (state.currentConversation == null) return;
+
+    final message = state.messages.firstWhere(
+      (m) => m.id == event.messageId,
+      orElse: () => throw StateError('Message not found'),
+    );
+
     try {
-      // Mark as pending again
+      // Mark as pending in DB and state
       await _chatRepository.updateMessageStatus(
           event.messageId, MessageStatus.pending);
 
-      // Update in state
       final updatedMessages = state.messages.map((msg) {
         if (msg.id == event.messageId) {
           return MessageEntry(
@@ -467,11 +484,43 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         return msg;
       }).toList();
 
-      emit(state.copyWith(messages: updatedMessages));
+      emit(state.copyWith(status: ChatStatus.sending, messages: updatedMessages));
 
-      // TODO: Implement actual retry logic with BLE service
+      bool success;
+
+      if (message.contentType == MessageContentType.text) {
+        final payload = ble.MessagePayload(
+          messageId: message.id,
+          type: ble.MessageType.text,
+          content: message.textContent ?? '',
+        );
+        success = await _bleService.sendMessage(
+          state.currentConversation!.peerId,
+          payload,
+        );
+      } else {
+        // Photo retry — re-compress from stored path and resend
+        final absolutePath =
+            await resolvePhotoPath(message.photoPath) ?? message.photoPath!;
+        final photoBytes =
+            await _imageService.compressForBleTransfer(absolutePath);
+        success = await _bleService.sendPhoto(
+          state.currentConversation!.peerId,
+          photoBytes,
+          message.id,
+        );
+      }
+
+      add(MessageStatusUpdated(
+        messageId: message.id,
+        status: success ? MessageStatus.sent : MessageStatus.failed,
+      ));
     } catch (e) {
       Logger.error('Failed to retry message', e, null, 'ChatBloc');
+      add(MessageStatusUpdated(
+        messageId: event.messageId,
+        status: MessageStatus.failed,
+      ));
     }
   }
 
@@ -482,9 +531,8 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     if (state.currentConversation == null) return;
 
     try {
-      // In a real app, you'd mark specific messages as read
-      // For now, just refresh conversations to update unread count
-      add(const LoadConversations());
+      // Mark any newly arrived messages as read (e.g. received while chat is open)
+      await _chatRepository.markConversationRead(state.currentConversation!.id);
     } catch (e) {
       Logger.error('Failed to mark messages as read', e, null, 'ChatBloc');
     }

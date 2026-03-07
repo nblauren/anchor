@@ -10,6 +10,40 @@ import '../core/constants/app_constants.dart';
 import '../core/errors/app_error.dart';
 import '../core/utils/logger.dart';
 
+/// Resolve a photo path stored in the database to a valid absolute path.
+///
+/// Paths are stored relative to the app documents directory (e.g.
+/// "chat_images/abc.jpg") so they survive app reinstalls where the iOS
+/// sandbox UUID changes. Absolute paths from older versions are also handled
+/// by stripping the sandbox-specific prefix.
+Future<String?> resolvePhotoPath(String? storedPath) async {
+  if (storedPath == null || storedPath.isEmpty) return null;
+
+  // Try as-is first (handles current-session absolute paths)
+  if (storedPath.startsWith('/') && await File(storedPath).exists()) {
+    return storedPath;
+  }
+
+  final docsDir = await getApplicationDocumentsDirectory();
+
+  // Relative path (new format) — resolve against current docs dir
+  if (!storedPath.startsWith('/')) {
+    final resolved = '${docsDir.path}/$storedPath';
+    return await File(resolved).exists() ? resolved : null;
+  }
+
+  // Old absolute path whose sandbox UUID may have changed — re-root it
+  const marker = '/Documents/';
+  final idx = storedPath.indexOf(marker);
+  if (idx != -1) {
+    final relative = storedPath.substring(idx + marker.length);
+    final resolved = '${docsDir.path}/$relative';
+    return await File(resolved).exists() ? resolved : null;
+  }
+
+  return null;
+}
+
 /// Result of processing an image with both full and thumbnail versions
 class ProcessedImage {
   const ProcessedImage({
@@ -106,9 +140,10 @@ class ImageService {
         'Image',
       );
 
+      // Return relative paths so they survive iOS sandbox UUID changes on reinstall
       return ProcessedImage(
-        photoPath: photoPath,
-        thumbnailPath: thumbnailPath,
+        photoPath: 'profile_images/$fileId.jpg',
+        thumbnailPath: 'thumbnails/${fileId}_thumb.jpg',
         thumbnailBytes: thumbnailBytes,
       );
     } catch (e) {
@@ -203,19 +238,19 @@ class ImageService {
     return _generateThumbnail(file);
   }
 
-  /// Delete an image and its thumbnail
+  /// Delete an image and its thumbnail (paths may be relative or absolute)
   Future<void> deleteImage(String photoPath, String thumbnailPath) async {
     try {
-      final photoFile = File(photoPath);
-      if (await photoFile.exists()) {
-        await photoFile.delete();
-        Logger.info('Deleted photo: $photoPath', 'Image');
+      final resolvedPhoto = await resolvePhotoPath(photoPath);
+      if (resolvedPhoto != null) {
+        await File(resolvedPhoto).delete();
+        Logger.info('Deleted photo: $resolvedPhoto', 'Image');
       }
 
-      final thumbFile = File(thumbnailPath);
-      if (await thumbFile.exists()) {
-        await thumbFile.delete();
-        Logger.info('Deleted thumbnail: $thumbnailPath', 'Image');
+      final resolvedThumb = await resolvePhotoPath(thumbnailPath);
+      if (resolvedThumb != null) {
+        await File(resolvedThumb).delete();
+        Logger.info('Deleted thumbnail: $resolvedThumb', 'Image');
       }
     } catch (e) {
       Logger.error('Failed to delete image', e, null, 'Image');
@@ -295,7 +330,8 @@ class ImageService {
         'Image',
       );
 
-      return outputPath;
+      // Return relative path so it survives sandbox UUID changes on reinstall
+      return 'chat_images/$fileId.jpg';
     } catch (e) {
       Logger.error('Failed to compress chat image', e, null, 'Image');
       throw ImageError('Failed to compress chat image', e);
@@ -404,7 +440,8 @@ class ImageService {
         'Image',
       );
 
-      return photoPath;
+      // Return relative path so it survives sandbox UUID changes on reinstall
+      return 'received_photos/$fileId.jpg';
     } catch (e) {
       Logger.error('Failed to save received photo', e, null, 'Image');
       throw ImageError('Failed to save received photo', e);

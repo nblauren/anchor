@@ -5,6 +5,7 @@ import 'package:photo_view/photo_view.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../data/local_database/database.dart';
+import '../../../services/image_service.dart';
 
 /// Widget displaying a single chat message bubble
 class MessageBubbleWidget extends StatelessWidget {
@@ -100,89 +101,52 @@ class MessageBubbleWidget extends StatelessWidget {
     );
   }
 
-  Widget _buildPhotoContent(context) {
+  Widget _buildPhotoContent(BuildContext context) {
     final photoPath = message.photoPath;
     if (photoPath == null || photoPath.isEmpty) {
       return _buildPhotoPlaceholder();
     }
 
-    final file = File(photoPath);
+    return _PhotoContent(
+      photoPath: photoPath,
+      status: message.status,
+      onTap: (file) => _showFullScreen(context, file),
+    );
+  }
 
-    return GestureDetector(
-      onTap: () {
-        showDialog(
-          context: context,
-          barrierColor: Colors.black87,
-          builder: (context) => Dialog(
-            insetPadding:
-                const EdgeInsets.all(0), // removes default margins → full bleed
-            backgroundColor: Colors.transparent,
-            child: Stack(
-              fit: StackFit.expand, // or use SizedBox.expand
-              children: [
-                PhotoView(
-                  imageProvider: FileImage(file),
-                  minScale: PhotoViewComputedScale.contained * 0.8,
-                  maxScale: PhotoViewComputedScale.covered * 4.0,
-                  initialScale: PhotoViewComputedScale.contained,
-                  backgroundDecoration:
-                      const BoxDecoration(color: Colors.black),
-                  loadingBuilder: (context, event) => const Center(
-                    child: CircularProgressIndicator(color: Colors.white),
-                  ),
-                ),
-                Positioned(
-                  top: 40,
-                  right: 16,
-                  child: IconButton(
-                    icon:
-                        const Icon(Icons.close, color: Colors.white, size: 36),
-                    onPressed: () => Navigator.pop(context),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-      child: FutureBuilder<bool>(
-        future: file.exists(),
-        builder: (context, snapshot) {
-          if (snapshot.data != true) {
-            return _buildPhotoPlaceholder();
-          }
-
-          return Stack(
-            children: [
-              // Main change here
-              ClipRRect(
-                borderRadius: BorderRadius.circular(12), // ← looks nicer
-                child: Image.file(
-                  file,
-                  fit: BoxFit.cover,
-                  width: double.infinity,
-                  height: 200,
-                  errorBuilder: (context, error, stackTrace) =>
-                      _buildPhotoPlaceholder(),
-                ),
+  void _showFullScreen(BuildContext context, File file) {
+    showDialog(
+      context: context,
+      barrierColor: Colors.black87,
+      builder: (context) => Dialog(
+        insetPadding: EdgeInsets.zero,
+        backgroundColor: Colors.transparent,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            PhotoView(
+              imageProvider: FileImage(file),
+              minScale: PhotoViewComputedScale.contained * 0.8,
+              maxScale: PhotoViewComputedScale.covered * 4.0,
+              initialScale: PhotoViewComputedScale.contained,
+              backgroundDecoration: const BoxDecoration(color: Colors.black),
+              loadingBuilder: (context, event) => const Center(
+                child: CircularProgressIndicator(color: Colors.white),
               ),
-
-              // Your pending overlay
-              if (message.status == MessageStatus.pending)
-                Positioned.fill(
-                  child: Container(
-                    color: Colors.black.withValues(alpha: 0.4),
-                    child: const Center(
-                      child: CircularProgressIndicator(
-                        color: Colors.white,
-                        strokeWidth: 2,
-                      ),
-                    ),
-                  ),
-                ),
-            ],
-          );
-        },
+              errorBuilder: (context, error, stackTrace) => const Center(
+                child: Icon(Icons.broken_image, color: Colors.white54, size: 64),
+              ),
+            ),
+            Positioned(
+              top: 40,
+              right: 16,
+              child: IconButton(
+                icon: const Icon(Icons.close, color: Colors.white, size: 36),
+                onPressed: () => Navigator.pop(context),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -225,6 +189,12 @@ class MessageBubbleWidget extends StatelessWidget {
           size: 14,
           color: Colors.lightBlueAccent,
         );
+      case MessageStatus.read:
+        return const Icon(
+          Icons.done_all,
+          size: 14,
+          color: Colors.lightBlueAccent,
+        );
       case MessageStatus.failed:
         return GestureDetector(
           onTap: onRetry,
@@ -239,5 +209,106 @@ class MessageBubbleWidget extends StatelessWidget {
 
   String _formatTime(DateTime dateTime) {
     return '${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
+  }
+}
+
+/// Stateful wrapper for photo content that caches the path-resolution future
+/// so it survives parent rebuilds (e.g. message status updates) without
+/// re-running the async lookup and flashing the placeholder.
+class _PhotoContent extends StatefulWidget {
+  const _PhotoContent({
+    required this.photoPath,
+    required this.status,
+    required this.onTap,
+  });
+
+  final String photoPath;
+  final MessageStatus status;
+  final void Function(File file) onTap;
+
+  @override
+  State<_PhotoContent> createState() => _PhotoContentState();
+}
+
+class _PhotoContentState extends State<_PhotoContent> {
+  late Future<String?> _resolvedPathFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _resolvedPathFuture = resolvePhotoPath(widget.photoPath);
+  }
+
+  @override
+  void didUpdateWidget(_PhotoContent oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.photoPath != widget.photoPath) {
+      _resolvedPathFuture = resolvePhotoPath(widget.photoPath);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<String?>(
+      future: _resolvedPathFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return _buildPlaceholder();
+        }
+
+        final resolvedPath = snapshot.data;
+        if (resolvedPath == null) {
+          return _buildPlaceholder();
+        }
+
+        final file = File(resolvedPath);
+
+        return GestureDetector(
+          onTap: () => widget.onTap(file),
+          child: Stack(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: Image.file(
+                  file,
+                  fit: BoxFit.cover,
+                  width: double.infinity,
+                  height: 200,
+                  errorBuilder: (context, error, stackTrace) =>
+                      _buildPlaceholder(),
+                ),
+              ),
+              if (widget.status == MessageStatus.pending)
+                Positioned.fill(
+                  child: Container(
+                    color: Colors.black.withValues(alpha: 0.4),
+                    child: const Center(
+                      child: CircularProgressIndicator(
+                        color: Colors.white,
+                        strokeWidth: 2,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildPlaceholder() {
+    return Container(
+      width: double.infinity,
+      height: 150,
+      color: AppTheme.darkCard,
+      child: const Center(
+        child: Icon(
+          Icons.image,
+          color: AppTheme.textHint,
+          size: 48,
+        ),
+      ),
+    );
   }
 }

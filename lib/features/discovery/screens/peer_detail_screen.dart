@@ -75,18 +75,19 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
     );
   }
 
-  void _openChat() {
+  Future<void> _openChat() async {
     // Get the current user's profile ID for ChatBloc
     final profileState = context.read<ProfileBloc>().state;
     final ownUserId = profileState.profileId ?? '';
 
-    Navigator.of(context).push(
+    await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => BlocProvider<ChatBloc>(
           create: (_) => getIt<ChatBloc>(param1: ownUserId),
           child: ChatScreen(
             peerId: _peer.peerId,
             peerName: _peer.name,
+            peerThumbnail: _peer.thumbnailData,
           ),
         ),
       ),

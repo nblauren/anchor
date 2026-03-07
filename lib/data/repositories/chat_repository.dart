@@ -23,27 +23,25 @@ class ChatRepository {
     query.orderBy([OrderingTerm.desc(_db.conversations.updatedAt)]);
 
     final results = await query.get();
-    final conversations = <ConversationWithPeer>[];
 
-    for (final row in results) {
+    // Run last-message + unread-count queries in parallel (one pair per
+    // conversation) instead of sequentially to avoid O(N) blocking.
+    return Future.wait(results.map((row) async {
       final conversation = row.readTable(_db.conversations);
       final peer = row.readTableOrNull(_db.discoveredPeers);
 
-      // Get last message
-      final lastMessage = await getLastMessage(conversation.id);
+      final results = await Future.wait([
+        getLastMessage(conversation.id),
+        getUnreadCount(conversation.id),
+      ]);
 
-      // Get unread count
-      final unreadCount = await getUnreadCount(conversation.id);
-
-      conversations.add(ConversationWithPeer(
+      return ConversationWithPeer(
         conversation: conversation,
         peer: peer,
-        lastMessage: lastMessage,
-        unreadCount: unreadCount,
-      ));
-    }
-
-    return conversations;
+        lastMessage: results[0] as MessageEntry?,
+        unreadCount: results[1] as int,
+      );
+    }));
   }
 
   /// Get a conversation by ID
@@ -280,11 +278,9 @@ class ChatRepository {
     await (_db.delete(_db.messages)..where((t) => t.id.equals(id))).go();
   }
 
-  /// Get unread count for a conversation (messages from peer)
+  /// Get unread count for a conversation (messages from peer, not yet read)
   Future<int> getUnreadCount(String conversationId,
       {String? localUserId}) async {
-    // For simplicity, count messages with status 'delivered' that aren't from local user
-    // In a real app, you'd track read status separately
     final count = _db.messages.id.count();
     final query = _db.selectOnly(_db.messages)
       ..where(_db.messages.conversationId.equals(conversationId))
@@ -295,6 +291,14 @@ class ChatRepository {
     query.addColumns([count]);
     final result = await query.getSingle();
     return result.read(count) ?? 0;
+  }
+
+  /// Mark all delivered messages in a conversation as read
+  Future<void> markConversationRead(String conversationId) async {
+    await (_db.update(_db.messages)
+          ..where((t) => t.conversationId.equals(conversationId))
+          ..where((t) => t.status.equalsValue(MessageStatus.delivered)))
+        .write(const MessagesCompanion(status: Value(MessageStatus.read)));
   }
 
   /// Watch messages for a conversation

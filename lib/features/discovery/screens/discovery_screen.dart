@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../chat/bloc/chat_bloc.dart';
+import '../../chat/bloc/chat_event.dart';
+import '../../chat/bloc/chat_state.dart';
 import '../bloc/discovery_bloc.dart';
 import '../bloc/discovery_event.dart';
 import '../bloc/discovery_state.dart';
@@ -34,8 +37,8 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
     context.read<DiscoveryBloc>().add(const LoadMockPeers());
   }
 
-  void _openPeerDetail(DiscoveredPeer peer) {
-    Navigator.of(context).push(
+  Future<void> _openPeerDetail(DiscoveredPeer peer) async {
+    await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (context) => BlocProvider.value(
           value: context.read<DiscoveryBloc>(),
@@ -43,6 +46,11 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
         ),
       ),
     );
+
+    // Reload conversations when returning so unread badges reflect any chat opened
+    if (mounted) {
+      context.read<ChatBloc>().add(const LoadConversations());
+    }
   }
 
   @override
@@ -126,20 +134,33 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
           // Responsive column count: 2 for phones, 3 for tablets
           final crossAxisCount = constraints.maxWidth > 600 ? 5 : 3;
 
-          return GridView.builder(
-            padding: const EdgeInsets.all(12),
-            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: crossAxisCount,
-              childAspectRatio: 1,
-              crossAxisSpacing: 12,
-              mainAxisSpacing: 12,
-            ),
-            itemCount: state.visiblePeers.length,
-            itemBuilder: (context, index) {
-              final peer = state.visiblePeers[index];
-              return PeerGridTile(
-                peer: peer,
-                onTap: () => _openPeerDetail(peer),
+          return BlocBuilder<ChatBloc, ChatState>(
+            builder: (context, chatState) {
+              // Build a map of peerId → unreadCount from chat conversations
+              final unreadByPeer = <String, int>{
+                for (final conv in chatState.conversations)
+                  if (conv.unreadCount > 0)
+                    conv.conversation.peerId: conv.unreadCount,
+              };
+
+              return GridView.builder(
+                padding: const EdgeInsets.all(12),
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: crossAxisCount,
+                  childAspectRatio: 1,
+                  crossAxisSpacing: 12,
+                  mainAxisSpacing: 12,
+                ),
+                itemCount: state.visiblePeers.length,
+                itemBuilder: (context, index) {
+                  final peer = state.visiblePeers[index];
+                  return PeerGridTile(
+                    key: ValueKey(peer.peerId),
+                    peer: peer,
+                    unreadCount: unreadByPeer[peer.peerId] ?? 0,
+                    onTap: () => _openPeerDetail(peer),
+                  );
+                },
               );
             },
           );

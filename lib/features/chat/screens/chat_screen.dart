@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:image_picker/image_picker.dart';
@@ -14,10 +16,14 @@ class ChatScreen extends StatefulWidget {
     super.key,
     required this.peerId,
     required this.peerName,
+    this.peerThumbnail,
+    this.onViewProfile,
   });
 
   final String peerId;
   final String peerName;
+  final Uint8List? peerThumbnail;
+  final VoidCallback? onViewProfile;
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -31,12 +37,11 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void initState() {
     super.initState();
-    // Open conversation for this peer
+    // Open conversation for this peer (marks messages as read automatically)
     context.read<ChatBloc>().add(OpenConversation(
           peerId: widget.peerId,
           peerName: widget.peerName,
         ));
-    context.read<ChatBloc>().add(const MarkMessagesRead());
 
     _scrollController.addListener(() {
       if (_scrollController.position.pixels >=
@@ -149,12 +154,10 @@ class _ChatScreenState extends State<ChatScreen> {
         return Scaffold(
           appBar: AppBar(
             title: GestureDetector(
-              onTap: () {
-                // Could navigate to peer profile
-              },
+              onTap: widget.onViewProfile,
               child: Row(
                 children: [
-                  _buildAvatar(conversation?.peerName ?? '?'),
+                  _buildAvatar(conversation?.peerName ?? '?', widget.peerThumbnail),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
@@ -165,13 +168,14 @@ class _ChatScreenState extends State<ChatScreen> {
                           style: const TextStyle(fontSize: 16),
                           overflow: TextOverflow.ellipsis,
                         ),
-                        const Text(
-                          'Tap for info',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: AppTheme.textSecondary,
+                        if (widget.onViewProfile != null)
+                          const Text(
+                            'Tap for info',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: AppTheme.textSecondary,
+                            ),
                           ),
-                        ),
                       ],
                     ),
                   ),
@@ -244,7 +248,14 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  Widget _buildAvatar(String name) {
+  Widget _buildAvatar(String name, Uint8List? thumbnail) {
+    if (thumbnail != null && thumbnail.isNotEmpty) {
+      return CircleAvatar(
+        radius: 18,
+        backgroundImage: MemoryImage(thumbnail),
+      );
+    }
+
     final colorIndex = name.hashCode.abs() % _avatarColors.length;
     final color = _avatarColors[colorIndex];
 

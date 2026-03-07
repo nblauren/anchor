@@ -152,24 +152,28 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
 
       final peer = DiscoveredPeer.fromEntry(entry);
 
-      // Update state with debouncing
-      _scheduleUpdate(emit, () {
-        final existingIndex =
-            state.peers.indexWhere((p) => p.peerId == event.peerId);
-        List<DiscoveredPeer> updatedPeers;
+      final existingIndex =
+          state.peers.indexWhere((p) => p.peerId == event.peerId);
+      List<DiscoveredPeer> updatedPeers;
+      if (existingIndex >= 0) {
+        updatedPeers = [...state.peers];
+        updatedPeers[existingIndex] = peer;
+      } else {
+        updatedPeers = [peer, ...state.peers];
+      }
+      final newState = state.copyWith(
+        status: DiscoveryStatus.loaded,
+        peers: updatedPeers,
+      );
 
-        if (existingIndex >= 0) {
-          updatedPeers = [...state.peers];
-          updatedPeers[existingIndex] = peer;
-        } else {
-          updatedPeers = [peer, ...state.peers];
-        }
-
-        return state.copyWith(
-          status: DiscoveryStatus.loaded,
-          peers: updatedPeers,
-        );
-      });
+      // Thumbnail arrivals must reach the UI immediately — no debounce.
+      // All other updates (RSSI refresh, profile re-reads) use debouncing
+      // to avoid excessive rebuilds when many peers update in rapid succession.
+      if (event.thumbnailData != null) {
+        emit(newState);
+      } else {
+        _scheduleUpdate(emit, () => newState);
+      }
     } catch (e) {
       Logger.error(
           'Failed to process discovered peer', e, null, 'DiscoveryBloc');

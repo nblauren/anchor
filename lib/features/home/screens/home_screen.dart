@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../injection.dart';
 import '../../chat/bloc/chat_bloc.dart';
+import '../../chat/bloc/chat_state.dart';
 import '../../chat/screens/chat_list_screen.dart';
 import '../../discovery/screens/discovery_screen.dart';
 import '../../profile/bloc/profile_bloc.dart';
@@ -37,26 +38,39 @@ class _HomeScreenState extends State<HomeScreen> {
                 ProfileViewScreen(),
               ],
             ),
-            bottomNavigationBar: BottomNavigationBar(
-              currentIndex: _currentIndex,
-              onTap: _onTabTapped,
-              items: const [
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.explore),
-                  activeIcon: Icon(Icons.explore),
-                  label: 'Discover',
-                ),
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.chat_bubble_outline),
-                  activeIcon: Icon(Icons.chat_bubble),
-                  label: 'Messages',
-                ),
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.person_outline),
-                  activeIcon: Icon(Icons.person),
-                  label: 'Profile',
-                ),
-              ],
+            bottomNavigationBar: BlocBuilder<ChatBloc, ChatState>(
+              builder: (context, chatState) {
+                final unreadCount = chatState.totalUnreadCount;
+                return BottomNavigationBar(
+                  currentIndex: _currentIndex,
+                  onTap: _onTabTapped,
+                  items: [
+                    const BottomNavigationBarItem(
+                      icon: Icon(Icons.explore),
+                      activeIcon: Icon(Icons.explore),
+                      label: 'Discover',
+                    ),
+                    BottomNavigationBarItem(
+                      icon: Badge(
+                        isLabelVisible: unreadCount > 0,
+                        label: Text('$unreadCount'),
+                        child: const Icon(Icons.chat_bubble_outline),
+                      ),
+                      activeIcon: Badge(
+                        isLabelVisible: unreadCount > 0,
+                        label: Text('$unreadCount'),
+                        child: const Icon(Icons.chat_bubble),
+                      ),
+                      label: 'Messages',
+                    ),
+                    const BottomNavigationBarItem(
+                      icon: Icon(Icons.person_outline),
+                      activeIcon: Icon(Icons.person),
+                      label: 'Profile',
+                    ),
+                  ],
+                );
+              },
             ),
           ),
         );

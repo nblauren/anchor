@@ -39,6 +39,8 @@ class FlutterBluePlusBleService implements BleServiceInterface {
       UUID.fromString('0000fff0-0000-1000-8000-00805f9b34fb');
   static final _profileCharUuid =
       UUID.fromString('0000fff1-0000-1000-8000-00805f9b34fb');
+  static final _thumbnailCharUuid =
+      UUID.fromString('0000fff2-0000-1000-8000-00805f9b34fb');
   static final _messagingCharUuid =
       UUID.fromString('0000fff3-0000-1000-8000-00805f9b34fb');
 
@@ -73,22 +75,46 @@ class FlutterBluePlusBleService implements BleServiceInterface {
 
   // Scan lifecycle
   Timer? _scanRestartTimer;
-  static const _scanDuration = Duration(seconds: 8);
-  static const _scanPause = Duration(seconds: 4);
+  static const _scanDuration = Duration(seconds: 5);
+  static const _scanPause = Duration(seconds: 15);
 
   // Subscriptions
   StreamSubscription? _centralStateSubscription;
   StreamSubscription? _peripheralStateSubscription;
   StreamSubscription? _discoveredSubscription;
+  StreamSubscription? _charReadSubscription;
   StreamSubscription? _charWriteSubscription;
+  StreamSubscription? _charNotifyStateSubscription;
+  StreamSubscription? _charNotifiedSubscription;
+
+  // In-memory message ID deduplication — prevents the same BLE write
+  // from being processed twice if the transport retransmits it.
+  final Set<String> _seenMessageIds = {};
 
   // GATT characteristics (server side)
   GATTCharacteristic? _serverProfileChar;
+  GATTCharacteristic? _serverThumbnailChar;
   GATTCharacteristic? _serverMessagingChar;
+  bool _gattServerReady = false; // true once addService succeeds
+  bool _settingUpGatt = false; // prevents concurrent _setupGattServer calls
+  bool _startCalled = false; // true after start() has been called at least once
 
   // Cached profile data for GATT server read requests
   Uint8List _profileData = Uint8List(0);
+  // Raw thumbnail bytes served via the dedicated thumbnail characteristic (fff2).
+  // Kept separate from _profileData so the profile JSON stays small (<512 bytes).
+  Uint8List _thumbnailData = Uint8List(0);
   BroadcastPayload? _pendingPayload;
+
+  // Per-peer characteristic cache (central side — for reading remote profiles)
+  final Map<String, GATTCharacteristic> _profileChars = {};
+  final Map<String, GATTCharacteristic> _thumbnailChars = {};
+  // Throttle profile re-reads to once per 60 s per peer
+  final Map<String, DateTime> _lastProfileReadTime = {};
+
+  // Per-peer thumbnail assembly buffers (notification-based chunked delivery)
+  final Map<String, List<int>> _thumbnailBuffers = {};
+  final Map<String, int> _thumbnailExpectedSizes = {};
 
   // Active incoming binary photo transfers (keyed by centralUuid)
   // Stores metadata from the photo_start message so binary chunks
@@ -111,10 +137,16 @@ class FlutterBluePlusBleService implements BleServiceInterface {
       _centralStateSubscription =
           _central.stateChanged.listen((e) => _onStateChanged(e.state));
 
+      // Listen to peripheral manager state so we can set up the GATT server
+      // and retry advertising once the peripheral is powered on.
+      _peripheralStateSubscription = _peripheral.stateChanged
+          .listen((e) => _onPeripheralStateChanged(e.state));
+
       _isInitialized = true;
 
       // Check initial state
       _onStateChanged(_central.state);
+      _onPeripheralStateChanged(_peripheral.state);
 
       Logger.info('BleService: Initialized successfully', 'BLE');
     } catch (e) {
@@ -130,7 +162,8 @@ class FlutterBluePlusBleService implements BleServiceInterface {
     Logger.info('BleService: Starting...', 'BLE');
 
     try {
-      await _setupGattServer();
+      _startCalled = true;
+      await _setupGattServer(force: true);
       await startScanning();
       _setStatus(BleStatus.ready);
     } catch (e) {
@@ -152,9 +185,18 @@ class FlutterBluePlusBleService implements BleServiceInterface {
       Logger.error('BleService: Remove services failed', e, null, 'BLE');
     }
 
+    _gattServerReady = false;
+    _settingUpGatt = false;
+    _startCalled = false;
     _discoveredPeripherals.clear();
     _messagingChars.clear();
+    _profileChars.clear();
+    _thumbnailChars.clear();
+    _maxWriteLengths.clear();
+    _lastProfileReadTime.clear();
     _userIdToPeerId.clear();
+    _thumbnailBuffers.clear();
+    _thumbnailExpectedSizes.clear();
     _setStatus(BleStatus.ready);
   }
 
@@ -171,7 +213,10 @@ class FlutterBluePlusBleService implements BleServiceInterface {
     await _centralStateSubscription?.cancel();
     await _peripheralStateSubscription?.cancel();
     await _discoveredSubscription?.cancel();
+    await _charReadSubscription?.cancel();
     await _charWriteSubscription?.cancel();
+    await _charNotifyStateSubscription?.cancel();
+    await _charNotifiedSubscription?.cancel();
 
     await _statusController.close();
     await _peerDiscoveredController.close();
@@ -191,14 +236,14 @@ class FlutterBluePlusBleService implements BleServiceInterface {
   }
 
   void _onStateChanged(BluetoothLowEnergyState state) {
-    Logger.info('BleService: State changed: $state', 'BLE');
+    Logger.info('BleService: Central state changed: $state', 'BLE');
 
     switch (state) {
       case BluetoothLowEnergyState.poweredOn:
         if (_status == BleStatus.disabled) {
           _setStatus(BleStatus.ready);
         }
-        // Retry pending advertising
+        // Retry pending advertising (central ready — peripheral may already be ready too)
         if (_pendingPayload != null && !_isBroadcasting) {
           _startAdvertisingAndGatt(_pendingPayload!);
         }
@@ -219,19 +264,61 @@ class FlutterBluePlusBleService implements BleServiceInterface {
     }
   }
 
+  /// Called when the PeripheralManager state changes.
+  ///
+  /// The peripheral and central managers share the same Bluetooth adapter on
+  /// iOS/Android, but their state callbacks can fire at slightly different times.
+  /// Listening here ensures the GATT server is (re-)registered and pending
+  /// advertising is retried as soon as the peripheral is ready — even if
+  /// [_onStateChanged] (central) already fired.
+  void _onPeripheralStateChanged(BluetoothLowEnergyState state) {
+    Logger.info('BleService: Peripheral state changed: $state', 'BLE');
+
+    if (state == BluetoothLowEnergyState.poweredOn &&
+        _startCalled &&
+        !_gattServerReady) {
+      // start() was called but the GATT server setup failed because the
+      // peripheral wasn't ready yet. Retry now that it's powered on.
+      _setupGattServer().then((_) {
+        if (_pendingPayload != null && !_isBroadcasting) {
+          _startAdvertisingAndGatt(_pendingPayload!);
+        }
+      });
+    }
+  }
+
   // ==================== GATT Server ====================
 
-  Future<void> _setupGattServer() async {
+  Future<void> _setupGattServer({bool force = false}) async {
+    if (_settingUpGatt && !force) return; // skip if already in progress
+    _settingUpGatt = true;
+    _gattServerReady = false;
     Logger.info('BleService: Setting up GATT server...', 'BLE');
 
     try {
       await _peripheral.removeAllServices();
 
-      // Profile characteristic: centrals read this to get our profile
+      // Profile characteristic: centrals read this to get our profile metadata
+      // Kept small (userId/name/age/bio, <512 bytes) to stay within ATT limits.
       _serverProfileChar = GATTCharacteristic.mutable(
         uuid: _profileCharUuid,
         properties: [
           GATTCharacteristicProperty.read,
+        ],
+        permissions: [
+          GATTCharacteristicPermission.read,
+        ],
+        descriptors: [],
+      );
+
+      // Thumbnail characteristic: centrals read this to get our profile photo.
+      // Also has notify so the peripheral can push the thumbnail in chunks
+      // when the central subscribes — bypassing the single-packet ATT read limit.
+      _serverThumbnailChar = GATTCharacteristic.mutable(
+        uuid: _thumbnailCharUuid,
+        properties: [
+          GATTCharacteristicProperty.read,
+          GATTCharacteristicProperty.notify,
         ],
         permissions: [
           GATTCharacteristicPermission.read,
@@ -256,34 +343,92 @@ class FlutterBluePlusBleService implements BleServiceInterface {
         uuid: _serviceUuid,
         isPrimary: true,
         includedServices: [],
-        characteristics: [_serverProfileChar!, _serverMessagingChar!],
+        characteristics: [
+          _serverProfileChar!,
+          _serverThumbnailChar!,
+          _serverMessagingChar!,
+        ],
       );
 
       await _peripheral.addService(service);
 
-      // Handle profile read requests
-      _peripheral.characteristicReadRequested.listen(_onProfileReadRequested);
+      // Handle profile + thumbnail read requests (single stream, dispatch by UUID)
+      await _charReadSubscription?.cancel();
+      _charReadSubscription = _peripheral.characteristicReadRequested
+          .listen(_onCharacteristicReadRequested);
 
       // Handle incoming messages (writes to messaging characteristic)
       await _charWriteSubscription?.cancel();
       _charWriteSubscription = _peripheral.characteristicWriteRequested
           .listen(_onMessageWriteReceived);
 
+      // Handle thumbnail characteristic notify subscriptions from centrals.
+      // When a central subscribes, push the thumbnail in chunks.
+      await _charNotifyStateSubscription?.cancel();
+      _charNotifyStateSubscription = _peripheral
+          .characteristicNotifyStateChanged
+          .listen(_onThumbnailNotifyStateChanged);
+
+      // Handle thumbnail notification chunks arriving at the central side.
+      await _charNotifiedSubscription?.cancel();
+      _charNotifiedSubscription =
+          _central.characteristicNotified.listen(_onCharacteristicNotified);
+
+      _gattServerReady = true;
       Logger.info('BleService: GATT server ready', 'BLE');
     } catch (e) {
       Logger.error('BleService: GATT server setup failed', e, null, 'BLE');
+    } finally {
+      _settingUpGatt = false;
     }
   }
 
-  void _onProfileReadRequested(
+  /// Handles read requests for ALL readable characteristics.
+  /// Dispatches by UUID so both the profile char (fff1) and the thumbnail
+  /// char (fff2) are served from the correct data buffer.
+  ///
+  /// iOS issues Read Blob Requests with increasing offsets for data > ATT MTU.
+  /// We respond with the slice starting at `offset`; CoreBluetooth clips the
+  /// response to MTU-1 bytes and issues the next request automatically.
+  void _onCharacteristicReadRequested(
       GATTCharacteristicReadRequestedEventArgs args) async {
     try {
+      final charUuid = args.characteristic.uuid;
+      final offset = args.request.offset;
+
+      final Uint8List sourceData;
+      final String charName;
+      if (charUuid == _profileCharUuid) {
+        sourceData = _profileData;
+        charName = 'profile';
+      } else if (charUuid == _thumbnailCharUuid) {
+        sourceData = _thumbnailData;
+        charName = 'thumbnail';
+      } else {
+        await _peripheral.respondReadRequestWithValue(
+          args.request,
+          value: Uint8List(0),
+        );
+        return;
+      }
+
+      final slice = offset < sourceData.length
+          ? sourceData.sublist(offset)
+          : Uint8List(0);
+
+      Logger.info(
+        'BleService: Read request [$charName] offset=$offset '
+            'total=${sourceData.length}B responding=${slice.length}B',
+        'BLE',
+      );
+
       await _peripheral.respondReadRequestWithValue(
         args.request,
-        value: _profileData,
+        value: slice,
       );
     } catch (e) {
-      Logger.error('BleService: Profile read response failed', e, null, 'BLE');
+      Logger.error(
+          'BleService: Characteristic read response failed', e, null, 'BLE');
     }
   }
 
@@ -335,9 +480,23 @@ class FlutterBluePlusBleService implements BleServiceInterface {
   }
 
   void _handleReceivedMessage(Map<String, dynamic> json, String fromPeerId) {
+    final messageId = json['message_id'] as String? ?? '';
+
+    // Deduplicate — BLE transport can retransmit the same write
+    if (messageId.isNotEmpty) {
+      if (_seenMessageIds.contains(messageId)) {
+        Logger.info('BleService: Duplicate message ignored: $messageId', 'BLE');
+        return;
+      }
+      _seenMessageIds.add(messageId);
+      // Evict after 5 minutes to avoid unbounded growth
+      Future.delayed(
+          const Duration(minutes: 5), () => _seenMessageIds.remove(messageId));
+    }
+
     final message = ReceivedMessage(
       fromPeerId: fromPeerId,
-      messageId: json['message_id'] as String? ?? '',
+      messageId: messageId,
       type: MessageType.values[json['message_type'] as int? ?? 0],
       content: json['content'] as String? ?? '',
       timestamp: DateTime.now(),
@@ -613,11 +772,13 @@ class FlutterBluePlusBleService implements BleServiceInterface {
     _ensureInitialized();
     _pendingPayload = payload;
 
-    // Encode profile data for GATT read requests
+    // Set thumbnail data FIRST so _encodeProfileData can include thumbnail_size.
+    _thumbnailData = payload.thumbnailBytes ?? Uint8List(0);
     _profileData = _encodeProfileData(payload);
 
     Logger.info(
-      'BleService: Broadcasting profile for ${payload.name}',
+      'BleService: Broadcasting profile for ${payload.name} '
+          '(profileData=${_profileData.length}B, thumbnailData=${_thumbnailData.length}B)',
       'BLE',
     );
 
@@ -650,7 +811,12 @@ class FlutterBluePlusBleService implements BleServiceInterface {
 
       await _peripheral.startAdvertising(Advertisement(
         name: compactName,
-        serviceUUIDs: [_serviceUuid],
+        serviceUUIDs: [
+          _serviceUuid,
+          _messagingCharUuid,
+          _profileCharUuid,
+          _thumbnailCharUuid
+        ],
       ));
 
       _isBroadcasting = true;
@@ -696,13 +862,21 @@ class FlutterBluePlusBleService implements BleServiceInterface {
     );
   }
 
-  /// Encode profile data as JSON for GATT characteristic reads.
+  /// Encode profile metadata as a small JSON for the profile characteristic.
+  ///
+  /// Intentionally excludes the thumbnail — that is served separately via the
+  /// dedicated thumbnail characteristic (fff2) as raw binary bytes, avoiding
+  /// the base64 inflation that would push the JSON well past the 512-byte
+  /// ATT attribute value limit.
   Uint8List _encodeProfileData(BroadcastPayload payload) {
-    final json = {
+    final json = <String, dynamic>{
       'userId': payload.userId,
       'name': payload.name,
       'age': payload.age,
       'bio': payload.bio,
+      // Include thumbnail size so the central knows how many notification bytes
+      // to accumulate before the thumbnail is fully reassembled.
+      if (_thumbnailData.isNotEmpty) 'thumbnail_size': _thumbnailData.length,
     };
     return Uint8List.fromList(utf8.encode(jsonEncode(json)));
   }
@@ -847,85 +1021,177 @@ class FlutterBluePlusBleService implements BleServiceInterface {
     _connectAndReadProfile(deviceId, peripheral);
   }
 
-  /// Connect to a discovered peer to read their full profile from GATT.
+  /// Connect to a discovered peer to read their profile + thumbnail from GATT.
+  ///
+  /// On first contact: connects, negotiates MTU, discovers services, caches
+  /// all characteristics. On subsequent sightings (peer already connected):
+  /// skips the connect step and re-reads the profile + thumbnail directly,
+  /// throttled to once every 60 seconds so a peer updating their photo is
+  /// picked up without excessive GATT traffic.
   // Cached maximum write lengths per peripheral (avoids repeated queries)
   final Map<String, int> _maxWriteLengths = {};
 
   Future<void> _connectAndReadProfile(
       String peerId, Peripheral peripheral) async {
-    // Don't re-connect if we already have messaging char cached
-    if (_messagingChars.containsKey(peerId)) return;
+    final isAlreadyConnected = _messagingChars.containsKey(peerId);
 
-    try {
-      await _central.connect(peripheral);
-
-      // Request larger MTU on Android (iOS auto-negotiates)
-      if (Platform.isAndroid) {
-        try {
-          await _central.requestMTU(peripheral, mtu: 517);
-        } catch (e) {
-          Logger.warning('BleService: MTU request failed for $peerId', 'BLE');
-        }
-      }
-
-      // Query the safe write length for this connection
+    if (!isAlreadyConnected) {
+      // ── First contact: full connect + GATT discovery ──
       try {
-        final maxLen = await _central.getMaximumWriteLength(
-          peripheral,
-          type: GATTCharacteristicWriteType.withResponse,
+        await _central.connect(peripheral);
+
+        // Request larger MTU on Android (iOS auto-negotiates)
+        if (Platform.isAndroid) {
+          try {
+            await _central.requestMTU(peripheral, mtu: 517);
+          } catch (e) {
+            Logger.warning('BleService: MTU request failed for $peerId', 'BLE');
+          }
+        }
+
+        // Query the safe write length for photo transfers
+        try {
+          final maxLen = await _central.getMaximumWriteLength(
+            peripheral,
+            type: GATTCharacteristicWriteType.withResponse,
+          );
+          _maxWriteLengths[peerId] = maxLen;
+          Logger.info(
+            'BleService: Max write length for $peerId: $maxLen bytes',
+            'BLE',
+          );
+        } catch (e) {
+          Logger.warning(
+            'BleService: getMaximumWriteLength failed for $peerId',
+            'BLE',
+          );
+        }
+
+        final services = await _central.discoverGATT(peripheral);
+        final anchorService =
+            services.where((s) => s.uuid == _serviceUuid).firstOrNull;
+
+        if (anchorService == null) {
+          await _central.disconnect(peripheral);
+          return;
+        }
+
+        // Cache all readable/writable characteristics for future use
+        for (final char in anchorService.characteristics) {
+          if (char.uuid == _profileCharUuid) {
+            _profileChars[peerId] = char;
+          } else if (char.uuid == _thumbnailCharUuid) {
+            _thumbnailChars[peerId] = char;
+          } else if (char.uuid == _messagingCharUuid) {
+            _messagingChars[peerId] = char;
+            Logger.info('BleService: Messaging ready for $peerId', 'BLE');
+          }
+        }
+
+        // Added by Nikko: Subscribe to thumbnail notifications immediately so the peripheral can start pushing the thumbnail in chunks while we read the profile — this can speed up the overall profile+
+        final thumbnailChar = _thumbnailChars[peerId];
+        if (thumbnailChar != null) {
+          try {
+            await _central.setCharacteristicNotifyState(
+              peripheral,
+              thumbnailChar,
+              state: true,
+            );
+            Logger.info(
+              'BleService: Subscribed to thumbnail notifications from $peerId',
+              'BLE',
+            );
+
+            // ──────────────── ADD THE DELAY HERE ────────────────
+            await Future.delayed(
+                const Duration(milliseconds: 60)); // ← this line
+          } catch (e) {
+            Logger.warning(
+              'BleService: Failed to subscribe to thumbnail notifications from $peerId: $e',
+              'BLE',
+            );
+          }
+        } else {
+          Logger.warning(
+            'BleService: No thumbnail char found for $peerId '
+                '— peer may be running old code without fff2',
+            'BLE',
+          );
+        }
+      } catch (e) {
+        Logger.warning(
+          'BleService: Connect to $peerId failed: $e',
+          'BLE',
         );
-        _maxWriteLengths[peerId] = maxLen;
+        return;
+      }
+    }
+
+    // ── Throttled profile + thumbnail re-read ──
+    // Always read on first contact; re-read at most once per 30 s thereafter
+    // so devices pick up profile updates (e.g. newly added photo) quickly.
+    final lastRead = _lastProfileReadTime[peerId];
+    final shouldReread = lastRead == null ||
+        DateTime.now().difference(lastRead) > const Duration(seconds: 30);
+
+    Logger.info(
+      'BleService: _connectAndReadProfile $peerId '
+          'alreadyConnected=$isAlreadyConnected '
+          'hasProfileChar=${_profileChars.containsKey(peerId)} '
+          'hasThumbnailChar=${_thumbnailChars.containsKey(peerId)} '
+          'shouldReread=$shouldReread',
+      'BLE',
+    );
+
+    if (!shouldReread) return;
+    _lastProfileReadTime[peerId] = DateTime.now();
+
+    // Read profile metadata (small JSON: userId/name/age/bio)
+    final profileChar = _profileChars[peerId];
+    if (profileChar != null) {
+      try {
+        final data = await _central.readCharacteristic(peripheral, profileChar);
         Logger.info(
-          'BleService: Max write length for $peerId: $maxLen bytes',
+          'BleService: Profile char read → ${data.length}B from $peerId',
+          'BLE',
+        );
+        _updatePeerFromProfile(peerId, data);
+      } catch (e) {
+        Logger.warning(
+            'BleService: Profile read failed for $peerId: $e', 'BLE');
+      }
+    } else {
+      Logger.warning(
+        'BleService: No profile char cached for $peerId — skip profile read',
+        'BLE',
+      );
+    }
+
+    // Subscribe to thumbnail char notifications so the peripheral can push the
+    // thumbnail in chunks.  The profile JSON includes thumbnail_size so we know
+    // how many bytes to accumulate before the thumbnail is fully received.
+    final thumbnailChar = _thumbnailChars[peerId];
+    if (thumbnailChar != null) {
+      try {
+        await _central.setCharacteristicNotifyState(
+          peripheral,
+          thumbnailChar,
+          state: true,
+        );
+        Logger.info(
+          'BleService: Subscribed to thumbnail notifications from $peerId',
           'BLE',
         );
       } catch (e) {
         Logger.warning(
-          'BleService: getMaximumWriteLength failed for $peerId',
+          'BleService: Failed to subscribe to thumbnail notifications from $peerId: $e',
           'BLE',
         );
       }
-
-      final services = await _central.discoverGATT(peripheral);
-      final anchorService =
-          services.where((s) => s.uuid == _serviceUuid).firstOrNull;
-
-      if (anchorService == null) {
-        await _central.disconnect(peripheral);
-        return;
-      }
-
-      // Read profile characteristic
-      final profileChar = anchorService.characteristics
-          .where((c) => c.uuid == _profileCharUuid)
-          .firstOrNull;
-
-      if (profileChar != null) {
-        try {
-          final data = await _central.readCharacteristic(
-            peripheral,
-            profileChar,
-          );
-          _updatePeerFromProfile(peerId, data);
-        } catch (e) {
-          Logger.warning('BleService: Profile read failed for $peerId', 'BLE');
-        }
-      }
-
-      // Cache messaging characteristic for sending
-      final msgChar = anchorService.characteristics
-          .where((c) => c.uuid == _messagingCharUuid)
-          .firstOrNull;
-
-      if (msgChar != null) {
-        _messagingChars[peerId] = msgChar;
-        Logger.info('BleService: Messaging ready for $peerId', 'BLE');
-      }
-
-      // Keep connection alive for messaging
-    } catch (e) {
+    } else {
       Logger.warning(
-        'BleService: Connect to $peerId failed: $e',
+        'BleService: No thumbnail char found for $peerId '
+            '— peer may be running old code without fff2',
         'BLE',
       );
     }
@@ -937,6 +1203,19 @@ class FlutterBluePlusBleService implements BleServiceInterface {
       final existingPeer = _visiblePeers[peerId];
       if (existingPeer == null) return;
 
+      // Prepare thumbnail assembly buffer if the peer has a thumbnail.
+      // The central will subscribe to thumbnail char notifications and accumulate
+      // notification chunks until it has received thumbnail_size bytes.
+      final thumbnailSize = json['thumbnail_size'] as int?;
+      if (thumbnailSize != null && thumbnailSize > 0) {
+        _thumbnailExpectedSizes[peerId] = thumbnailSize;
+        _thumbnailBuffers[peerId] = [];
+        Logger.info(
+          'BleService: Expecting ${thumbnailSize}B thumbnail from $peerId via notifications',
+          'BLE',
+        );
+      }
+
       final userId = json['userId'] as String?;
 
       // Record userId → BLE peerId mapping so incoming messages (which carry
@@ -947,12 +1226,14 @@ class FlutterBluePlusBleService implements BleServiceInterface {
 
       // Update the existing peer entry in-place — keep the BLE peripheral UUID
       // as the stable peerId to avoid creating duplicate database records.
+      // Thumbnail is NOT in the profile JSON (lives in the fff2 characteristic).
+      // Preserve any thumbnail bytes we have already read.
       final updatedPeer = DiscoveredPeer(
         peerId: peerId,
         name: json['name'] as String? ?? existingPeer.name,
         age: json['age'] as int? ?? existingPeer.age,
         bio: json['bio'] as String?,
-        thumbnailBytes: null,
+        thumbnailBytes: existingPeer.thumbnailBytes,
         rssi: existingPeer.rssi,
         timestamp: DateTime.now(),
       );
@@ -964,6 +1245,101 @@ class FlutterBluePlusBleService implements BleServiceInterface {
       );
     } catch (e) {
       Logger.warning('BleService: Profile decode failed', 'BLE');
+    }
+  }
+
+  /// Update an existing visible peer's thumbnail bytes after reading the
+  /// dedicated thumbnail characteristic (fff2).
+  void _updatePeerThumbnail(String peerId, Uint8List thumbnailBytes) {
+    final existingPeer = _visiblePeers[peerId];
+    if (existingPeer == null) return;
+
+    final updatedPeer = existingPeer.copyWith(
+      thumbnailBytes: thumbnailBytes,
+      timestamp: DateTime.now(),
+    );
+    _emitPeer(updatedPeer);
+    Logger.info(
+      'BleService: Updated thumbnail for "${updatedPeer.name}" '
+          '(${thumbnailBytes.length}B)',
+      'BLE',
+    );
+  }
+
+  /// Called on the PERIPHERAL side when a central subscribes to the thumbnail
+  /// characteristic.  Push the thumbnail in MTU-sized chunks so the central can
+  /// reassemble the full JPEG without being limited by a single ATT read payload.
+  void _onThumbnailNotifyStateChanged(
+      GATTCharacteristicNotifyStateChangedEventArgs args) async {
+    if (args.characteristic.uuid != _thumbnailCharUuid) return;
+    if (!args.state) return; // Unsubscribed — nothing to do
+
+    final data = _thumbnailData;
+    if (data.isEmpty) return;
+
+    final central = args.central;
+    int maxChunk;
+    try {
+      maxChunk = await _peripheral.getMaximumNotifyLength(central);
+    } catch (_) {
+      maxChunk = 500; // Conservative fallback
+    }
+
+    Logger.info(
+      'BleService: Central subscribed to thumbnail — pushing '
+          '${data.length}B in ≤${maxChunk}B chunks',
+      'BLE',
+    );
+
+    var offset = 0;
+    while (offset < data.length) {
+      final end = min(offset + maxChunk, data.length);
+      final chunk = data.sublist(offset, end);
+      try {
+        await _peripheral.notifyCharacteristic(
+          central,
+          _serverThumbnailChar!,
+          value: chunk,
+        );
+        offset = end;
+      } catch (e) {
+        Logger.warning(
+          'BleService: Thumbnail chunk failed at offset $offset: $e',
+          'BLE',
+        );
+        break;
+      }
+    }
+    Logger.info(
+      'BleService: Thumbnail push complete (${data.length}B sent)',
+      'BLE',
+    );
+  }
+
+  /// Called on the CENTRAL side when a notification arrives on any characteristic.
+  /// Accumulates thumbnail chunks and calls [_updatePeerThumbnail] when complete.
+  void _onCharacteristicNotified(GATTCharacteristicNotifiedEventArgs args) {
+    if (args.characteristic.uuid != _thumbnailCharUuid) return;
+
+    final peerId = args.peripheral.uuid.toString();
+    var buffer = _thumbnailBuffers[peerId] ??= []; // create if missing
+    var expected = _thumbnailExpectedSizes[peerId];
+
+    buffer.addAll(args.value);
+
+    // If we still don't know expected size, but buffer is getting big → log warning
+    if (expected == null && buffer.length > 32000) {
+      Logger.warning(
+          'Receiving thumbnail chunks without knowing size – possible race',
+          'BLE');
+      // Optionally: keep buffering anyway and wait for late profile read
+    }
+
+    if (expected != null && buffer.length >= expected) {
+      final thumbnailBytes = Uint8List.fromList(buffer.sublist(0, expected));
+      _thumbnailBuffers.remove(peerId);
+      _thumbnailExpectedSizes.remove(peerId);
+      _updatePeerThumbnail(peerId, thumbnailBytes);
     }
   }
 
@@ -984,7 +1360,12 @@ class FlutterBluePlusBleService implements BleServiceInterface {
       _peerTimeoutTimers.remove(peerId)?.cancel();
       _peerLostController.add(peerId);
       _messagingChars.remove(peerId);
+      _profileChars.remove(peerId);
+      _thumbnailChars.remove(peerId);
       _maxWriteLengths.remove(peerId);
+      _lastProfileReadTime.remove(peerId);
+      _thumbnailBuffers.remove(peerId);
+      _thumbnailExpectedSizes.remove(peerId);
       _userIdToPeerId.removeWhere((_, v) => v == peerId);
       Logger.info('BleService: Lost peer ${peer?.name}', 'BLE');
     }
