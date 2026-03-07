@@ -1622,7 +1622,19 @@ class FlutterBluePlusBleService implements BleServiceInterface {
 
       // Record userId → BLE peerId mapping so incoming messages (which carry
       // the sender's app userId) can be routed to the correct peer.
+      // If the same userId was previously seen under a different peerId (e.g.
+      // due to BLE MAC address rotation when the peer restarted advertising),
+      // retire the stale entry so the user doesn't appear twice in discovery.
       if (userId != null && userId.isNotEmpty) {
+        final previousPeerId = _userIdToPeerId[userId];
+        if (previousPeerId != null && previousPeerId != peerId) {
+          Logger.info(
+            'BleService: userId $userId rotated MAC '
+                '$previousPeerId → $peerId, retiring stale entry',
+            'BLE',
+          );
+          _onPeerLost(previousPeerId);
+        }
         _userIdToPeerId[userId] = peerId;
       }
 

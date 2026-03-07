@@ -151,10 +151,12 @@ class DiscoveryState extends Equatable {
   final DateTime? lastRefreshed;
   final bool isScanning;
 
-  /// Visible peers (excluding blocked), sorted by last seen
+  /// Visible peers (excluding blocked), sorted by last seen.
+  /// Deduplicates by peerId in case a MAC rotation briefly produces two entries.
   List<DiscoveredPeer> get visiblePeers {
+    final seen = <String>{};
     return peers
-        .where((p) => !p.isBlocked)
+        .where((p) => !p.isBlocked && seen.add(p.peerId))
         .toList()
       ..sort((a, b) => b.lastSeenAt.compareTo(a.lastSeenAt));
   }

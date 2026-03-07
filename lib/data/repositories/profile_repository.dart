@@ -172,7 +172,10 @@ class ProfileRepository {
       for (var i = 0; i < photoIds.length; i++) {
         await (_db.update(_db.userPhotos)
               ..where((t) => t.id.equals(photoIds[i])))
-            .write(UserPhotosCompanion(orderIndex: Value(i)));
+            .write(UserPhotosCompanion(
+          orderIndex: Value(i),
+          isPrimary: Value(i == 0),
+        ));
       }
     });
   }

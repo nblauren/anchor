@@ -54,6 +54,7 @@ class ChatState extends Equatable {
     this.errorMessage,
     this.hasMoreMessages = true,
     this.photoTransfers = const {},
+    this.isBlocked = false,
   });
 
   final ChatStatus status;
@@ -63,6 +64,7 @@ class ChatState extends Equatable {
   final String? errorMessage;
   final bool hasMoreMessages;
   final Map<String, PhotoTransferInfo> photoTransfers; // messageId -> progress
+  final bool isBlocked;
 
   /// Total unread count across all conversations
   int get totalUnreadCount =>
@@ -82,6 +84,7 @@ class ChatState extends Equatable {
     String? errorMessage,
     bool? hasMoreMessages,
     Map<String, PhotoTransferInfo>? photoTransfers,
+    bool? isBlocked,
     bool clearCurrentConversation = false,
   }) {
     return ChatState(
@@ -93,6 +96,7 @@ class ChatState extends Equatable {
       errorMessage: errorMessage,
       hasMoreMessages: hasMoreMessages ?? this.hasMoreMessages,
       photoTransfers: photoTransfers ?? this.photoTransfers,
+      isBlocked: isBlocked ?? this.isBlocked,
     );
   }
 
@@ -105,5 +109,6 @@ class ChatState extends Equatable {
         errorMessage,
         hasMoreMessages,
         photoTransfers,
+        isBlocked,
       ];
 }

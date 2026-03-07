@@ -7,6 +7,7 @@ import '../../../core/constants/app_constants.dart';
 import '../../../core/utils/logger.dart';
 import '../../../data/local_database/database.dart';
 import '../../../data/repositories/chat_repository.dart';
+import '../../../data/repositories/peer_repository.dart';
 import '../../../services/ble/ble.dart' as ble;
 import '../../../services/image_service.dart';
 import 'chat_event.dart';
@@ -15,11 +16,13 @@ import 'chat_state.dart';
 class ChatBloc extends Bloc<ChatEvent, ChatState> {
   ChatBloc({
     required ChatRepository chatRepository,
+    required PeerRepository peerRepository,
     required ImageService imageService,
     required ble.BleServiceInterface bleService,
     required NotificationService notificationService,
     required String ownUserId,
   })  : _chatRepository = chatRepository,
+        _peerRepository = peerRepository,
         _imageService = imageService,
         _bleService = bleService,
         _notificationService = notificationService,
@@ -39,6 +42,8 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     on<CloseConversation>(_onCloseConversation);
     on<DeleteConversation>(_onDeleteConversation);
     on<ClearChatError>(_onClearError);
+    on<BlockChatPeer>(_onBlockChatPeer);
+    on<UnblockChatPeer>(_onUnblockChatPeer);
 
     // Subscribe to BLE message stream
     _messageSubscription = _bleService.messageReceivedStream.listen(
@@ -57,6 +62,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   }
 
   final ChatRepository _chatRepository;
+  final PeerRepository _peerRepository;
   final ImageService _imageService;
   final ble.BleServiceInterface _bleService;
   final NotificationService _notificationService;
@@ -111,6 +117,8 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       // Mark any unread messages as read immediately on open
       await _chatRepository.markConversationRead(conversationEntry.id);
 
+      final isBlocked = await _peerRepository.isPeerBlocked(event.peerId);
+
       emit(state.copyWith(
         status: ChatStatus.loaded,
         currentConversation: CurrentConversation(
@@ -120,6 +128,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         ),
         messages: [],
         hasMoreMessages: true,
+        isBlocked: isBlocked,
       ));
 
       // Load messages
@@ -166,6 +175,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   ) async {
     if (state.currentConversation == null) return;
     if (event.text.trim().isEmpty) return;
+    if (state.isBlocked) return;
 
     emit(state.copyWith(status: ChatStatus.sending));
 
@@ -223,6 +233,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     Emitter<ChatState> emit,
   ) async {
     if (state.currentConversation == null) return;
+    if (state.isBlocked) return;
 
     emit(state.copyWith(status: ChatStatus.sending));
 
@@ -312,6 +323,9 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     try {
       final bleMsg = event.message;
 
+      // Discard messages from blocked peers
+      if (await _peerRepository.isPeerBlocked(bleMsg.fromPeerId)) return;
+
       // Get or create conversation with this peer
       final conversation =
           await _chatRepository.getOrCreateConversation(bleMsg.fromPeerId);
@@ -394,6 +408,9 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   /// Handle BLE photo received from peer
   Future<void> _onBlePhotoReceived(ble.ReceivedPhoto photo) async {
     try {
+      // Discard photos from blocked peers
+      if (await _peerRepository.isPeerBlocked(photo.fromPeerId)) return;
+
       // Get or create conversation with this peer
       final conversation =
           await _chatRepository.getOrCreateConversation(photo.fromPeerId);
@@ -575,6 +592,38 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     Emitter<ChatState> emit,
   ) {
     emit(state.copyWith(errorMessage: null));
+  }
+
+  Future<void> _onBlockChatPeer(
+    BlockChatPeer event,
+    Emitter<ChatState> emit,
+  ) async {
+    if (state.currentConversation == null) return;
+
+    try {
+      await _peerRepository.blockPeer(state.currentConversation!.peerId);
+      emit(state.copyWith(isBlocked: true));
+      Logger.info('Peer blocked from chat', 'ChatBloc');
+    } catch (e) {
+      Logger.error('Failed to block peer', e, null, 'ChatBloc');
+      emit(state.copyWith(errorMessage: 'Failed to block user'));
+    }
+  }
+
+  Future<void> _onUnblockChatPeer(
+    UnblockChatPeer event,
+    Emitter<ChatState> emit,
+  ) async {
+    if (state.currentConversation == null) return;
+
+    try {
+      await _peerRepository.unblockPeer(state.currentConversation!.peerId);
+      emit(state.copyWith(isBlocked: false));
+      Logger.info('Peer unblocked from chat', 'ChatBloc');
+    } catch (e) {
+      Logger.error('Failed to unblock peer', e, null, 'ChatBloc');
+      emit(state.copyWith(errorMessage: 'Failed to unblock user'));
+    }
   }
 
   @override

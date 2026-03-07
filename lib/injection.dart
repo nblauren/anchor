@@ -79,6 +79,7 @@ Future<void> initializeDependencies({
   getIt.registerFactoryParam<ChatBloc, String, void>(
     (ownUserId, _) => ChatBloc(
       chatRepository: getIt<DatabaseService>().chatRepository,
+      peerRepository: getIt<DatabaseService>().peerRepository,
       imageService: getIt<ImageService>(),
       bleService: getIt<BleServiceInterface>(),
       notificationService: getIt<NotificationService>(),

@@ -112,6 +112,16 @@ class ClearChatError extends ChatEvent {
   const ClearChatError();
 }
 
+/// Block the current conversation peer
+class BlockChatPeer extends ChatEvent {
+  const BlockChatPeer();
+}
+
+/// Unblock the current conversation peer
+class UnblockChatPeer extends ChatEvent {
+  const UnblockChatPeer();
+}
+
 /// BLE message received from peer
 class BleMessageReceived extends ChatEvent {
   const BleMessageReceived(this.message);

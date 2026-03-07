@@ -70,6 +70,34 @@ class _ChatScreenState extends State<ChatScreen> {
     super.dispose();
   }
 
+  void _confirmBlock(BuildContext context, ChatState state) {
+    final peerName = state.currentConversation?.peerName ?? 'this user';
+    showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Block User'),
+        content: Text('Block $peerName? They won\'t be able to send you messages.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Block', style: TextStyle(color: AppTheme.error)),
+          ),
+        ],
+      ),
+    ).then((confirmed) {
+      if (confirmed == true && context.mounted) {
+        context.read<ChatBloc>().add(const BlockChatPeer());
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$peerName blocked')),
+        );
+      }
+    });
+  }
+
   void _sendMessage() {
     final content = _messageController.text.trim();
     if (content.isNotEmpty) {
@@ -220,11 +248,46 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
             ),
             actions: [
-              IconButton(
+              PopupMenuButton<String>(
                 icon: const Icon(Icons.more_vert),
-                onPressed: () {
-                  // Show chat options
+                onSelected: (value) {
+                  if (value == 'block') {
+                    _confirmBlock(context, state);
+                  } else if (value == 'unblock') {
+                    context.read<ChatBloc>().add(const UnblockChatPeer());
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          '${state.currentConversation?.peerName ?? 'User'} unblocked',
+                        ),
+                      ),
+                    );
+                  }
                 },
+                itemBuilder: (_) => [
+                  if (state.isBlocked)
+                    const PopupMenuItem(
+                      value: 'unblock',
+                      child: Row(
+                        children: [
+                          Icon(Icons.lock_open, size: 20),
+                          SizedBox(width: 12),
+                          Text('Unblock'),
+                        ],
+                      ),
+                    )
+                  else
+                    const PopupMenuItem(
+                      value: 'block',
+                      child: Row(
+                        children: [
+                          Icon(Icons.block, size: 20, color: AppTheme.error),
+                          SizedBox(width: 12),
+                          Text('Block', style: TextStyle(color: AppTheme.error)),
+                        ],
+                      ),
+                    ),
+                ],
               ),
             ],
           ),
@@ -278,7 +341,9 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
 
               // Message input
-              _buildMessageInput(state),
+              state.isBlocked
+                  ? _buildBlockedBanner()
+                  : _buildMessageInput(state),
             ],
           ),
         );
@@ -336,6 +401,26 @@ class _ChatScreenState extends State<ChatScreen> {
                 ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildBlockedBanner() {
+    return Container(
+      padding: EdgeInsets.only(
+        left: 16,
+        right: 16,
+        top: 12,
+        bottom: MediaQuery.of(context).padding.bottom + 12,
+      ),
+      decoration: const BoxDecoration(
+        color: AppTheme.darkSurface,
+        border: Border(top: BorderSide(color: AppTheme.darkCard)),
+      ),
+      child: const Text(
+        'You have blocked this person. Unblock them to send messages.',
+        textAlign: TextAlign.center,
+        style: TextStyle(color: AppTheme.textHint, fontSize: 13),
       ),
     );
   }
