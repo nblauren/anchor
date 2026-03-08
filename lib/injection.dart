@@ -8,6 +8,7 @@ import 'services/ble/ble.dart';
 import 'services/database_service.dart';
 import 'services/image_service.dart';
 import 'services/notification_service.dart';
+import 'services/nsfw_detection_service.dart';
 
 /// Global service locator instance
 final getIt = GetIt.instance;
@@ -58,12 +59,16 @@ Future<void> initializeDependencies({
   // Initialize notification service
   await getIt<NotificationService>().initialize();
 
+  // NSFW detection service — on-device TFLite model via nsfw_detector_flutter
+  getIt.registerLazySingleton<NsfwDetectionService>(() => NsfwDetectorFlutterService());
+
   // Blocs (factories - new instance each time)
   getIt.registerFactory<ProfileBloc>(
     () => ProfileBloc(
       databaseService: getIt<DatabaseService>(),
       imageService: getIt<ImageService>(),
       bleService: getIt<BleServiceInterface>(),
+      nsfwDetectionService: getIt<NsfwDetectionService>(),
     ),
   );
 

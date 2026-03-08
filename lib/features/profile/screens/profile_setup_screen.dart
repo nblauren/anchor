@@ -133,6 +133,30 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
           );
         }
 
+        // Show NSFW block alert when a photo is blocked from becoming primary
+        if (state.nsfwBlockedPhotoId != null) {
+          showDialog<void>(
+            context: context,
+            builder: (_) => AlertDialog(
+              title: const Text('Sensitive Content Detected'),
+              content: const Text(
+                'This photo contains sensitive content and cannot be set as your '
+                'primary (public) photo in Anchor. It can still be used as a '
+                'secondary photo.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                    context.read<ProfileBloc>().add(const DismissNsfwWarning());
+                  },
+                  child: const Text('OK'),
+                ),
+              ],
+            ),
+          );
+        }
+
         // Show errors
         if (state.errorMessage != null) {
           ScaffoldMessenger.of(context).showSnackBar(

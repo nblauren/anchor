@@ -101,3 +101,8 @@ class ClearError extends ProfileEvent {
 class BroadcastProfile extends ProfileEvent {
   const BroadcastProfile();
 }
+
+/// Dismiss the NSFW-blocked warning dialog and clear [ProfileState.nsfwBlockedPhotoId].
+class DismissNsfwWarning extends ProfileEvent {
+  const DismissNsfwWarning();
+}
