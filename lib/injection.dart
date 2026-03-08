@@ -59,8 +59,8 @@ Future<void> initializeDependencies({
   // Initialize notification service
   await getIt<NotificationService>().initialize();
 
-  // NSFW detection service (stub; swap for real implementation when available)
-  getIt.registerLazySingleton<NsfwDetectionService>(() => const StubNsfwDetectionService());
+  // NSFW detection service — on-device TFLite model via nsfw_detector_flutter
+  getIt.registerLazySingleton<NsfwDetectionService>(() => NsfwDetectorFlutterService());
 
   // Blocs (factories - new instance each time)
   getIt.registerFactory<ProfileBloc>(

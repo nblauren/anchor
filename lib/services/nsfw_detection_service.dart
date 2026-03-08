@@ -1,3 +1,7 @@
+import 'dart:io';
+
+import 'package:nsfw_detector_flutter/nsfw_detector_flutter.dart';
+
 import '../core/utils/logger.dart';
 
 /// Result of an on-device sensitive-content analysis.
@@ -32,82 +36,42 @@ abstract class NsfwDetectionService {
   Future<NsfwCheckResult> analyzeImage(String absolutePath);
 }
 
-/// Stub that always reports safe.
+/// Production implementation backed by the `nsfw_detector_flutter` package
+/// (Yahoo open_nsfw TFLite model, runs fully on-device).
 ///
-/// Replace the body of [analyzeImage] with real inference before shipping
-/// to production.  Two ready-to-use integration patterns are documented
-/// in comments below.
-class StubNsfwDetectionService implements NsfwDetectionService {
-  const StubNsfwDetectionService();
+/// The [NsfwDetector] is loaded lazily on the first call and reused
+/// thereafter — loading is ~100–300 ms the first time.
+///
+/// **Platform requirements**
+/// - Android: `minSdkVersion 26` in `android/app/build.gradle`
+/// - iOS: Disable "Strip Linked Product" in Xcode Build Settings
+///        (target → Build Settings → search "strip linked product" → set to No)
+class NsfwDetectorFlutterService implements NsfwDetectionService {
+  NsfwDetectorFlutterService({this.threshold = 0.7});
+
+  /// Probability threshold above which an image is considered NSFW.
+  /// The default (0.7) matches the package default.
+  final double threshold;
+
+  NsfwDetector? _detector;
+
+  Future<NsfwDetector> _getDetector() async {
+    _detector ??= await NsfwDetector.load();
+    return _detector!;
+  }
 
   @override
   Future<NsfwCheckResult> analyzeImage(String absolutePath) async {
-    // ── tflite_flutter integration ─────────────────────────────────────────
-    //
-    // 1. Add to pubspec.yaml:
-    //      tflite_flutter: ^0.10.4
-    //      flutter:
-    //        assets:
-    //          - assets/models/nsfw_model.tflite
-    //
-    // 2. Replace this method body with:
-    //
-    //    import 'dart:io';
-    //    import 'package:tflite_flutter/tflite_flutter.dart';
-    //    import 'package:image/image.dart' as img;
-    //
-    //    final interpreter =
-    //        await Interpreter.fromAsset('assets/models/nsfw_model.tflite');
-    //    final rawBytes = await File(absolutePath).readAsBytes();
-    //    final image = img.decodeImage(rawBytes)!;
-    //    final resized = img.copyResize(image, width: 224, height: 224);
-    //
-    //    // Normalise to [-1, 1] float32 (adjust per your model's input spec)
-    //    final input = List.generate(
-    //      1,
-    //      (_) => List.generate(224, (y) => List.generate(224, (x) {
-    //        final pixel = resized.getPixel(x, y);
-    //        return [
-    //          (img.getRed(pixel) / 127.5) - 1.0,
-    //          (img.getGreen(pixel) / 127.5) - 1.0,
-    //          (img.getBlue(pixel) / 127.5) - 1.0,
-    //        ];
-    //      })),
-    //    );
-    //    // Output shape [1, N_classes].  Adjust indices for your label order.
-    //    // Example: class 1 = "sexy/nude", class 3 = "porn"
-    //    final output = List.filled(5, 0.0).reshape([1, 5]);
-    //    interpreter.run(input, output);
-    //
-    //    final nsfwScore = (output[0][1] as double) + (output[0][3] as double);
-    //    return NsfwCheckResult(
-    //      isSafe: nsfwScore < 0.5,
-    //      confidence: 1.0 - nsfwScore,
-    //    );
-    //
-    // ── nsfw_detector_flutter integration ─────────────────────────────────
-    //
-    // 1. Add to pubspec.yaml:
-    //      nsfw_detector_flutter: ^latest
-    //
-    // 2. Replace this method body with:
-    //
-    //    import 'package:nsfw_detector_flutter/nsfw_detector_flutter.dart';
-    //
-    //    final result = await NsfwDetector.detectFromPath(absolutePath);
-    //    return NsfwCheckResult(
-    //      isSafe: result.classification != NsfwClass.nsfw,
-    //      confidence: result.confidence ?? 1.0,
-    //    );
-    //
-    // ──────────────────────────────────────────────────────────────────────
-
-    // Stub: always safe.
+    final detector = await _getDetector();
+    final result = await detector.detectNSFWFromFile(File(absolutePath));
     Logger.info(
-      'NsfwDetection: stub check — always safe '
-      '(replace StubNsfwDetectionService with real model)',
+      'NsfwDetection: score=${result.score.toStringAsFixed(3)} '
+      'isNsfw=${result.isNsfw} path=$absolutePath',
       'NSFW',
     );
-    return const NsfwCheckResult(isSafe: true, confidence: 1.0);
+    return NsfwCheckResult(
+      isSafe: !result.isNsfw,
+      confidence: result.score.toDouble(),
+    );
   }
 }

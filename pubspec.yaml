@@ -35,6 +35,7 @@ dependencies:
   # Image Handling
   image_picker: ^1.0.5
   image_compression_flutter: ^1.0.4
+  nsfw_detector_flutter: ^1.0.5
 
   # UI
   cupertino_icons: ^1.0.6
