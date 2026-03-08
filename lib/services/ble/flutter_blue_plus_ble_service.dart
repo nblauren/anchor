@@ -44,6 +44,10 @@ class FlutterBluePlusBleService implements BleServiceInterface {
       UUID.fromString('0000fff2-0000-1000-8000-00805f9b34fb');
   static final _messagingCharUuid =
       UUID.fromString('0000fff3-0000-1000-8000-00805f9b34fb');
+  /// fff4 — serves ALL profile photo thumbnails concatenated, pushed on-demand
+  /// only when a central explicitly subscribes (e.g. profile view opened).
+  static final _fullPhotosCharUuid =
+      UUID.fromString('0000fff4-0000-1000-8000-00805f9b34fb');
 
   // Status
   BleStatus _status = BleStatus.disabled;
@@ -116,31 +120,43 @@ class FlutterBluePlusBleService implements BleServiceInterface {
   GATTCharacteristic? _serverProfileChar;
   GATTCharacteristic? _serverThumbnailChar;
   GATTCharacteristic? _serverMessagingChar;
+  GATTCharacteristic? _serverFullPhotosChar;
   bool _gattServerReady = false; // true once addService succeeds
   bool _settingUpGatt = false; // prevents concurrent _setupGattServer calls
   bool _startCalled = false; // true after start() has been called at least once
 
   // Cached profile data for GATT server read requests
   Uint8List _profileData = Uint8List(0);
-  // Raw thumbnail bytes served via the dedicated thumbnail characteristic (fff2).
-  // For multi-photo: concatenation of all photo thumbnails in display order.
+  // PRIMARY thumbnail only — served via fff2 to every connecting peer.
+  // Kept small (≤15 KB) so initial discovery is fast and lean.
   Uint8List _thumbnailData = Uint8List(0);
-  // Sizes of individual photo thumbnails concatenated in _thumbnailData (server side).
+  // Size of the primary thumbnail (single-element list for backward compat).
   List<int> _ownPhotoSizes = [];
+  // ALL photo thumbnails concatenated — served via fff4 on-demand only.
+  Uint8List _fullPhotosData = Uint8List(0);
+  // Sizes of each photo in _fullPhotosData (for splitting on the central side).
+  List<int> _ownFullPhotoSizes = [];
   BroadcastPayload? _pendingPayload;
 
   // Per-peer characteristic cache (central side — for reading remote profiles)
   final Map<String, GATTCharacteristic> _profileChars = {};
   final Map<String, GATTCharacteristic> _thumbnailChars = {};
+  final Map<String, GATTCharacteristic> _fullPhotosChars = {};
   // Throttle profile re-reads to once per 60 s per peer
   final Map<String, DateTime> _lastProfileReadTime = {};
 
-  // Per-peer thumbnail assembly buffers (notification-based chunked delivery)
+  // Per-peer thumbnail assembly buffers (notification-based chunked delivery for fff2)
   final Map<String, List<int>> _thumbnailBuffers = {};
   final Map<String, int> _thumbnailExpectedSizes = {};
-  // Per-peer photo sizes for splitting the reassembled thumbnail buffer (central side).
-  // Only set when the remote peer advertises multiple photos via 'photo_sizes'.
+  // Per-peer photo sizes for splitting old-format fff2 data (backward compat).
+  // Only set when the remote peer advertises multiple photos via legacy 'photo_sizes'.
   final Map<String, List<int>> _peerPhotoSizes = {};
+
+  // Per-peer full-photo assembly buffers (fff4 on-demand delivery)
+  final Map<String, List<int>> _fullPhotoBuffers = {};
+  final Map<String, int> _fullPhotoExpectedSizes = {};
+  // Sizes of individual photos in fff4 data so the central can split them.
+  final Map<String, List<int>> _peerFullPhotoSizes = {};
 
   // Active incoming binary photo transfers (keyed by centralUuid)
   // Stores metadata from the photo_start message so binary chunks
@@ -219,12 +235,16 @@ class FlutterBluePlusBleService implements BleServiceInterface {
     _messagingChars.clear();
     _profileChars.clear();
     _thumbnailChars.clear();
+    _fullPhotosChars.clear();
     _maxWriteLengths.clear();
     _lastProfileReadTime.clear();
     _userIdToPeerId.clear();
     _thumbnailBuffers.clear();
     _thumbnailExpectedSizes.clear();
     _peerPhotoSizes.clear();
+    _fullPhotoBuffers.clear();
+    _fullPhotoExpectedSizes.clear();
+    _peerFullPhotoSizes.clear();
     _lastAnnouncedAt.clear();
     _neighborMap.clear();
     _neighborListTimer?.cancel();
@@ -371,6 +391,22 @@ class FlutterBluePlusBleService implements BleServiceInterface {
         descriptors: [],
       );
 
+      // Full-photos characteristic (fff4): serves ALL profile photo thumbnails
+      // concatenated, pushed via notify only when a central explicitly subscribes.
+      // This keeps initial discovery lean (only primary via fff2) while allowing
+      // the profile-view screen to request the full set on demand.
+      _serverFullPhotosChar = GATTCharacteristic.mutable(
+        uuid: _fullPhotosCharUuid,
+        properties: [
+          GATTCharacteristicProperty.read,
+          GATTCharacteristicProperty.notify,
+        ],
+        permissions: [
+          GATTCharacteristicPermission.read,
+        ],
+        descriptors: [],
+      );
+
       final service = GATTService(
         uuid: _serviceUuid,
         isPrimary: true,
@@ -379,6 +415,7 @@ class FlutterBluePlusBleService implements BleServiceInterface {
           _serverProfileChar!,
           _serverThumbnailChar!,
           _serverMessagingChar!,
+          _serverFullPhotosChar!,
         ],
       );
 
@@ -394,12 +431,18 @@ class FlutterBluePlusBleService implements BleServiceInterface {
       _charWriteSubscription = _peripheral.characteristicWriteRequested
           .listen(_onMessageWriteReceived);
 
-      // Handle thumbnail characteristic notify subscriptions from centrals.
-      // When a central subscribes, push the thumbnail in chunks.
+      // Handle thumbnail/full-photos characteristic notify subscriptions.
+      // When a central subscribes, push the relevant data in chunks.
       await _charNotifyStateSubscription?.cancel();
       _charNotifyStateSubscription = _peripheral
           .characteristicNotifyStateChanged
-          .listen(_onThumbnailNotifyStateChanged);
+          .listen((args) {
+        if (args.characteristic.uuid == _thumbnailCharUuid) {
+          _onThumbnailNotifyStateChanged(args);
+        } else if (args.characteristic.uuid == _fullPhotosCharUuid) {
+          _onFullPhotosNotifyStateChanged(args);
+        }
+      });
 
       // Handle thumbnail notification chunks arriving at the central side.
       await _charNotifiedSubscription?.cancel();
@@ -436,6 +479,9 @@ class FlutterBluePlusBleService implements BleServiceInterface {
       } else if (charUuid == _thumbnailCharUuid) {
         sourceData = _thumbnailData;
         charName = 'thumbnail';
+      } else if (charUuid == _fullPhotosCharUuid) {
+        sourceData = _fullPhotosData;
+        charName = 'full_photos';
       } else {
         await _peripheral.respondReadRequestWithValue(
           args.request,
@@ -1134,17 +1180,21 @@ class FlutterBluePlusBleService implements BleServiceInterface {
     _ensureInitialized();
     _pendingPayload = payload;
 
-    // Concatenate all photo thumbnails; fall back to single thumbnailBytes.
-    // _ownPhotoSizes is set BEFORE _encodeProfileData so the JSON includes it.
+    // fff2 — PRIMARY thumbnail only (small, fast, sent to every connecting peer).
+    _thumbnailData = payload.thumbnailBytes ?? Uint8List(0);
+    _ownPhotoSizes = _thumbnailData.isNotEmpty ? [_thumbnailData.length] : [];
+
+    // fff4 — ALL thumbnails concatenated, served on-demand (profile view only).
     if (payload.thumbnailsList != null && payload.thumbnailsList!.isNotEmpty) {
-      _ownPhotoSizes = payload.thumbnailsList!.map((b) => b.length).toList();
-      _thumbnailData = Uint8List.fromList(
+      _ownFullPhotoSizes = payload.thumbnailsList!.map((b) => b.length).toList();
+      _fullPhotosData = Uint8List.fromList(
         payload.thumbnailsList!.expand((b) => b).toList(),
       );
     } else {
-      _ownPhotoSizes = payload.thumbnailBytes != null ? [payload.thumbnailBytes!.length] : [];
-      _thumbnailData = payload.thumbnailBytes ?? Uint8List(0);
+      _ownFullPhotoSizes = _ownPhotoSizes;
+      _fullPhotosData = _thumbnailData;
     }
+
     _profileData = _encodeProfileData(payload);
 
     Logger.info(
@@ -1238,24 +1288,28 @@ class FlutterBluePlusBleService implements BleServiceInterface {
 
   /// Encode profile metadata as a small JSON for the profile characteristic.
   ///
-  /// Intentionally excludes the thumbnail — that is served separately via the
-  /// dedicated thumbnail characteristic (fff2) as raw binary bytes, avoiding
-  /// the base64 inflation that would push the JSON well past the 512-byte
-  /// ATT attribute value limit.
+  /// fff2 (thumbnail char) now serves only the PRIMARY photo, so the JSON
+  /// only carries its size via `thumbnail_size`.
+  ///
+  /// When the peer has multiple photos they are available via fff4 (full-photos
+  /// char).  The JSON advertises this via `photo_count` + `full_photo_sizes`
+  /// so the central knows whether to request fff4 and how to split the data.
+  ///
+  /// Backward-compat: old clients only look at `thumbnail_size` and ignore
+  /// `photo_count`/`full_photo_sizes` — they still get the primary thumbnail.
   Uint8List _encodeProfileData(BroadcastPayload payload) {
     final json = <String, dynamic>{
       'userId': payload.userId,
       'name': payload.name,
       'age': payload.age,
       'bio': payload.bio,
-      // Multi-photo: include individual sizes so the central can split the buffer.
-      // Single photo: use legacy thumbnail_size for backward compatibility with
-      // older clients that don't understand photo_sizes.
-      if (_thumbnailData.isNotEmpty)
-        if (_ownPhotoSizes.length > 1)
-          'photo_sizes': _ownPhotoSizes
-        else
-          'thumbnail_size': _thumbnailData.length,
+      // Primary thumbnail size (fff2)
+      if (_thumbnailData.isNotEmpty) 'thumbnail_size': _thumbnailData.length,
+      // Full photo set metadata (fff4) — only when >1 photo available
+      if (_ownFullPhotoSizes.length > 1) ...{
+        'photo_count': _ownFullPhotoSizes.length,
+        'full_photo_sizes': _ownFullPhotoSizes,
+      },
     };
     return Uint8List.fromList(utf8.encode(jsonEncode(json)));
   }
@@ -1480,6 +1534,9 @@ class FlutterBluePlusBleService implements BleServiceInterface {
           } else if (char.uuid == _messagingCharUuid) {
             _messagingChars[peerId] = char;
             Logger.info('BleService: Messaging ready for $peerId', 'BLE');
+          } else if (char.uuid == _fullPhotosCharUuid) {
+            _fullPhotosChars[peerId] = char;
+            Logger.info('BleService: Full-photos char cached for $peerId', 'BLE');
           }
         }
 
@@ -1583,38 +1640,55 @@ class FlutterBluePlusBleService implements BleServiceInterface {
       final existingPeer = _visiblePeers[peerId];
       if (existingPeer == null) return;
 
-      // Prepare thumbnail assembly buffer.
-      // Multi-photo peers advertise 'photo_sizes: [n1, n2, ...]' so we can split.
-      // Single-photo (or old) peers use 'thumbnail_size: N' (backward compat).
+      // ── Backward-compat: old peers broadcast all thumbnails via fff2 ──
+      // They advertise 'photo_sizes: [n1, n2, ...]' — handle as before.
       final rawPhotoSizes = json['photo_sizes'] as List?;
-      final thumbnailSize = json['thumbnail_size'] as int?;
-      int? totalExpected;
-
       if (rawPhotoSizes != null && rawPhotoSizes.isNotEmpty) {
         final photoSizes = rawPhotoSizes.cast<int>();
         _peerPhotoSizes[peerId] = photoSizes;
-        totalExpected = photoSizes.reduce((a, b) => a + b);
-      } else if (thumbnailSize != null && thumbnailSize > 0) {
-        _peerPhotoSizes.remove(peerId); // single photo — no split needed
-        totalExpected = thumbnailSize;
-      }
-
-      if (totalExpected != null && totalExpected > 0) {
+        final totalExpected = photoSizes.reduce((a, b) => a + b);
         _thumbnailExpectedSizes[peerId] = totalExpected;
-        // Preserve any chunks already buffered — they may have arrived before
-        // this profile read completed. Only create the buffer if absent.
         final buffer = _thumbnailBuffers.putIfAbsent(peerId, () => []);
         Logger.info(
-          'BleService: Expecting ${totalExpected}B thumbnail data from $peerId '
-              '(${rawPhotoSizes?.length ?? 1} photo(s), ${buffer.length}B already buffered)',
+          'BleService: [legacy] Expecting ${totalExpected}B thumbnail from $peerId '
+              '(${photoSizes.length} photos, ${buffer.length}B buffered)',
           'BLE',
         );
-        // If chunks arrived early and we already have everything, reassemble now.
         if (buffer.length >= totalExpected) {
           final allBytes = Uint8List.fromList(buffer.sublist(0, totalExpected));
           _thumbnailBuffers.remove(peerId);
           _thumbnailExpectedSizes.remove(peerId);
           _splitAndUpdatePeerPhotos(peerId, allBytes);
+        }
+      } else {
+        // ── New protocol: fff2 carries primary thumbnail only ──
+        final thumbnailSize = json['thumbnail_size'] as int?;
+        if (thumbnailSize != null && thumbnailSize > 0) {
+          _peerPhotoSizes.remove(peerId);
+          _thumbnailExpectedSizes[peerId] = thumbnailSize;
+          final buffer = _thumbnailBuffers.putIfAbsent(peerId, () => []);
+          Logger.info(
+            'BleService: Expecting ${thumbnailSize}B primary thumbnail from $peerId '
+                '(${buffer.length}B already buffered)',
+            'BLE',
+          );
+          if (buffer.length >= thumbnailSize) {
+            final allBytes = Uint8List.fromList(buffer.sublist(0, thumbnailSize));
+            _thumbnailBuffers.remove(peerId);
+            _thumbnailExpectedSizes.remove(peerId);
+            _updatePeerThumbnail(peerId, allBytes);
+          }
+        }
+
+        // ── fff4 full-photo metadata ──
+        final photoCount = json['photo_count'] as int? ?? 0;
+        final rawFullPhotoSizes = json['full_photo_sizes'] as List?;
+        if (photoCount > 1 && rawFullPhotoSizes != null && rawFullPhotoSizes.isNotEmpty) {
+          _peerFullPhotoSizes[peerId] = rawFullPhotoSizes.cast<int>();
+          Logger.info(
+            'BleService: Peer $peerId has $photoCount full photos available via fff4',
+            'BLE',
+          );
         }
       }
 
@@ -1640,16 +1714,21 @@ class FlutterBluePlusBleService implements BleServiceInterface {
 
       // Update the existing peer entry in-place — keep the BLE peripheral UUID
       // as the stable peerId to avoid creating duplicate database records.
-      // Thumbnail is NOT in the profile JSON (lives in the fff2 characteristic).
+      // Thumbnail is NOT in the profile JSON (lives in the fff2/fff4 characteristics).
       // Preserve any thumbnail bytes we have already read.
+      final photoCount = json['photo_count'] as int?;
       final updatedPeer = DiscoveredPeer(
         peerId: peerId,
         name: json['name'] as String? ?? existingPeer.name,
         age: json['age'] as int? ?? existingPeer.age,
         bio: json['bio'] as String?,
         thumbnailBytes: existingPeer.thumbnailBytes,
+        photoThumbnails: existingPeer.photoThumbnails,
         rssi: existingPeer.rssi,
         timestamp: DateTime.now(),
+        isRelayed: existingPeer.isRelayed,
+        hopCount: existingPeer.hopCount,
+        fullPhotoCount: photoCount ?? existingPeer.fullPhotoCount,
       );
 
       _emitPeer(updatedPeer);
@@ -1776,29 +1855,184 @@ class FlutterBluePlusBleService implements BleServiceInterface {
   }
 
   /// Called on the CENTRAL side when a notification arrives on any characteristic.
-  /// Accumulates thumbnail chunks and calls [_updatePeerThumbnail] when complete.
+  /// Routes to the appropriate handler by characteristic UUID.
   void _onCharacteristicNotified(GATTCharacteristicNotifiedEventArgs args) {
-    if (args.characteristic.uuid != _thumbnailCharUuid) return;
+    if (args.characteristic.uuid == _thumbnailCharUuid) {
+      _handleThumbnailChunk(args);
+    } else if (args.characteristic.uuid == _fullPhotosCharUuid) {
+      _handleFullPhotosChunk(args);
+    }
+  }
 
+  /// Accumulates fff2 (primary thumbnail) notification chunks.
+  void _handleThumbnailChunk(GATTCharacteristicNotifiedEventArgs args) {
     final peerId = args.peripheral.uuid.toString();
-    var buffer = _thumbnailBuffers[peerId] ??= []; // create if missing
-    var expected = _thumbnailExpectedSizes[peerId];
+    final buffer = _thumbnailBuffers[peerId] ??= [];
+    final expected = _thumbnailExpectedSizes[peerId];
 
     buffer.addAll(args.value);
 
-    // If we still don't know expected size, but buffer is getting big → log warning
     if (expected == null && buffer.length > 32000) {
       Logger.warning(
-          'Receiving thumbnail chunks without knowing size – possible race',
-          'BLE');
-      // Optionally: keep buffering anyway and wait for late profile read
+          'Receiving thumbnail chunks without knowing size — possible race', 'BLE');
     }
 
     if (expected != null && buffer.length >= expected) {
       final allBytes = Uint8List.fromList(buffer.sublist(0, expected));
       _thumbnailBuffers.remove(peerId);
       _thumbnailExpectedSizes.remove(peerId);
+      // Old format: split by _peerPhotoSizes; new format: single photo
       _splitAndUpdatePeerPhotos(peerId, allBytes);
+    }
+  }
+
+  /// Accumulates fff4 (full-photos) notification chunks delivered on-demand.
+  void _handleFullPhotosChunk(GATTCharacteristicNotifiedEventArgs args) {
+    final peerId = args.peripheral.uuid.toString();
+    final buffer = _fullPhotoBuffers[peerId] ??= [];
+    final expected = _fullPhotoExpectedSizes[peerId];
+
+    buffer.addAll(args.value);
+
+    if (expected != null && buffer.length >= expected) {
+      final allBytes = Uint8List.fromList(buffer.sublist(0, expected));
+      _fullPhotoBuffers.remove(peerId);
+      _fullPhotoExpectedSizes.remove(peerId);
+      _splitAndUpdateFullPhotos(peerId, allBytes);
+    }
+  }
+
+  /// Called on the PERIPHERAL side when a central subscribes to fff4.
+  /// Pushes ALL photo thumbnails concatenated in MTU-sized chunks.
+  void _onFullPhotosNotifyStateChanged(
+      GATTCharacteristicNotifyStateChangedEventArgs args) async {
+    if (args.characteristic.uuid != _fullPhotosCharUuid) return;
+    if (!args.state) return; // Unsubscribed — nothing to do
+
+    final data = _fullPhotosData;
+    if (data.isEmpty) return;
+
+    final central = args.central;
+    int maxChunk;
+    try {
+      maxChunk = await _peripheral.getMaximumNotifyLength(central);
+    } catch (_) {
+      maxChunk = 500;
+    }
+
+    Logger.info(
+      'BleService: Central subscribed to full-photos — pushing '
+          '${data.length}B in ≤${maxChunk}B chunks',
+      'BLE',
+    );
+
+    var offset = 0;
+    while (offset < data.length) {
+      final end = min(offset + maxChunk, data.length);
+      final chunk = data.sublist(offset, end);
+      try {
+        await _peripheral.notifyCharacteristic(
+          central,
+          _serverFullPhotosChar!,
+          value: chunk,
+        );
+        offset = end;
+      } catch (e) {
+        Logger.warning(
+          'BleService: Full-photos chunk failed at offset $offset: $e',
+          'BLE',
+        );
+        break;
+      }
+    }
+    Logger.info(
+      'BleService: Full-photos push complete (${data.length}B sent)',
+      'BLE',
+    );
+  }
+
+  /// Split fff4 reassembled data by [_peerFullPhotoSizes] and update peer.
+  /// Does NOT trigger a mesh re-announce (full-photos are direct-range only).
+  void _splitAndUpdateFullPhotos(String peerId, Uint8List allBytes) {
+    final photoSizes = _peerFullPhotoSizes.remove(peerId);
+    final existingPeer = _visiblePeers[peerId];
+    if (existingPeer == null) return;
+
+    List<Uint8List> photos;
+    if (photoSizes != null && photoSizes.length > 1) {
+      photos = [];
+      var offset = 0;
+      for (final size in photoSizes) {
+        if (offset + size <= allBytes.length) {
+          photos.add(allBytes.sublist(offset, offset + size));
+          offset += size;
+        }
+      }
+      if (photos.isEmpty) photos = [allBytes];
+    } else {
+      photos = [allBytes];
+    }
+
+    final updatedPeer = existingPeer.copyWith(
+      thumbnailBytes: photos.first,
+      photoThumbnails: photos,
+      timestamp: DateTime.now(),
+    );
+    _emitPeer(updatedPeer);
+    Logger.info(
+      'BleService: Full-photos received for "${updatedPeer.name}": '
+          '${photos.length} photo(s), ${allBytes.length}B total',
+      'BLE',
+    );
+  }
+
+  @override
+  Future<bool> fetchFullProfilePhotos(String peerId) async {
+    final peripheral = _discoveredPeripherals[peerId];
+    if (peripheral == null) {
+      Logger.info('BleService: fetchFullProfilePhotos — peer $peerId not visible', 'BLE');
+      return false;
+    }
+
+    final fullPhotosChar = _fullPhotosChars[peerId];
+    if (fullPhotosChar == null) {
+      Logger.info('BleService: fetchFullProfilePhotos — no fff4 char for $peerId', 'BLE');
+      return false;
+    }
+
+    final photoSizes = _peerFullPhotoSizes[peerId];
+    if (photoSizes == null || photoSizes.isEmpty) {
+      Logger.info(
+          'BleService: fetchFullProfilePhotos — no full_photo_sizes for $peerId', 'BLE');
+      return false;
+    }
+
+    final totalExpected = photoSizes.reduce((a, b) => a + b);
+    _fullPhotoExpectedSizes[peerId] = totalExpected;
+    _fullPhotoBuffers[peerId] = [];
+
+    try {
+      // Unsubscribe first so the peripheral sees a fresh state-change → re-pushes.
+      try {
+        await _central.setCharacteristicNotifyState(
+          peripheral, fullPhotosChar, state: false);
+      } catch (_) {}
+
+      await _central.setCharacteristicNotifyState(
+        peripheral, fullPhotosChar, state: true);
+
+      Logger.info(
+        'BleService: Subscribed to fff4 for $peerId '
+            '(expecting ${totalExpected}B, ${photoSizes.length} photos)',
+        'BLE',
+      );
+      return true;
+    } catch (e) {
+      Logger.error(
+          'BleService: fetchFullProfilePhotos failed for $peerId', e, null, 'BLE');
+      _fullPhotoBuffers.remove(peerId);
+      _fullPhotoExpectedSizes.remove(peerId);
+      return false;
     }
   }
 
@@ -1822,11 +2056,15 @@ class FlutterBluePlusBleService implements BleServiceInterface {
       _messagingChars.remove(peerId);
       _profileChars.remove(peerId);
       _thumbnailChars.remove(peerId);
+      _fullPhotosChars.remove(peerId);
       _maxWriteLengths.remove(peerId);
       _lastProfileReadTime.remove(peerId);
       _thumbnailBuffers.remove(peerId);
       _thumbnailExpectedSizes.remove(peerId);
       _peerPhotoSizes.remove(peerId);
+      _fullPhotoBuffers.remove(peerId);
+      _fullPhotoExpectedSizes.remove(peerId);
+      _peerFullPhotoSizes.remove(peerId);
       _userIdToPeerId.removeWhere((_, v) => v == peerId);
       _lastAnnouncedAt.remove(peerId);
       Logger.info('BleService: Lost peer ${peer?.name}', 'BLE');

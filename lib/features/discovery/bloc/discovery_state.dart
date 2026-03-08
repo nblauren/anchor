@@ -25,6 +25,7 @@ class DiscoveredPeer extends Equatable {
     this.isBlocked = false,
     this.isRelayed = false,
     this.hopCount = 0,
+    this.fullPhotoCount = 0,
   });
 
   final String peerId;
@@ -41,6 +42,9 @@ class DiscoveredPeer extends Equatable {
   final bool isRelayed;
   /// Number of relay hops from origin (0 = direct).
   final int hopCount;
+  /// Total number of profile photos available from this peer via fff4.
+  /// 0 = unknown, 1 = primary only, >1 = extra photos available on-demand.
+  final int fullPhotoCount;
 
   /// Factory from Drift entry
   factory DiscoveredPeer.fromEntry(DiscoveredPeerEntry entry) {
@@ -104,6 +108,7 @@ class DiscoveredPeer extends Equatable {
     bool? isBlocked,
     bool? isRelayed,
     int? hopCount,
+    int? fullPhotoCount,
   }) {
     return DiscoveredPeer(
       peerId: peerId ?? this.peerId,
@@ -117,6 +122,7 @@ class DiscoveredPeer extends Equatable {
       isBlocked: isBlocked ?? this.isBlocked,
       isRelayed: isRelayed ?? this.isRelayed,
       hopCount: hopCount ?? this.hopCount,
+      fullPhotoCount: fullPhotoCount ?? this.fullPhotoCount,
     );
   }
 
@@ -133,6 +139,7 @@ class DiscoveredPeer extends Equatable {
         isBlocked,
         isRelayed,
         hopCount,
+        fullPhotoCount,
       ];
 }
 

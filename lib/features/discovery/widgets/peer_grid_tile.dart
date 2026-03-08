@@ -176,6 +176,40 @@ class PeerGridTile extends StatelessWidget {
                   ),
                 ),
               ),
+
+            // Multi-photo badge (bottom-right of thumbnail area) — shown for
+            // direct peers with extra photos not yet fetched.
+            if (!peer.isRelayed &&
+                peer.fullPhotoCount > 1 &&
+                (peer.photoThumbnails == null || peer.photoThumbnails!.length < 2))
+              Positioned(
+                bottom: 48, // above the name row
+                right: 8,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.55),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.photo_library_outlined,
+                          size: 10, color: Colors.white70),
+                      const SizedBox(width: 3),
+                      Text(
+                        '+${peer.fullPhotoCount - 1}',
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
           ],
         ),
       ),

@@ -40,6 +40,7 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
     on<RefreshPeers>(_onRefreshPeers);
     on<LoadMockPeers>(_onLoadMockPeers);
     on<ClearDiscoveryError>(_onClearError);
+    on<FetchPeerFullPhotos>(_onFetchPeerFullPhotos);
     on<_ApplyDebouncedState>((event, emit) => emit(event.newState));
 
     // Subscribe to BLE peer discovery stream
@@ -79,6 +80,7 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
           rssi: peer.rssi,
           isRelayed: peer.isRelayed,
           hopCount: peer.hopCount,
+          fullPhotoCount: peer.fullPhotoCount,
         ));
       }
     });
@@ -167,6 +169,7 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
           rssi: null,
           isRelayed: true,
           hopCount: event.hopCount,
+          fullPhotoCount: event.fullPhotoCount,
         );
       } else {
         // Direct peer: persist to database
@@ -180,15 +183,24 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
         );
 
         peer = DiscoveredPeer.fromEntry(entry);
+
+        // Carry over in-memory-only fields not stored in DB
+        final existing =
+            state.peers.where((p) => p.peerId == event.peerId).firstOrNull;
         if (event.photoThumbnails != null) {
-          peer = peer.copyWith(photoThumbnails: event.photoThumbnails);
+          peer = peer.copyWith(
+            photoThumbnails: event.photoThumbnails,
+            fullPhotoCount: event.fullPhotoCount > 0
+                ? event.fullPhotoCount
+                : existing?.fullPhotoCount ?? 0,
+          );
         } else {
-          // Preserve any previously received photoThumbnails for this peer
-          final existing =
-              state.peers.where((p) => p.peerId == event.peerId).firstOrNull;
-          if (existing?.photoThumbnails != null) {
-            peer = peer.copyWith(photoThumbnails: existing!.photoThumbnails);
-          }
+          peer = peer.copyWith(
+            photoThumbnails: existing?.photoThumbnails,
+            fullPhotoCount: event.fullPhotoCount > 0
+                ? event.fullPhotoCount
+                : existing?.fullPhotoCount ?? 0,
+          );
         }
       }
 
@@ -400,6 +412,15 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
     Emitter<DiscoveryState> emit,
   ) {
     emit(state.copyWith(errorMessage: null));
+  }
+
+  /// Fetch all full-size profile photos for a peer via fff4.
+  /// Photos arrive asynchronously via [peerDiscoveredStream] → [_onPeerDiscovered].
+  Future<void> _onFetchPeerFullPhotos(
+    FetchPeerFullPhotos event,
+    Emitter<DiscoveryState> emit,
+  ) async {
+    await _bleService.fetchFullProfilePhotos(event.peerId);
   }
 
   /// Debounce UI updates to batch rapid changes.

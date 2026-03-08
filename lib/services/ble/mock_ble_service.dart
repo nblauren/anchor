@@ -348,6 +348,12 @@ class MockBleService implements BleServiceInterface {
   Stream<ReceivedPhoto> get photoReceivedStream => _photoReceivedController.stream;
 
   @override
+  Future<bool> fetchFullProfilePhotos(String peerId) async {
+    Logger.info('MockBleService: fetchFullProfilePhotos (no-op in mock)', 'BLE');
+    return false;
+  }
+
+  @override
   Future<void> cancelPhotoTransfer(String messageId) async {
     Logger.info('MockBleService: Cancelled photo transfer $messageId', 'BLE');
     _photoProgressController.add(PhotoTransferProgress(

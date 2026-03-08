@@ -82,6 +82,15 @@ abstract class BleServiceInterface {
   /// Returns true if transfer started successfully
   Future<bool> sendPhoto(String peerId, Uint8List photoData, String messageId);
 
+  /// Fetch all full-size profile photo thumbnails from a peer on demand.
+  ///
+  /// Only works when the peer is in direct BLE range (connected via GATT).
+  /// Returns true if the request was queued; photos arrive asynchronously
+  /// via [peerDiscoveredStream] as an updated [DiscoveredPeer] with
+  /// [DiscoveredPeer.photoThumbnails] populated.
+  /// Returns false if the peer is unreachable or has no extra photos.
+  Future<bool> fetchFullProfilePhotos(String peerId);
+
   /// Stream of photo transfer progress updates
   Stream<PhotoTransferProgress> get photoProgressStream;
 

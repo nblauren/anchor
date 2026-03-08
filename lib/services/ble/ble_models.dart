@@ -87,6 +87,7 @@ class DiscoveredPeer extends Equatable {
     required this.timestamp,
     this.isRelayed = false,
     this.hopCount = 0,
+    this.fullPhotoCount = 0,
   });
 
   final String peerId;
@@ -102,6 +103,9 @@ class DiscoveredPeer extends Equatable {
   final bool isRelayed;
   /// Number of relay hops from the origin device (0 = direct).
   final int hopCount;
+  /// Total number of profile photos available from the peer via fff4.
+  /// 0 = unknown, 1 = primary only, >1 = multiple photos available.
+  final int fullPhotoCount;
 
   /// Estimated distance based on RSSI
   String? get distanceEstimate {
@@ -132,6 +136,7 @@ class DiscoveredPeer extends Equatable {
     DateTime? timestamp,
     bool? isRelayed,
     int? hopCount,
+    int? fullPhotoCount,
   }) {
     return DiscoveredPeer(
       peerId: peerId ?? this.peerId,
@@ -144,13 +149,14 @@ class DiscoveredPeer extends Equatable {
       timestamp: timestamp ?? this.timestamp,
       isRelayed: isRelayed ?? this.isRelayed,
       hopCount: hopCount ?? this.hopCount,
+      fullPhotoCount: fullPhotoCount ?? this.fullPhotoCount,
     );
   }
 
   @override
   List<Object?> get props => [
         peerId, name, age, bio, thumbnailBytes, photoThumbnails,
-        rssi, timestamp, isRelayed, hopCount,
+        rssi, timestamp, isRelayed, hopCount, fullPhotoCount,
       ];
 }
 

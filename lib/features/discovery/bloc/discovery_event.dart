@@ -36,6 +36,7 @@ class PeerDiscovered extends DiscoveryEvent {
     this.rssi,
     this.isRelayed = false,
     this.hopCount = 0,
+    this.fullPhotoCount = 0,
   });
 
   final String peerId;
@@ -49,10 +50,12 @@ class PeerDiscovered extends DiscoveryEvent {
   final bool isRelayed;
   /// Number of hops from origin (0 = direct).
   final int hopCount;
+  /// Total number of profile photos available via fff4.
+  final int fullPhotoCount;
 
   @override
   List<Object?> get props =>
-      [peerId, name, age, bio, thumbnailData, photoThumbnails, rssi, isRelayed, hopCount];
+      [peerId, name, age, bio, thumbnailData, photoThumbnails, rssi, isRelayed, hopCount, fullPhotoCount];
 }
 
 /// Peer data updated (signal strength, new info)
@@ -117,5 +120,15 @@ class LoadMockPeers extends DiscoveryEvent {
 /// Clear error state
 class ClearDiscoveryError extends DiscoveryEvent {
   const ClearDiscoveryError();
+}
+
+/// Fetch all full-size profile photos for a peer via fff4 (direct range only).
+/// Photos arrive asynchronously — the state updates when they land.
+class FetchPeerFullPhotos extends DiscoveryEvent {
+  const FetchPeerFullPhotos(this.peerId);
+  final String peerId;
+
+  @override
+  List<Object?> get props => [peerId];
 }
 

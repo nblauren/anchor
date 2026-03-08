@@ -27,11 +27,25 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
   late DiscoveredPeer _peer;
   final PageController _pageController = PageController();
   int _currentPhotoIndex = 0;
+  bool _isFetchingPhotos = false;
 
   @override
   void initState() {
     super.initState();
     _peer = widget.peer;
+
+    // Trigger full-photo fetch when the detail screen opens for a direct peer
+    // that has extra photos not yet loaded.
+    if (!widget.peer.isRelayed && widget.peer.fullPhotoCount > 1) {
+      _isFetchingPhotos = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          context
+              .read<DiscoveryBloc>()
+              .add(FetchPeerFullPhotos(widget.peer.peerId));
+        }
+      });
+    }
   }
 
   @override
@@ -98,14 +112,22 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
   @override
   Widget build(BuildContext context) {
     return BlocListener<DiscoveryBloc, DiscoveryState>(
-      // Keep _peer in sync as BLE delivers bio, thumbnail, etc. after screen opens
+      // Keep _peer in sync as BLE delivers bio, thumbnail, full photos, etc.
       listenWhen: (_, state) =>
           state.peers.any((p) => p.peerId == _peer.peerId),
       listener: (context, state) {
         final updated =
             state.peers.firstWhere((p) => p.peerId == _peer.peerId);
         if (updated != _peer) {
-          setState(() => _peer = updated);
+          setState(() {
+            _peer = updated;
+            // Stop the loading indicator once full photos have arrived.
+            if (_isFetchingPhotos &&
+                updated.photoThumbnails != null &&
+                updated.photoThumbnails!.length > 1) {
+              _isFetchingPhotos = false;
+            }
+          });
         }
       },
       child: Scaffold(
@@ -359,29 +381,38 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
       return _buildPlaceholder();
     }
 
+    // Determine how many slots to show: loaded + pending fetches
+    final totalSlots = (_isFetchingPhotos && _peer.fullPhotoCount > photos.length)
+        ? _peer.fullPhotoCount
+        : photos.length;
+
     return Stack(
       fit: StackFit.expand,
       children: [
         PageView.builder(
           controller: _pageController,
           onPageChanged: (index) => setState(() => _currentPhotoIndex = index),
-          itemCount: photos.length,
+          itemCount: totalSlots,
           itemBuilder: (context, index) {
-            return Image.memory(
-              photos[index],
-              fit: BoxFit.cover,
-              errorBuilder: (context, error, stackTrace) => _buildPlaceholder(),
-            );
+            if (index < photos.length) {
+              return Image.memory(
+                photos[index],
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) => _buildPlaceholder(),
+              );
+            }
+            // Placeholder for photos still loading from fff4
+            return _buildPhotoLoadingPlaceholder();
           },
         ),
 
-        // Page indicator (shown when multiple photos)
-        if (photos.length > 1)
+        // Page indicator (shown when multiple photos or pending slots)
+        if (totalSlots > 1)
           Positioned(
             bottom: 20,
             left: 0,
             right: 0,
-            child: _buildPageIndicator(photos.length),
+            child: _buildPageIndicator(totalSlots),
           ),
 
         // Gradient for back button visibility
@@ -467,6 +498,30 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildPhotoLoadingPlaceholder() {
+    final colorIndex = _peer.name.hashCode.abs() % _placeholderColors.length;
+    final color = _placeholderColors[colorIndex];
+    return Container(
+      color: color.withValues(alpha: 0.12),
+      child: const Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(
+              strokeWidth: 2,
+              valueColor: AlwaysStoppedAnimation<Color>(Colors.white54),
+            ),
+            SizedBox(height: 12),
+            Text(
+              'Loading photo…',
+              style: TextStyle(color: Colors.white54, fontSize: 13),
+            ),
+          ],
+        ),
       ),
     );
   }
