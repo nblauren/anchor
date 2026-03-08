@@ -6,8 +6,10 @@ import '../../../core/theme/app_theme.dart';
 import '../bloc/profile_bloc.dart';
 import '../bloc/profile_event.dart';
 import '../bloc/profile_state.dart';
+import '../widgets/interests_chip_selector.dart';
 import '../widgets/photo_grid_widget.dart';
 import '../widgets/photo_source_sheet.dart';
+import '../widgets/position_dropdown.dart';
 import '../widgets/profile_preview_widget.dart';
 
 /// Initial profile setup screen for new users (or editing existing profile)
@@ -36,6 +38,11 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   bool _profileCreated = false;
   bool _initialized = false;
 
+  // Optional "More About You" fields
+  int? _selectedPosition;
+  List<int> _selectedInterestIds = [];
+  bool _moreAboutYouExpanded = false;
+
   @override
   void initState() {
     super.initState();
@@ -52,6 +59,11 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
       _nameController.text = state.name ?? '';
       _ageController.text = state.age?.toString() ?? '';
       _bioController.text = state.bio ?? '';
+      _selectedPosition = state.position;
+      _selectedInterestIds = List<int>.from(state.interestIds);
+      if (_selectedPosition != null || _selectedInterestIds.isNotEmpty) {
+        _moreAboutYouExpanded = true;
+      }
       _initialized = true;
     }
   }
@@ -77,6 +89,8 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
           name: _nameController.text.trim(),
           age: _ageController.text.isNotEmpty ? int.tryParse(_ageController.text) : null,
           bio: _bioController.text.trim().isNotEmpty ? _bioController.text.trim() : null,
+          position: _selectedPosition,
+          interests: _selectedInterestIds,
         ));
       } else {
         // Update existing profile
@@ -84,6 +98,9 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
           name: _nameController.text.trim(),
           age: _ageController.text.isNotEmpty ? int.tryParse(_ageController.text) : null,
           bio: _bioController.text.trim().isNotEmpty ? _bioController.text.trim() : null,
+          position: _selectedPosition,
+          clearPosition: _selectedPosition == null,
+          interests: _selectedInterestIds,
         ));
       }
     } else {
@@ -291,6 +308,11 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
               maxLength: 200,
               textCapitalization: TextCapitalization.sentences,
             ),
+            const SizedBox(height: 24),
+
+            // ── Optional "More About You" collapsible section ──────────────
+            _buildMoreAboutYouSection(),
+
             const SizedBox(height: 32),
 
             // Next button
@@ -312,6 +334,96 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildMoreAboutYouSection() {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppTheme.darkCard,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Column(
+        children: [
+          InkWell(
+            onTap: () => setState(() => _moreAboutYouExpanded = !_moreAboutYouExpanded),
+            borderRadius: BorderRadius.circular(12),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              child: Row(
+                children: [
+                  const Icon(Icons.tune_rounded, size: 20, color: AppTheme.textSecondary),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'More About You',
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                            color: AppTheme.textPrimary,
+                          ),
+                    ),
+                  ),
+                  Text(
+                    'Optional',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: AppTheme.textHint,
+                        ),
+                  ),
+                  const SizedBox(width: 8),
+                  AnimatedRotation(
+                    turns: _moreAboutYouExpanded ? 0.5 : 0,
+                    duration: const Duration(milliseconds: 200),
+                    child: const Icon(Icons.keyboard_arrow_down,
+                        color: AppTheme.textSecondary),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          AnimatedCrossFade(
+            firstChild: const SizedBox.shrink(),
+            secondChild: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Divider(color: Colors.white12, height: 1),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Position',
+                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                          color: AppTheme.textSecondary,
+                          letterSpacing: 0.5,
+                        ),
+                  ),
+                  const SizedBox(height: 8),
+                  PositionDropdown(
+                    value: _selectedPosition,
+                    onChanged: (id) => setState(() => _selectedPosition = id),
+                  ),
+                  const SizedBox(height: 20),
+                  Text(
+                    'Interests',
+                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                          color: AppTheme.textSecondary,
+                          letterSpacing: 0.5,
+                        ),
+                  ),
+                  const SizedBox(height: 8),
+                  InterestsChipSelector(
+                    selectedIds: _selectedInterestIds,
+                    onChanged: (ids) => setState(() => _selectedInterestIds = ids),
+                  ),
+                ],
+              ),
+            ),
+            crossFadeState: _moreAboutYouExpanded
+                ? CrossFadeState.showSecond
+                : CrossFadeState.showFirst,
+            duration: const Duration(milliseconds: 250),
+          ),
+        ],
       ),
     );
   }

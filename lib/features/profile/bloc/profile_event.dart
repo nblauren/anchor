@@ -20,14 +20,20 @@ class CreateProfile extends ProfileEvent {
     required this.name,
     this.age,
     this.bio,
+    this.position,
+    this.interests = const [],
   });
 
   final String name;
   final int? age;
   final String? bio;
+  /// Position preference ID (see ProfileConstants.positionMap). null = not set.
+  final int? position;
+  /// Selected interest IDs (see ProfileConstants.interestMap).
+  final List<int> interests;
 
   @override
-  List<Object?> get props => [name, age, bio];
+  List<Object?> get props => [name, age, bio, position, interests];
 }
 
 /// Update profile information
@@ -36,14 +42,23 @@ class UpdateProfile extends ProfileEvent {
     this.name,
     this.age,
     this.bio,
+    this.position,
+    this.clearPosition = false,
+    this.interests,
   });
 
   final String? name;
   final int? age;
   final String? bio;
+  /// New position ID, or null to leave unchanged (use clearPosition to unset).
+  final int? position;
+  /// Set true to explicitly clear the position field to null.
+  final bool clearPosition;
+  /// New interests list, or null to leave unchanged. Pass [] to clear.
+  final List<int>? interests;
 
   @override
-  List<Object?> get props => [name, age, bio];
+  List<Object?> get props => [name, age, bio, position, clearPosition, interests];
 }
 
 /// Add a photo from file

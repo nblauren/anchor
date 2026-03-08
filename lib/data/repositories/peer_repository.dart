@@ -45,6 +45,8 @@ class PeerRepository {
     required String name,
     int? age,
     String? bio,
+    int? position,
+    String? interests,
     Uint8List? thumbnailData,
     int? rssi,
   }) async {
@@ -57,12 +59,12 @@ class PeerRepository {
       // Update existing peer
       final companion = DiscoveredPeersCompanion(
         name: Value(name),
-        // Only overwrite age/bio/thumbnail when we actually have a new value.
-        // Advertisement scans can arrive with null age (truncated ad packet)
-        // or null bio/thumbnail — we must not let them wipe the richer data
-        // that the GATT profile read stored previously.
+        // Only overwrite when we actually have a new value — don't let stale
+        // advertisement scans wipe richer data from the GATT profile read.
         age: age != null ? Value(age) : const Value.absent(),
         bio: bio != null ? Value(bio) : const Value.absent(),
+        position: position != null ? Value(position) : const Value.absent(),
+        interests: interests != null ? Value(interests) : const Value.absent(),
         thumbnailData:
             thumbnailData != null ? Value(thumbnailData) : const Value.absent(),
         lastSeenAt: Value(now),
@@ -76,9 +78,10 @@ class PeerRepository {
       return DiscoveredPeerEntry(
         peerId: peerId,
         name: name,
-        // Mirror the DB write: don't overwrite stored age/bio/thumbnail with null.
         age: age ?? existing.age,
         bio: bio ?? existing.bio,
+        position: position ?? existing.position,
+        interests: interests ?? existing.interests,
         thumbnailData: thumbnailData ?? existing.thumbnailData,
         lastSeenAt: now,
         rssi: rssi ?? existing.rssi,
@@ -91,6 +94,8 @@ class PeerRepository {
         name: name,
         age: Value(age),
         bio: Value(bio),
+        position: Value(position),
+        interests: Value(interests),
         thumbnailData: Value(thumbnailData),
         lastSeenAt: now,
         rssi: Value(rssi),
@@ -104,6 +109,8 @@ class PeerRepository {
         name: name,
         age: age,
         bio: bio,
+        position: position,
+        interests: interests,
         thumbnailData: thumbnailData,
         lastSeenAt: now,
         rssi: rssi,

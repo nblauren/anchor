@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../../core/constants/profile_constants.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../chat/bloc/chat_bloc.dart';
 import '../../chat/bloc/chat_event.dart';
@@ -70,6 +71,21 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
     }
   }
 
+  void _showFilterSheet(BuildContext context, DiscoveryState state) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppTheme.darkSurface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => BlocProvider.value(
+        value: context.read<DiscoveryBloc>(),
+        child: const _FilterSheet(),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return BlocConsumer<DiscoveryBloc, DiscoveryState>(
@@ -131,6 +147,29 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                     ],
                   ),
                 ),
+              // Filter button
+              Stack(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.tune_rounded),
+                    tooltip: 'Filter',
+                    onPressed: () => _showFilterSheet(context, state),
+                  ),
+                  if (state.hasActiveFilters)
+                    Positioned(
+                      right: 8,
+                      top: 8,
+                      child: Container(
+                        width: 8,
+                        height: 8,
+                        decoration: const BoxDecoration(
+                          color: AppTheme.primaryColor,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
               // Debug: Load mock data
               IconButton(
                 icon: const Icon(Icons.bug_report),
@@ -181,6 +220,11 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
 
               return CustomScrollView(
                 slivers: [
+                  // Active filter strip
+                  if (state.hasActiveFilters)
+                    SliverToBoxAdapter(
+                      child: _buildActiveFilterStrip(context, state),
+                    ),
                   // Tip card: shown once when relayed peers appear
                   if (hasRelayedPeers && !_meshTipDismissed)
                     SliverToBoxAdapter(
@@ -217,6 +261,47 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
             },
           );
         },
+      ),
+    );
+  }
+
+  Widget _buildActiveFilterStrip(BuildContext context, DiscoveryState state) {
+    final bloc = context.read<DiscoveryBloc>();
+    return Container(
+      color: AppTheme.primaryColor.withAlpha(20),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      child: Row(
+        children: [
+          const Icon(Icons.tune_rounded, size: 14, color: AppTheme.primaryColor),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Wrap(
+              spacing: 6,
+              children: [
+                if (state.filterPositionId != null)
+                  _FilterChip(
+                    label: ProfileConstants.positionMap[state.filterPositionId] ?? '?',
+                    onRemove: () => bloc.add(const SetPositionFilter(null)),
+                  ),
+                for (final id in state.filterInterestIds)
+                  _FilterChip(
+                    label: ProfileConstants.interestMap[id] ?? '?',
+                    onRemove: () => bloc.add(ToggleInterestFilter(id)),
+                  ),
+              ],
+            ),
+          ),
+          TextButton(
+            onPressed: () => bloc.add(const ClearFilters()),
+            style: TextButton.styleFrom(
+              foregroundColor: AppTheme.primaryColor,
+              padding: EdgeInsets.zero,
+              minimumSize: const Size(0, 0),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: const Text('Clear', style: TextStyle(fontSize: 12)),
+          ),
+        ],
       ),
     );
   }
@@ -373,6 +458,237 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
           ],
         ),
       ),
+    );
+  }
+}
+
+// ── Small chip shown in the active filter strip ───────────────────────────────
+
+class _FilterChip extends StatelessWidget {
+  const _FilterChip({required this.label, required this.onRemove});
+  final String label;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: AppTheme.primaryColor.withAlpha(38),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.primaryColor.withAlpha(102)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(
+                color: AppTheme.primaryColor,
+                fontSize: 11,
+                fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(width: 4),
+          GestureDetector(
+            onTap: onRemove,
+            child: const Icon(Icons.close,
+                size: 12, color: AppTheme.primaryColor),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Modal bottom sheet with position + interest filters ───────────────────────
+
+class _FilterSheet extends StatelessWidget {
+  const _FilterSheet();
+
+  @override
+  Widget build(BuildContext context) {
+    return BlocBuilder<DiscoveryBloc, DiscoveryState>(
+      builder: (context, state) {
+        final bloc = context.read<DiscoveryBloc>();
+
+        return DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: 0.75,
+          minChildSize: 0.4,
+          maxChildSize: 0.92,
+          builder: (_, controller) => ListView(
+            controller: controller,
+            padding: EdgeInsets.fromLTRB(
+              20,
+              16,
+              20,
+              MediaQuery.of(context).viewInsets.bottom + 24,
+            ),
+            children: [
+              // Handle
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 20),
+                  decoration: BoxDecoration(
+                    color: Colors.white24,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+
+              // Title row
+              Row(
+                children: [
+                  Text(
+                    'Filter Discovery',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                  ),
+                  const Spacer(),
+                  if (state.hasActiveFilters)
+                    TextButton(
+                      onPressed: () {
+                        bloc.add(const ClearFilters());
+                        Navigator.pop(context);
+                      },
+                      child: const Text('Clear all'),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 20),
+
+              // Position filter
+              Text(
+                'Position',
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      color: AppTheme.textSecondary,
+                      letterSpacing: 0.5,
+                    ),
+              ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  // "Any" chip
+                  ChoiceChip(
+                    label: const Text('Any'),
+                    selected: state.filterPositionId == null,
+                    onSelected: (_) => bloc.add(const SetPositionFilter(null)),
+                    selectedColor: AppTheme.primaryColor.withAlpha(51),
+                    labelStyle: TextStyle(
+                      color: state.filterPositionId == null
+                          ? AppTheme.primaryColor
+                          : AppTheme.textSecondary,
+                      fontWeight: state.filterPositionId == null
+                          ? FontWeight.w600
+                          : FontWeight.normal,
+                    ),
+                    side: BorderSide(
+                      color: state.filterPositionId == null
+                          ? AppTheme.primaryColor
+                          : Colors.white24,
+                    ),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(20)),
+                    backgroundColor: AppTheme.darkCard,
+                  ),
+                  ...ProfileConstants.positionMap.entries.map((e) {
+                    final selected = state.filterPositionId == e.key;
+                    return ChoiceChip(
+                      label: Text(e.value),
+                      selected: selected,
+                      onSelected: (_) => bloc.add(
+                        selected
+                            ? const SetPositionFilter(null)
+                            : SetPositionFilter(e.key),
+                      ),
+                      selectedColor: AppTheme.primaryColor.withAlpha(51),
+                      labelStyle: TextStyle(
+                        color: selected
+                            ? AppTheme.primaryColor
+                            : AppTheme.textSecondary,
+                        fontWeight:
+                            selected ? FontWeight.w600 : FontWeight.normal,
+                      ),
+                      side: BorderSide(
+                        color:
+                            selected ? AppTheme.primaryColor : Colors.white24,
+                      ),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(20)),
+                      backgroundColor: AppTheme.darkCard,
+                    );
+                  }),
+                ],
+              ),
+
+              const SizedBox(height: 24),
+
+              // Interest filter
+              Text(
+                'Interests',
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      color: AppTheme.textSecondary,
+                      letterSpacing: 0.5,
+                    ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Show peers that match at least one selected interest.',
+                style: Theme.of(context)
+                    .textTheme
+                    .bodySmall
+                    ?.copyWith(color: AppTheme.textHint),
+              ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: ProfileConstants.interestMap.entries.map((e) {
+                  final selected = state.filterInterestIds.contains(e.key);
+                  return FilterChip(
+                    label: Text(e.value),
+                    selected: selected,
+                    onSelected: (_) =>
+                        bloc.add(ToggleInterestFilter(e.key)),
+                    selectedColor: AppTheme.primaryColor.withAlpha(51),
+                    checkmarkColor: AppTheme.primaryColor,
+                    backgroundColor: AppTheme.darkCard,
+                    labelStyle: TextStyle(
+                      color: selected
+                          ? AppTheme.primaryColor
+                          : AppTheme.textSecondary,
+                      fontWeight:
+                          selected ? FontWeight.w600 : FontWeight.normal,
+                    ),
+                    side: BorderSide(
+                      color:
+                          selected ? AppTheme.primaryColor : Colors.white24,
+                    ),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(20)),
+                  );
+                }).toList(),
+              ),
+
+              const SizedBox(height: 24),
+
+              // Apply / Done button
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Done'),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

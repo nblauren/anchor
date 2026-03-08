@@ -1326,6 +1326,10 @@ class FlutterBluePlusBleService implements BleServiceInterface {
       'name': payload.name,
       'age': payload.age,
       'bio': payload.bio,
+      // Compact optional fields — IDs only, no strings
+      if (payload.position != null) 'pos': payload.position,
+      if (payload.interests != null && payload.interests!.isNotEmpty)
+        'int': payload.interests,
       // Primary thumbnail size (fff2)
       if (_thumbnailData.isNotEmpty) 'thumbnail_size': _thumbnailData.length,
       // Full photo set metadata (fff4) — only when >1 photo available
@@ -1740,11 +1744,16 @@ class FlutterBluePlusBleService implements BleServiceInterface {
       // Thumbnail is NOT in the profile JSON (lives in the fff2/fff4 characteristics).
       // Preserve any thumbnail bytes we have already read.
       final photoCount = json['photo_count'] as int?;
+      // Decode compact position/interests IDs (keys 'pos' / 'int').
+      final position = json['pos'] as int?;
+      final interests = json['int'] as String?;
       final updatedPeer = DiscoveredPeer(
         peerId: peerId,
         name: json['name'] as String? ?? existingPeer.name,
         age: json['age'] as int? ?? existingPeer.age,
         bio: json['bio'] as String?,
+        position: position ?? existingPeer.position,
+        interests: interests ?? existingPeer.interests,
         thumbnailBytes: existingPeer.thumbnailBytes,
         photoThumbnails: existingPeer.photoThumbnails,
         rssi: existingPeer.rssi,

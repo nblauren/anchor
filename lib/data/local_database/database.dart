@@ -42,6 +42,12 @@ class UserProfiles extends Table {
   TextColumn get name => text()();
   IntColumn get age => integer().nullable()();
   TextColumn get bio => text().nullable()();
+  /// Sexual position preference stored as a compact integer ID (see ProfileConstants.positionMap).
+  /// null = not set.
+  IntColumn get position => integer().nullable()();
+  /// Comma-separated interest IDs (e.g. "0,3,7"). null / empty = not set.
+  /// See ProfileConstants.interestMap and encodeInterests / parseInterests.
+  TextColumn get interests => text().nullable()();
   DateTimeColumn get createdAt => dateTime()();
   DateTimeColumn get updatedAt => dateTime()();
 
@@ -75,6 +81,10 @@ class DiscoveredPeers extends Table {
   DateTimeColumn get lastSeenAt => dateTime()();
   IntColumn get rssi => integer().nullable()();
   BoolColumn get isBlocked => boolean().withDefault(const Constant(false))();
+  /// Position ID received from peer's BLE profile characteristic. null = not shared.
+  IntColumn get position => integer().nullable()();
+  /// Comma-separated interest IDs received from peer. null / empty = not shared.
+  TextColumn get interests => text().nullable()();
 
   @override
   Set<Column> get primaryKey => {peerId};
@@ -149,7 +159,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration {
@@ -168,6 +178,13 @@ class AppDatabase extends _$AppDatabase {
         if (from < 3) {
           // Migration from v2 to v3: add anchor_drops table
           await m.createTable(anchorDrops);
+        }
+        if (from < 4) {
+          // Migration from v3 to v4: add position + interests to own profile and peers
+          await m.addColumn(userProfiles, userProfiles.position);
+          await m.addColumn(userProfiles, userProfiles.interests);
+          await m.addColumn(discoveredPeers, discoveredPeers.position);
+          await m.addColumn(discoveredPeers, discoveredPeers.interests);
         }
       },
       beforeOpen: (details) async {

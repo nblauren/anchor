@@ -33,6 +33,8 @@ class BroadcastPayload extends Equatable {
     required this.name,
     this.age,
     this.bio,
+    this.position,
+    this.interests,
     this.thumbnailBytes,
     this.thumbnailsList,
   });
@@ -41,6 +43,10 @@ class BroadcastPayload extends Equatable {
   final String name;
   final int? age;
   final String? bio;
+  /// Position preference ID (see ProfileConstants.positionMap). null = not shared.
+  final int? position;
+  /// Comma-separated interest IDs (see ProfileConstants.encodeInterests). null = not shared.
+  final String? interests;
   final Uint8List? thumbnailBytes;
   /// All profile photo thumbnails in display order (up to 4).
   /// When set, [thumbnailBytes] should be the first element.
@@ -53,6 +59,8 @@ class BroadcastPayload extends Equatable {
       'name': name,
       'age': age,
       'bio': bio,
+      if (position != null) 'position': position,
+      if (interests != null && interests!.isNotEmpty) 'interests': interests,
       'thumbnailBytes': thumbnailBytes?.toList(),
     };
   }
@@ -64,6 +72,8 @@ class BroadcastPayload extends Equatable {
       name: json['name'] as String,
       age: json['age'] as int?,
       bio: json['bio'] as String?,
+      position: json['position'] as int?,
+      interests: json['interests'] as String?,
       thumbnailBytes: json['thumbnailBytes'] != null
           ? Uint8List.fromList(List<int>.from(json['thumbnailBytes']))
           : null,
@@ -71,7 +81,7 @@ class BroadcastPayload extends Equatable {
   }
 
   @override
-  List<Object?> get props => [userId, name, age, bio, thumbnailBytes, thumbnailsList];
+  List<Object?> get props => [userId, name, age, bio, position, interests, thumbnailBytes, thumbnailsList];
 }
 
 /// Discovered peer from BLE scan
@@ -81,6 +91,8 @@ class DiscoveredPeer extends Equatable {
     required this.name,
     this.age,
     this.bio,
+    this.position,
+    this.interests,
     this.thumbnailBytes,
     this.photoThumbnails,
     this.rssi,
@@ -94,6 +106,10 @@ class DiscoveredPeer extends Equatable {
   final String name;
   final int? age;
   final String? bio;
+  /// Position preference ID received from peer's profile. null = not shared.
+  final int? position;
+  /// Comma-separated interest IDs received from peer. null = not shared.
+  final String? interests;
   final Uint8List? thumbnailBytes;
   /// All profile photo thumbnails in display order (up to 4).
   final List<Uint8List>? photoThumbnails;
@@ -130,6 +146,8 @@ class DiscoveredPeer extends Equatable {
     String? name,
     int? age,
     String? bio,
+    int? position,
+    String? interests,
     Uint8List? thumbnailBytes,
     List<Uint8List>? photoThumbnails,
     int? rssi,
@@ -143,6 +161,8 @@ class DiscoveredPeer extends Equatable {
       name: name ?? this.name,
       age: age ?? this.age,
       bio: bio ?? this.bio,
+      position: position ?? this.position,
+      interests: interests ?? this.interests,
       thumbnailBytes: thumbnailBytes ?? this.thumbnailBytes,
       photoThumbnails: photoThumbnails ?? this.photoThumbnails,
       rssi: rssi ?? this.rssi,
@@ -155,7 +175,8 @@ class DiscoveredPeer extends Equatable {
 
   @override
   List<Object?> get props => [
-        peerId, name, age, bio, thumbnailBytes, photoThumbnails,
+        peerId, name, age, bio, position, interests,
+        thumbnailBytes, photoThumbnails,
         rssi, timestamp, isRelayed, hopCount, fullPhotoCount,
       ];
 }

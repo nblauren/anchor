@@ -31,6 +31,8 @@ class PeerDiscovered extends DiscoveryEvent {
     required this.name,
     this.age,
     this.bio,
+    this.position,
+    this.interests,
     this.thumbnailData,
     this.photoThumbnails,
     this.rssi,
@@ -43,6 +45,10 @@ class PeerDiscovered extends DiscoveryEvent {
   final String name;
   final int? age;
   final String? bio;
+  /// Position ID from peer BLE profile characteristic. null = not shared.
+  final int? position;
+  /// Comma-separated interest IDs from peer BLE profile. null = not shared.
+  final String? interests;
   final Uint8List? thumbnailData;
   final List<Uint8List>? photoThumbnails;
   final int? rssi;
@@ -55,7 +61,7 @@ class PeerDiscovered extends DiscoveryEvent {
 
   @override
   List<Object?> get props =>
-      [peerId, name, age, bio, thumbnailData, photoThumbnails, rssi, isRelayed, hopCount, fullPhotoCount];
+      [peerId, name, age, bio, position, interests, thumbnailData, photoThumbnails, rssi, isRelayed, hopCount, fullPhotoCount];
 }
 
 /// Peer data updated (signal strength, new info)
@@ -149,5 +155,29 @@ class AnchorDropSignalReceived extends DiscoveryEvent {
 
   @override
   List<Object?> get props => [fromPeerId];
+}
+
+/// Apply a local-only position filter to the discovery grid. Pass null to clear.
+class SetPositionFilter extends DiscoveryEvent {
+  const SetPositionFilter(this.positionId);
+  /// null clears the position filter.
+  final int? positionId;
+
+  @override
+  List<Object?> get props => [positionId];
+}
+
+/// Toggle an interest ID in the local-only multi-select interest filter.
+class ToggleInterestFilter extends DiscoveryEvent {
+  const ToggleInterestFilter(this.interestId);
+  final int interestId;
+
+  @override
+  List<Object?> get props => [interestId];
+}
+
+/// Clear all active discovery filters.
+class ClearFilters extends DiscoveryEvent {
+  const ClearFilters();
 }
 
