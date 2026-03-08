@@ -114,6 +114,15 @@ abstract class BleServiceInterface {
   /// Get list of currently visible peer IDs
   List<String> get visiblePeerIds;
 
+  // ==================== Drop Anchor ====================
+
+  /// Send a "Drop Anchor" ⚓ signal to a specific peer — a tiny BLE ping
+  /// with no heavy payload. Returns true if the signal was sent successfully.
+  Future<bool> sendDropAnchor(String peerId);
+
+  /// Stream of received anchor drop signals from peers
+  Stream<AnchorDropReceived> get anchorDropReceivedStream;
+
   // ==================== Mesh ====================
 
   /// Enable or disable mesh relay (message forwarding between devices)

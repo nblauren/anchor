@@ -27,6 +27,7 @@ class MockBleService implements BleServiceInterface {
   final _messageReceivedController = StreamController<ReceivedMessage>.broadcast();
   final _photoProgressController = StreamController<PhotoTransferProgress>.broadcast();
   final _photoReceivedController = StreamController<ReceivedPhoto>.broadcast();
+  final _anchorDropReceivedController = StreamController<AnchorDropReceived>.broadcast();
 
   // Mock data
   final Map<String, DiscoveredPeer> _visiblePeers = {};
@@ -104,6 +105,7 @@ class MockBleService implements BleServiceInterface {
     await _messageReceivedController.close();
     await _photoProgressController.close();
     await _photoReceivedController.close();
+    await _anchorDropReceivedController.close();
   }
 
   // ==================== Status ====================
@@ -325,6 +327,39 @@ class MockBleService implements BleServiceInterface {
       Logger.info('MockBleService: Echo response from ${peerId.substring(0, 8)}', 'BLE');
     });
   }
+
+  // ==================== Drop Anchor ====================
+
+  @override
+  Future<bool> sendDropAnchor(String peerId) async {
+    Logger.info(
+      'MockBleService: Sending drop_anchor to ${peerId.substring(0, 8)}',
+      'BLE',
+    );
+
+    await Future.delayed(Duration(milliseconds: 150 + _random.nextInt(200)));
+
+    if (!_visiblePeers.containsKey(peerId)) {
+      Logger.warning('MockBleService: Peer not reachable for drop anchor', 'BLE');
+      return false;
+    }
+
+    // Simulate the peer "dropping anchor back" after a short delay
+    Timer(Duration(milliseconds: 1000 + _random.nextInt(1500)), () {
+      final drop = AnchorDropReceived(
+        fromPeerId: peerId,
+        timestamp: DateTime.now(),
+      );
+      _anchorDropReceivedController.add(drop);
+      Logger.info('MockBleService: Simulated anchor drop back from ${peerId.substring(0, 8)}', 'BLE');
+    });
+
+    return true;
+  }
+
+  @override
+  Stream<AnchorDropReceived> get anchorDropReceivedStream =>
+      _anchorDropReceivedController.stream;
 
   // ==================== Photo Transfer ====================
 

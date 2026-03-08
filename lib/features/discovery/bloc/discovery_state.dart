@@ -150,6 +150,8 @@ class DiscoveryState extends Equatable {
     this.errorMessage,
     this.lastRefreshed,
     this.isScanning = false,
+    this.droppedAnchorPeerIds = const {},
+    this.incomingAnchorDropName,
   });
 
   final DiscoveryStatus status;
@@ -157,6 +159,10 @@ class DiscoveryState extends Equatable {
   final String? errorMessage;
   final DateTime? lastRefreshed;
   final bool isScanning;
+  /// Peer IDs we have dropped anchor on this session (for ⚓ button highlight)
+  final Set<String> droppedAnchorPeerIds;
+  /// Set briefly when a peer drops anchor on us — used to show a SnackBar
+  final String? incomingAnchorDropName;
 
   /// Visible peers (excluding blocked), sorted by last seen.
   /// Deduplicates by peerId in case a MAC rotation briefly produces two entries.
@@ -190,6 +196,8 @@ class DiscoveryState extends Equatable {
     String? errorMessage,
     DateTime? lastRefreshed,
     bool? isScanning,
+    Set<String>? droppedAnchorPeerIds,
+    Object? incomingAnchorDropName = _sentinel,
   }) {
     return DiscoveryState(
       status: status ?? this.status,
@@ -197,9 +205,24 @@ class DiscoveryState extends Equatable {
       errorMessage: errorMessage,
       lastRefreshed: lastRefreshed ?? this.lastRefreshed,
       isScanning: isScanning ?? this.isScanning,
+      droppedAnchorPeerIds: droppedAnchorPeerIds ?? this.droppedAnchorPeerIds,
+      incomingAnchorDropName: incomingAnchorDropName == _sentinel
+          ? this.incomingAnchorDropName
+          : incomingAnchorDropName as String?,
     );
   }
 
   @override
-  List<Object?> get props => [status, peers, errorMessage, lastRefreshed, isScanning];
+  List<Object?> get props => [
+        status,
+        peers,
+        errorMessage,
+        lastRefreshed,
+        isScanning,
+        droppedAnchorPeerIds,
+        incomingAnchorDropName,
+      ];
 }
+
+/// Sentinel for distinguishing "not provided" from explicit null in copyWith
+const _sentinel = Object();

@@ -71,6 +71,7 @@ Future<void> initializeDependencies({
     () => DiscoveryBloc(
       peerRepository: getIt<DatabaseService>().peerRepository,
       bleService: getIt<BleServiceInterface>(),
+      anchorDropRepository: getIt<DatabaseService>().anchorDropRepository,
       notificationService: getIt<NotificationService>(),
     ),
   );

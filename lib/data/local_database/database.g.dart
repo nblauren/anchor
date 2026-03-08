@@ -1894,6 +1894,322 @@ class MessagesCompanion extends UpdateCompanion<MessageEntry> {
   }
 }
 
+class $AnchorDropsTable extends AnchorDrops
+    with TableInfo<$AnchorDropsTable, AnchorDropEntry> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $AnchorDropsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+      'id', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _peerIdMeta = const VerificationMeta('peerId');
+  @override
+  late final GeneratedColumn<String> peerId = GeneratedColumn<String>(
+      'peer_id', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _peerNameMeta =
+      const VerificationMeta('peerName');
+  @override
+  late final GeneratedColumn<String> peerName = GeneratedColumn<String>(
+      'peer_name', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _directionMeta =
+      const VerificationMeta('direction');
+  @override
+  late final GeneratedColumnWithTypeConverter<AnchorDropDirection, String>
+      direction = GeneratedColumn<String>('direction', aliasedName, false,
+              type: DriftSqlType.string, requiredDuringInsert: true)
+          .withConverter<AnchorDropDirection>(
+              $AnchorDropsTable.$converterdirection);
+  static const VerificationMeta _droppedAtMeta =
+      const VerificationMeta('droppedAt');
+  @override
+  late final GeneratedColumn<DateTime> droppedAt = GeneratedColumn<DateTime>(
+      'dropped_at', aliasedName, false,
+      type: DriftSqlType.dateTime, requiredDuringInsert: true);
+  @override
+  List<GeneratedColumn> get $columns =>
+      [id, peerId, peerName, direction, droppedAt];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'anchor_drops';
+  @override
+  VerificationContext validateIntegrity(Insertable<AnchorDropEntry> instance,
+      {bool isInserting = false}) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('peer_id')) {
+      context.handle(_peerIdMeta,
+          peerId.isAcceptableOrUnknown(data['peer_id']!, _peerIdMeta));
+    } else if (isInserting) {
+      context.missing(_peerIdMeta);
+    }
+    if (data.containsKey('peer_name')) {
+      context.handle(_peerNameMeta,
+          peerName.isAcceptableOrUnknown(data['peer_name']!, _peerNameMeta));
+    } else if (isInserting) {
+      context.missing(_peerNameMeta);
+    }
+    context.handle(_directionMeta, const VerificationResult.success());
+    if (data.containsKey('dropped_at')) {
+      context.handle(_droppedAtMeta,
+          droppedAt.isAcceptableOrUnknown(data['dropped_at']!, _droppedAtMeta));
+    } else if (isInserting) {
+      context.missing(_droppedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  AnchorDropEntry map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return AnchorDropEntry(
+      id: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}id'])!,
+      peerId: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}peer_id'])!,
+      peerName: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}peer_name'])!,
+      direction: $AnchorDropsTable.$converterdirection.fromSql(attachedDatabase
+          .typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}direction'])!),
+      droppedAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.dateTime, data['${effectivePrefix}dropped_at'])!,
+    );
+  }
+
+  @override
+  $AnchorDropsTable createAlias(String alias) {
+    return $AnchorDropsTable(attachedDatabase, alias);
+  }
+
+  static JsonTypeConverter2<AnchorDropDirection, String, String>
+      $converterdirection =
+      const EnumNameConverter<AnchorDropDirection>(AnchorDropDirection.values);
+}
+
+class AnchorDropEntry extends DataClass implements Insertable<AnchorDropEntry> {
+  final String id;
+  final String peerId;
+  final String peerName;
+  final AnchorDropDirection direction;
+  final DateTime droppedAt;
+  const AnchorDropEntry(
+      {required this.id,
+      required this.peerId,
+      required this.peerName,
+      required this.direction,
+      required this.droppedAt});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['peer_id'] = Variable<String>(peerId);
+    map['peer_name'] = Variable<String>(peerName);
+    {
+      map['direction'] = Variable<String>(
+          $AnchorDropsTable.$converterdirection.toSql(direction));
+    }
+    map['dropped_at'] = Variable<DateTime>(droppedAt);
+    return map;
+  }
+
+  AnchorDropsCompanion toCompanion(bool nullToAbsent) {
+    return AnchorDropsCompanion(
+      id: Value(id),
+      peerId: Value(peerId),
+      peerName: Value(peerName),
+      direction: Value(direction),
+      droppedAt: Value(droppedAt),
+    );
+  }
+
+  factory AnchorDropEntry.fromJson(Map<String, dynamic> json,
+      {ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return AnchorDropEntry(
+      id: serializer.fromJson<String>(json['id']),
+      peerId: serializer.fromJson<String>(json['peerId']),
+      peerName: serializer.fromJson<String>(json['peerName']),
+      direction: $AnchorDropsTable.$converterdirection
+          .fromJson(serializer.fromJson<String>(json['direction'])),
+      droppedAt: serializer.fromJson<DateTime>(json['droppedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'peerId': serializer.toJson<String>(peerId),
+      'peerName': serializer.toJson<String>(peerName),
+      'direction': serializer.toJson<String>(
+          $AnchorDropsTable.$converterdirection.toJson(direction)),
+      'droppedAt': serializer.toJson<DateTime>(droppedAt),
+    };
+  }
+
+  AnchorDropEntry copyWith(
+          {String? id,
+          String? peerId,
+          String? peerName,
+          AnchorDropDirection? direction,
+          DateTime? droppedAt}) =>
+      AnchorDropEntry(
+        id: id ?? this.id,
+        peerId: peerId ?? this.peerId,
+        peerName: peerName ?? this.peerName,
+        direction: direction ?? this.direction,
+        droppedAt: droppedAt ?? this.droppedAt,
+      );
+  AnchorDropEntry copyWithCompanion(AnchorDropsCompanion data) {
+    return AnchorDropEntry(
+      id: data.id.present ? data.id.value : this.id,
+      peerId: data.peerId.present ? data.peerId.value : this.peerId,
+      peerName: data.peerName.present ? data.peerName.value : this.peerName,
+      direction: data.direction.present ? data.direction.value : this.direction,
+      droppedAt: data.droppedAt.present ? data.droppedAt.value : this.droppedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('AnchorDropEntry(')
+          ..write('id: $id, ')
+          ..write('peerId: $peerId, ')
+          ..write('peerName: $peerName, ')
+          ..write('direction: $direction, ')
+          ..write('droppedAt: $droppedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(id, peerId, peerName, direction, droppedAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is AnchorDropEntry &&
+          other.id == this.id &&
+          other.peerId == this.peerId &&
+          other.peerName == this.peerName &&
+          other.direction == this.direction &&
+          other.droppedAt == this.droppedAt);
+}
+
+class AnchorDropsCompanion extends UpdateCompanion<AnchorDropEntry> {
+  final Value<String> id;
+  final Value<String> peerId;
+  final Value<String> peerName;
+  final Value<AnchorDropDirection> direction;
+  final Value<DateTime> droppedAt;
+  final Value<int> rowid;
+  const AnchorDropsCompanion({
+    this.id = const Value.absent(),
+    this.peerId = const Value.absent(),
+    this.peerName = const Value.absent(),
+    this.direction = const Value.absent(),
+    this.droppedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  AnchorDropsCompanion.insert({
+    required String id,
+    required String peerId,
+    required String peerName,
+    required AnchorDropDirection direction,
+    required DateTime droppedAt,
+    this.rowid = const Value.absent(),
+  })  : id = Value(id),
+        peerId = Value(peerId),
+        peerName = Value(peerName),
+        direction = Value(direction),
+        droppedAt = Value(droppedAt);
+  static Insertable<AnchorDropEntry> custom({
+    Expression<String>? id,
+    Expression<String>? peerId,
+    Expression<String>? peerName,
+    Expression<String>? direction,
+    Expression<DateTime>? droppedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (peerId != null) 'peer_id': peerId,
+      if (peerName != null) 'peer_name': peerName,
+      if (direction != null) 'direction': direction,
+      if (droppedAt != null) 'dropped_at': droppedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  AnchorDropsCompanion copyWith(
+      {Value<String>? id,
+      Value<String>? peerId,
+      Value<String>? peerName,
+      Value<AnchorDropDirection>? direction,
+      Value<DateTime>? droppedAt,
+      Value<int>? rowid}) {
+    return AnchorDropsCompanion(
+      id: id ?? this.id,
+      peerId: peerId ?? this.peerId,
+      peerName: peerName ?? this.peerName,
+      direction: direction ?? this.direction,
+      droppedAt: droppedAt ?? this.droppedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (peerId.present) {
+      map['peer_id'] = Variable<String>(peerId.value);
+    }
+    if (peerName.present) {
+      map['peer_name'] = Variable<String>(peerName.value);
+    }
+    if (direction.present) {
+      map['direction'] = Variable<String>(
+          $AnchorDropsTable.$converterdirection.toSql(direction.value));
+    }
+    if (droppedAt.present) {
+      map['dropped_at'] = Variable<DateTime>(droppedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('AnchorDropsCompanion(')
+          ..write('id: $id, ')
+          ..write('peerId: $peerId, ')
+          ..write('peerName: $peerName, ')
+          ..write('direction: $direction, ')
+          ..write('droppedAt: $droppedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 class $BlockedUsersTable extends BlockedUsers
     with TableInfo<$BlockedUsersTable, BlockedUserEntry> {
   @override
@@ -2096,6 +2412,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
       $DiscoveredPeersTable(this);
   late final $ConversationsTable conversations = $ConversationsTable(this);
   late final $MessagesTable messages = $MessagesTable(this);
+  late final $AnchorDropsTable anchorDrops = $AnchorDropsTable(this);
   late final $BlockedUsersTable blockedUsers = $BlockedUsersTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
@@ -2107,6 +2424,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
         discoveredPeers,
         conversations,
         messages,
+        anchorDrops,
         blockedUsers
       ];
 }
@@ -3638,6 +3956,182 @@ typedef $$MessagesTableProcessedTableManager = ProcessedTableManager<
     (MessageEntry, $$MessagesTableReferences),
     MessageEntry,
     PrefetchHooks Function({bool conversationId})>;
+typedef $$AnchorDropsTableCreateCompanionBuilder = AnchorDropsCompanion
+    Function({
+  required String id,
+  required String peerId,
+  required String peerName,
+  required AnchorDropDirection direction,
+  required DateTime droppedAt,
+  Value<int> rowid,
+});
+typedef $$AnchorDropsTableUpdateCompanionBuilder = AnchorDropsCompanion
+    Function({
+  Value<String> id,
+  Value<String> peerId,
+  Value<String> peerName,
+  Value<AnchorDropDirection> direction,
+  Value<DateTime> droppedAt,
+  Value<int> rowid,
+});
+
+class $$AnchorDropsTableFilterComposer
+    extends Composer<_$AppDatabase, $AnchorDropsTable> {
+  $$AnchorDropsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+      column: $table.id, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get peerId => $composableBuilder(
+      column: $table.peerId, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get peerName => $composableBuilder(
+      column: $table.peerName, builder: (column) => ColumnFilters(column));
+
+  ColumnWithTypeConverterFilters<AnchorDropDirection, AnchorDropDirection,
+          String>
+      get direction => $composableBuilder(
+          column: $table.direction,
+          builder: (column) => ColumnWithTypeConverterFilters(column));
+
+  ColumnFilters<DateTime> get droppedAt => $composableBuilder(
+      column: $table.droppedAt, builder: (column) => ColumnFilters(column));
+}
+
+class $$AnchorDropsTableOrderingComposer
+    extends Composer<_$AppDatabase, $AnchorDropsTable> {
+  $$AnchorDropsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+      column: $table.id, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get peerId => $composableBuilder(
+      column: $table.peerId, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get peerName => $composableBuilder(
+      column: $table.peerName, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get direction => $composableBuilder(
+      column: $table.direction, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<DateTime> get droppedAt => $composableBuilder(
+      column: $table.droppedAt, builder: (column) => ColumnOrderings(column));
+}
+
+class $$AnchorDropsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $AnchorDropsTable> {
+  $$AnchorDropsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get peerId =>
+      $composableBuilder(column: $table.peerId, builder: (column) => column);
+
+  GeneratedColumn<String> get peerName =>
+      $composableBuilder(column: $table.peerName, builder: (column) => column);
+
+  GeneratedColumnWithTypeConverter<AnchorDropDirection, String> get direction =>
+      $composableBuilder(column: $table.direction, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get droppedAt =>
+      $composableBuilder(column: $table.droppedAt, builder: (column) => column);
+}
+
+class $$AnchorDropsTableTableManager extends RootTableManager<
+    _$AppDatabase,
+    $AnchorDropsTable,
+    AnchorDropEntry,
+    $$AnchorDropsTableFilterComposer,
+    $$AnchorDropsTableOrderingComposer,
+    $$AnchorDropsTableAnnotationComposer,
+    $$AnchorDropsTableCreateCompanionBuilder,
+    $$AnchorDropsTableUpdateCompanionBuilder,
+    (
+      AnchorDropEntry,
+      BaseReferences<_$AppDatabase, $AnchorDropsTable, AnchorDropEntry>
+    ),
+    AnchorDropEntry,
+    PrefetchHooks Function()> {
+  $$AnchorDropsTableTableManager(_$AppDatabase db, $AnchorDropsTable table)
+      : super(TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$AnchorDropsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$AnchorDropsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$AnchorDropsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback: ({
+            Value<String> id = const Value.absent(),
+            Value<String> peerId = const Value.absent(),
+            Value<String> peerName = const Value.absent(),
+            Value<AnchorDropDirection> direction = const Value.absent(),
+            Value<DateTime> droppedAt = const Value.absent(),
+            Value<int> rowid = const Value.absent(),
+          }) =>
+              AnchorDropsCompanion(
+            id: id,
+            peerId: peerId,
+            peerName: peerName,
+            direction: direction,
+            droppedAt: droppedAt,
+            rowid: rowid,
+          ),
+          createCompanionCallback: ({
+            required String id,
+            required String peerId,
+            required String peerName,
+            required AnchorDropDirection direction,
+            required DateTime droppedAt,
+            Value<int> rowid = const Value.absent(),
+          }) =>
+              AnchorDropsCompanion.insert(
+            id: id,
+            peerId: peerId,
+            peerName: peerName,
+            direction: direction,
+            droppedAt: droppedAt,
+            rowid: rowid,
+          ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ));
+}
+
+typedef $$AnchorDropsTableProcessedTableManager = ProcessedTableManager<
+    _$AppDatabase,
+    $AnchorDropsTable,
+    AnchorDropEntry,
+    $$AnchorDropsTableFilterComposer,
+    $$AnchorDropsTableOrderingComposer,
+    $$AnchorDropsTableAnnotationComposer,
+    $$AnchorDropsTableCreateCompanionBuilder,
+    $$AnchorDropsTableUpdateCompanionBuilder,
+    (
+      AnchorDropEntry,
+      BaseReferences<_$AppDatabase, $AnchorDropsTable, AnchorDropEntry>
+    ),
+    AnchorDropEntry,
+    PrefetchHooks Function()>;
 typedef $$BlockedUsersTableCreateCompanionBuilder = BlockedUsersCompanion
     Function({
   required String peerId,
@@ -3780,6 +4274,8 @@ class $AppDatabaseManager {
       $$ConversationsTableTableManager(_db, _db.conversations);
   $$MessagesTableTableManager get messages =>
       $$MessagesTableTableManager(_db, _db.messages);
+  $$AnchorDropsTableTableManager get anchorDrops =>
+      $$AnchorDropsTableTableManager(_db, _db.anchorDrops);
   $$BlockedUsersTableTableManager get blockedUsers =>
       $$BlockedUsersTableTableManager(_db, _db.blockedUsers);
 }

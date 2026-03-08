@@ -192,14 +192,16 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Let\'s get started',
+              widget.isEditing ? 'Edit your profile' : 'Let\'s get started',
               style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                     fontWeight: FontWeight.bold,
                   ),
             ),
             const SizedBox(height: 8),
             Text(
-              'Tell us a bit about yourself',
+              widget.isEditing
+                  ? 'Update your details below'
+                  : 'Tell us a bit about yourself',
               style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                     color: AppTheme.textSecondary,
                   ),

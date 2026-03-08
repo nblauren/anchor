@@ -277,6 +277,10 @@ class BleConnectionBloc extends Bloc<BleConnectionEvent, BleConnectionState> {
     if (!isMeshRelay) await _bleService.setMeshRelayMode(false);
 
     try {
+      // Initialize first so state-change listeners are set up regardless of BT state.
+      // initialize() is idempotent — safe to call multiple times.
+      await _bleService.initialize();
+
       final available = await _bleService.isBluetoothAvailable();
       if (!available) {
         emit(state.copyWith(
@@ -306,9 +310,6 @@ class BleConnectionBloc extends Bloc<BleConnectionEvent, BleConnectionState> {
         ));
         return;
       }
-
-      // Initialize BLE service
-      await _bleService.initialize();
 
       emit(state.copyWith(
         status: BleConnectionStatus.ready,

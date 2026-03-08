@@ -314,6 +314,20 @@ enum BleErrorType {
   unknown,
 }
 
+/// Received anchor drop signal from a peer
+class AnchorDropReceived extends Equatable {
+  const AnchorDropReceived({
+    required this.fromPeerId,
+    required this.timestamp,
+  });
+
+  final String fromPeerId;
+  final DateTime timestamp;
+
+  @override
+  List<Object?> get props => [fromPeerId, timestamp];
+}
+
 /// BLE error
 class BleError extends Equatable {
   const BleError({

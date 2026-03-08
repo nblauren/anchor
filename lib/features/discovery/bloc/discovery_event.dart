@@ -132,3 +132,22 @@ class FetchPeerFullPhotos extends DiscoveryEvent {
   List<Object?> get props => [peerId];
 }
 
+/// User tapped the ⚓ button to drop anchor on a peer
+class DropAnchorOnPeer extends DiscoveryEvent {
+  const DropAnchorOnPeer({required this.peerId, required this.peerName});
+  final String peerId;
+  final String peerName;
+
+  @override
+  List<Object?> get props => [peerId, peerName];
+}
+
+/// A peer dropped anchor on us (received via BLE)
+class AnchorDropSignalReceived extends DiscoveryEvent {
+  const AnchorDropSignalReceived({required this.fromPeerId});
+  final String fromPeerId;
+
+  @override
+  List<Object?> get props => [fromPeerId];
+}
+

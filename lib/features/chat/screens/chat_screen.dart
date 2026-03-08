@@ -5,6 +5,8 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../discovery/bloc/discovery_bloc.dart';
+import '../../discovery/bloc/discovery_event.dart';
 import '../bloc/chat_bloc.dart';
 import '../bloc/chat_event.dart';
 import '../bloc/chat_state.dart';
@@ -40,6 +42,7 @@ class _ChatScreenState extends State<ChatScreen> {
   final _scrollController = ScrollController();
   final _imagePicker = ImagePicker();
   late final ChatBloc _chatBloc;
+  bool _anchorDropped = false;
 
   @override
   void initState() {
@@ -96,6 +99,24 @@ class _ChatScreenState extends State<ChatScreen> {
         );
       }
     });
+  }
+
+  void _dropAnchor() {
+    try {
+      context.read<DiscoveryBloc>().add(
+            DropAnchorOnPeer(peerId: widget.peerId, peerName: widget.peerName),
+          );
+    } catch (_) {
+      // DiscoveryBloc may not be in the widget tree from all entry points
+    }
+    setState(() => _anchorDropped = true);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Anchor dropped on ${widget.peerName}! \u2693'),
+        duration: const Duration(seconds: 2),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
 
   void _sendMessage() {
@@ -248,6 +269,18 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
             ),
             actions: [
+              // Drop Anchor button
+              if (!state.isBlocked)
+                IconButton(
+                  onPressed: _anchorDropped ? null : _dropAnchor,
+                  icon: Icon(
+                    Icons.anchor,
+                    color: _anchorDropped
+                        ? const Color(0xFFEC4899)
+                        : AppTheme.textSecondary,
+                  ),
+                  tooltip: _anchorDropped ? 'Anchor dropped!' : 'Drop anchor',
+                ),
               PopupMenuButton<String>(
                 icon: const Icon(Icons.more_vert),
                 onSelected: (value) {

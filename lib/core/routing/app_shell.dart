@@ -23,6 +23,7 @@ class AppShell extends StatefulWidget {
 class _AppShellState extends State<AppShell> {
   bool? _hasSeenOnboarding;
   bool _isCheckingOnboarding = true;
+  bool _hasCompletedPermissions = false;
 
   @override
   void initState() {
@@ -84,13 +85,23 @@ class _AppShellState extends State<AppShell> {
   }
 
   Widget _buildSetupFlow(BuildContext context) {
+    if (_hasCompletedPermissions) {
+      return ProfileSetupScreen(
+        onComplete: () {
+          context.read<ProfileBloc>().add(const LoadProfile());
+        },
+      );
+    }
+
     return BlocBuilder<BleConnectionBloc, BleConnectionState>(
       builder: (context, bleState) {
         final needsPermissions = _needsBlePermissions(bleState.status);
 
         if (needsPermissions) {
           return PermissionsScreen(
-            onComplete: () => setState(() {}),
+            onComplete: () => setState(() {
+              _hasCompletedPermissions = true;
+            }),
           );
         }
 

@@ -73,7 +73,22 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
   @override
   Widget build(BuildContext context) {
     return BlocConsumer<DiscoveryBloc, DiscoveryState>(
+      listenWhen: (prev, curr) =>
+          curr.errorMessage != null ||
+          (curr.incomingAnchorDropName != null &&
+              curr.incomingAnchorDropName != prev.incomingAnchorDropName),
       listener: (context, state) {
+        if (state.incomingAnchorDropName != null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                '${state.incomingAnchorDropName} dropped anchor on you!',
+              ),
+              duration: const Duration(seconds: 3),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
         if (state.errorMessage != null) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text(state.errorMessage!)),
@@ -182,6 +197,8 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                             peer: peer,
                             unreadCount: unreadByPeer[peer.peerId] ?? 0,
                             onTap: () => _openPeerDetail(peer),
+                            anchorDropped: state.droppedAnchorPeerIds
+                                .contains(peer.peerId),
                           );
                         },
                         childCount: state.visiblePeers.length,

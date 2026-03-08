@@ -65,6 +65,8 @@ class FlutterBluePlusBleService implements BleServiceInterface {
   final _photoProgressController =
       StreamController<PhotoTransferProgress>.broadcast();
   final _photoReceivedController = StreamController<ReceivedPhoto>.broadcast();
+  final _anchorDropReceivedController =
+      StreamController<AnchorDropReceived>.broadcast();
 
   // Peer tracking
   final Map<String, DiscoveredPeer> _visiblePeers = {};
@@ -107,7 +109,7 @@ class FlutterBluePlusBleService implements BleServiceInterface {
   final Map<String, DateTime> _lastAnnouncedAt = {};
 
   // Mesh relay toggle (mutable at runtime via setMeshRelayMode)
-  late bool _meshRelayEnabled;
+  bool _meshRelayEnabled = true;
 
   // Routing table: sender userId → set of peer IDs they directly see.
   // Built from incoming neighbor_list messages.
@@ -168,7 +170,6 @@ class FlutterBluePlusBleService implements BleServiceInterface {
   @override
   Future<void> initialize() async {
     if (_isInitialized) return;
-    _meshRelayEnabled = _meshRelayEnabled;
 
     Logger.info('BleService: Initializing...', 'BLE');
 
@@ -276,6 +277,7 @@ class FlutterBluePlusBleService implements BleServiceInterface {
     await _messageReceivedController.close();
     await _photoProgressController.close();
     await _photoReceivedController.close();
+    await _anchorDropReceivedController.close();
 
     _photoReassembler.clear();
     _isInitialized = false;
@@ -540,6 +542,8 @@ class FlutterBluePlusBleService implements BleServiceInterface {
         _handlePeerAnnounce(json, fromPeerId);
       } else if (type == 'neighbor_list') {
         _handleNeighborList(json);
+      } else if (type == 'drop_anchor') {
+        _handleDropAnchor(fromPeerId);
       } else {
         _handleReceivedMessage(json, fromPeerId);
       }
@@ -2182,6 +2186,71 @@ class FlutterBluePlusBleService implements BleServiceInterface {
   @override
   Stream<ReceivedMessage> get messageReceivedStream =>
       _messageReceivedController.stream;
+
+  // ==================== Drop Anchor ====================
+
+  @override
+  Future<bool> sendDropAnchor(String peerId) async {
+    _ensureInitialized();
+
+    Logger.info(
+      'BleService: Sending drop_anchor to ${peerId.substring(0, min(8, peerId.length))}',
+      'BLE',
+    );
+
+    try {
+      var msgChar = _messagingChars[peerId];
+      var peripheral = _discoveredPeripherals[peerId];
+
+      if (msgChar == null && peripheral != null) {
+        await _connectAndReadProfile(peerId, peripheral);
+        msgChar = _messagingChars[peerId];
+      }
+
+      if (msgChar == null || peripheral == null) {
+        Logger.info('BleService: Cannot drop anchor — peer not reachable: $peerId', 'BLE');
+        return false;
+      }
+
+      final ownUserId = _pendingPayload?.userId ?? '';
+      final payload = <String, dynamic>{
+        'type': 'drop_anchor',
+        'sender_id': ownUserId,
+        'timestamp': DateTime.now().toIso8601String(),
+      };
+      final data = Uint8List.fromList(utf8.encode(jsonEncode(payload)));
+
+      await _central.writeCharacteristic(
+        peripheral,
+        msgChar,
+        value: data,
+        type: GATTCharacteristicWriteType.withResponse,
+      );
+
+      Logger.info('BleService: Anchor drop sent successfully', 'BLE');
+      return true;
+    } catch (e) {
+      Logger.error('BleService: Anchor drop send failed', e, null, 'BLE');
+      return false;
+    }
+  }
+
+  @override
+  Stream<AnchorDropReceived> get anchorDropReceivedStream =>
+      _anchorDropReceivedController.stream;
+
+  void _handleDropAnchor(String fromPeerId) {
+    final drop = AnchorDropReceived(
+      fromPeerId: fromPeerId,
+      timestamp: DateTime.now(),
+    );
+    _anchorDropReceivedController.add(drop);
+    Logger.info(
+      'BleService: Anchor drop received from '
+      '${fromPeerId.substring(0, min(8, fromPeerId.length))}',
+      'BLE',
+    );
+  }
 
   Uint8List _serializeMessagePayload(MessagePayload payload,
       {String? destinationUserId}) {

@@ -10,11 +10,14 @@ class PeerGridTile extends StatelessWidget {
     required this.peer,
     required this.onTap,
     this.unreadCount = 0,
+    this.anchorDropped = false,
   });
 
   final DiscoveredPeer peer;
   final VoidCallback onTap;
   final int unreadCount;
+  /// Whether anchor has been dropped on this peer — shows a ⚓ badge
+  final bool anchorDropped;
 
   @override
   Widget build(BuildContext context) {
@@ -173,6 +176,26 @@ class PeerGridTile extends StatelessWidget {
                         ),
                       ),
                     ],
+                  ),
+                ),
+              ),
+
+            // Anchor dropped badge (bottom-right, above name area)
+            if (anchorDropped)
+              Positioned(
+                bottom: 52,
+                right: 6,
+                child: Container(
+                  width: 26,
+                  height: 26,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEC4899).withValues(alpha: 0.9),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.anchor,
+                    size: 14,
+                    color: Colors.white,
                   ),
                 ),
               ),

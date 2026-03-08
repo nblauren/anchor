@@ -14,6 +14,7 @@ class NotificationService {
 
   static const _androidChannelIdMessages = 'messages_channel';
   static const _androidChannelIdPeers = 'peers_channel';
+  static const _androidChannelIdAnchorDrops = 'anchor_drops_channel';
 
   /// Initialize the notification service
   Future<void> initialize() async {
@@ -86,6 +87,20 @@ class NotificationService {
         .resolvePlatformSpecificImplementation<
             AndroidFlutterLocalNotificationsPlugin>()
         ?.createNotificationChannel(peersChannel);
+
+    const AndroidNotificationChannel anchorDropsChannel =
+        AndroidNotificationChannel(
+      _androidChannelIdAnchorDrops,
+      'Anchor Drops',
+      description: 'When someone drops anchor on you',
+      importance: Importance.high,
+      playSound: true,
+    );
+
+    await _notificationsPlugin
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>()
+        ?.createNotificationChannel(anchorDropsChannel);
   }
 
   /// Request notification permissions (mainly useful on iOS)
@@ -162,6 +177,50 @@ class NotificationService {
         'Notification shown - $fromName: $messagePreview', 'Notifications');
   }
 
+  /// Show a notification when someone drops anchor on us
+  Future<void> showAnchorDropNotification({
+    required String fromPeerId,
+    required String fromName,
+  }) async {
+    if (!_isInitialized) {
+      await initialize();
+    }
+
+    final int id = NotificationIds.forAnchorDrop(fromPeerId);
+
+    const AndroidNotificationDetails androidDetails =
+        AndroidNotificationDetails(
+      _androidChannelIdAnchorDrops,
+      'Anchor Drops',
+      channelDescription: 'When someone drops anchor on you',
+      importance: Importance.high,
+      priority: Priority.high,
+      showWhen: true,
+    );
+
+    const DarwinNotificationDetails iosDetails = DarwinNotificationDetails(
+      presentAlert: true,
+      presentBadge: false,
+      presentSound: true,
+    );
+
+    const NotificationDetails details = NotificationDetails(
+      android: androidDetails,
+      iOS: iosDetails,
+      macOS: iosDetails,
+    );
+
+    await _notificationsPlugin.show(
+      id: id,
+      title: '$fromName dropped anchor on you! \u2693',
+      body: 'Tap to view their profile',
+      notificationDetails: details,
+      payload: 'anchor_drop:$fromPeerId',
+    );
+
+    Logger.info('Anchor drop notification shown - $fromName', 'Notifications');
+  }
+
   /// Show a notification for a new peer discovered
   Future<void> showPeerDiscoveredNotification({
     required String peerId,
@@ -236,5 +295,11 @@ class NotificationIds {
 
   static int forPeer(String peerId) {
     return peerDiscoveredBase + peerId.hashCode.abs() % 1000;
+  }
+
+  static const int anchorDropBase = 3000;
+
+  static int forAnchorDrop(String peerId) {
+    return anchorDropBase + peerId.hashCode.abs() % 1000;
   }
 }

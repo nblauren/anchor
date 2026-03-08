@@ -26,6 +26,9 @@ enum MessageStatus {
   failed,
 }
 
+/// Direction of an anchor drop
+enum AnchorDropDirection { sent, received }
+
 // ==================== Tables ====================
 
 /// Local user's own profile
@@ -101,6 +104,19 @@ class Messages extends Table {
   Set<Column> get primaryKey => {id};
 }
 
+/// Anchor drops — tracks sent and received ⚓ drops per peer
+@DataClassName('AnchorDropEntry')
+class AnchorDrops extends Table {
+  TextColumn get id => text()();
+  TextColumn get peerId => text()();
+  TextColumn get peerName => text()();
+  TextColumn get direction => textEnum<AnchorDropDirection>()();
+  DateTimeColumn get droppedAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
 /// Blocked users
 @DataClassName('BlockedUserEntry')
 class BlockedUsers extends Table {
@@ -119,6 +135,7 @@ class BlockedUsers extends Table {
   DiscoveredPeers,
   Conversations,
   Messages,
+  AnchorDrops,
   BlockedUsers,
 ])
 class AppDatabase extends _$AppDatabase {
@@ -128,7 +145,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration {
@@ -139,11 +156,14 @@ class AppDatabase extends _$AppDatabase {
       onUpgrade: (Migrator m, int from, int to) async {
         if (from < 2) {
           // Migration from v1 to v2: complete schema change
-          // Drop old tables and create new ones
           await m.deleteTable('user_profiles');
           await m.deleteTable('chat_messages');
           await m.deleteTable('conversations');
           await m.createAll();
+        }
+        if (from < 3) {
+          // Migration from v2 to v3: add anchor_drops table
+          await m.createTable(anchorDrops);
         }
       },
       beforeOpen: (details) async {

@@ -28,11 +28,24 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
   final PageController _pageController = PageController();
   int _currentPhotoIndex = 0;
   bool _isFetchingPhotos = false;
+  bool _anchorDropped = false;
 
   @override
   void initState() {
     super.initState();
     _peer = widget.peer;
+
+    // Sync anchor drop state from bloc
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        final dropped = context
+            .read<DiscoveryBloc>()
+            .state
+            .droppedAnchorPeerIds
+            .contains(_peer.peerId);
+        if (dropped) setState(() => _anchorDropped = true);
+      }
+    });
 
     // Trigger full-photo fetch when the detail screen opens for a direct peer
     // that has extra photos not yet loaded.
@@ -87,6 +100,20 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
     Navigator.pop(context); // Go back to discovery
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('${_peer.name} has been blocked')),
+    );
+  }
+
+  void _dropAnchor() {
+    context.read<DiscoveryBloc>().add(
+          DropAnchorOnPeer(peerId: _peer.peerId, peerName: _peer.name),
+        );
+    setState(() => _anchorDropped = true);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Anchor dropped on ${_peer.name}! \u2693'),
+        duration: const Duration(seconds: 2),
+        behavior: SnackBarBehavior.floating,
+      ),
     );
   }
 
@@ -291,31 +318,29 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
 
                   // Action buttons
                   Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
                       // Message button
-                      Expanded(
-                        flex: 2,
-                        child: ElevatedButton.icon(
-                          onPressed: _openChat,
-                          icon: const Icon(Icons.chat_bubble_outline),
-                          label: const Text('Message'),
-                          style: ElevatedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                          ),
-                        ),
+                      _ActionIconButton(
+                        icon: Icons.chat_bubble_outline,
+                        label: 'Message',
+                        onPressed: _openChat,
                       ),
-                      const SizedBox(width: 12),
+                      // Drop Anchor button
+                      _ActionIconButton(
+                        icon: Icons.anchor,
+                        label: _anchorDropped ? 'Anchored!' : 'Drop Anchor',
+                        onPressed: _anchorDropped ? null : _dropAnchor,
+                        color: _anchorDropped
+                            ? const Color(0xFFEC4899)
+                            : null,
+                      ),
                       // Block button
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: _showBlockConfirmation,
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: AppTheme.error,
-                            side: const BorderSide(color: AppTheme.error),
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                          ),
-                          child: const Icon(Icons.block),
-                        ),
+                      _ActionIconButton(
+                        icon: Icons.block,
+                        label: 'Block',
+                        onPressed: _showBlockConfirmation,
+                        color: AppTheme.error,
                       ),
                     ],
                   ),
@@ -601,4 +626,58 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
     Color(0xFFEF4444), // Red
     Color(0xFF14B8A6), // Teal
   ];
+}
+
+/// A circular icon button with a label beneath it, used in the profile action row.
+class _ActionIconButton extends StatelessWidget {
+  const _ActionIconButton({
+    required this.icon,
+    required this.label,
+    required this.onPressed,
+    this.color,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback? onPressed;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    final effectiveColor = onPressed == null
+        ? color ?? AppTheme.primaryColor
+        : color ?? AppTheme.primaryColor;
+    final dimmed = onPressed == null;
+
+    return GestureDetector(
+      onTap: onPressed,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              color: effectiveColor.withValues(alpha: dimmed ? 0.08 : 0.15),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              icon,
+              color: effectiveColor.withValues(alpha: dimmed ? 0.4 : 1.0),
+              size: 24,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              color: effectiveColor.withValues(alpha: dimmed ? 0.4 : 1.0),
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }

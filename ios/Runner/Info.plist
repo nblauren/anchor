@@ -26,6 +26,10 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Anchor uses your camera to take profile photos.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Anchor accesses your photo library so you can choose profile photos.</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Anchor uses Bluetooth to discover and connect with nearby users offline for messaging and photo sharing, even when the app is in the background or not in use.</string>
 	<key>NSBluetoothPeripheralUsageDescription</key>
