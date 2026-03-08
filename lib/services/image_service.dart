@@ -448,6 +448,43 @@ class ImageService {
     }
   }
 
+  /// Save thumbnail bytes received via BLE preview to a persistent file.
+  ///
+  /// Returns a relative path (e.g. "chat_thumbnails/uuid.jpg") that survives
+  /// iOS sandbox UUID changes across reinstalls.
+  Future<String> saveChatThumbnail(Uint8List thumbnailBytes) async {
+    try {
+      final directory = await getApplicationDocumentsDirectory();
+      final thumbDir = Directory('${directory.path}/chat_thumbnails');
+
+      if (!await thumbDir.exists()) {
+        await thumbDir.create(recursive: true);
+      }
+
+      final fileId = _uuid.v4();
+      final thumbPath = '${thumbDir.path}/$fileId.jpg';
+      await File(thumbPath).writeAsBytes(thumbnailBytes);
+
+      Logger.info(
+        'Saved chat thumbnail: ${thumbnailBytes.length}B -> $thumbPath',
+        'Image',
+      );
+
+      return 'chat_thumbnails/$fileId.jpg';
+    } catch (e) {
+      Logger.error('Failed to save chat thumbnail', e, null, 'Image');
+      throw ImageError('Failed to save chat thumbnail', e);
+    }
+  }
+
+  /// Generate a compact preview thumbnail for chat photo consent flow.
+  ///
+  /// Targets ≤15 KB so it can be transmitted over BLE in a few seconds.
+  /// Reuses the existing [generateThumbnailFromPath] logic.
+  Future<Uint8List> generatePreviewThumbnail(String absolutePhotoPath) async {
+    return generateThumbnailFromPath(absolutePhotoPath);
+  }
+
   /// Clean up orphaned images not in the database
   Future<void> cleanupOrphanedImages(List<String> validPaths) async {
     try {

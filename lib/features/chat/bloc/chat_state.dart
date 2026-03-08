@@ -45,6 +45,29 @@ class PhotoTransferInfo extends Equatable {
   List<Object?> get props => [messageId, progress, isSending];
 }
 
+/// Metadata for an outgoing photo that has been previewed but not yet
+/// requested (or is mid-transfer).  Keyed by [photoId] in [ChatState].
+class PendingOutgoingPhoto extends Equatable {
+  const PendingOutgoingPhoto({
+    required this.photoId,
+    required this.localPhotoPath,
+    required this.messageId,
+    required this.peerId,
+  });
+
+  /// UUID shared between the preview and the full-transfer request.
+  final String photoId;
+  /// Absolute path to the BLE-compressed photo bytes on the sender's device.
+  final String localPhotoPath;
+  /// DB message ID for the sender's own chat bubble (type: photo).
+  final String messageId;
+  /// BLE peer ID of the recipient.
+  final String peerId;
+
+  @override
+  List<Object?> get props => [photoId, localPhotoPath, messageId, peerId];
+}
+
 class ChatState extends Equatable {
   const ChatState({
     this.status = ChatStatus.initial,
@@ -55,6 +78,7 @@ class ChatState extends Equatable {
     this.hasMoreMessages = true,
     this.photoTransfers = const {},
     this.isBlocked = false,
+    this.pendingOutgoingPhotos = const {},
   });
 
   final ChatStatus status;
@@ -65,6 +89,9 @@ class ChatState extends Equatable {
   final bool hasMoreMessages;
   final Map<String, PhotoTransferInfo> photoTransfers; // messageId -> progress
   final bool isBlocked;
+  /// Outgoing photos awaiting a [photo_request] from the receiver.
+  /// Keyed by [photoId].
+  final Map<String, PendingOutgoingPhoto> pendingOutgoingPhotos;
 
   /// Total unread count across all conversations
   int get totalUnreadCount =>
@@ -85,6 +112,7 @@ class ChatState extends Equatable {
     bool? hasMoreMessages,
     Map<String, PhotoTransferInfo>? photoTransfers,
     bool? isBlocked,
+    Map<String, PendingOutgoingPhoto>? pendingOutgoingPhotos,
     bool clearCurrentConversation = false,
   }) {
     return ChatState(
@@ -97,6 +125,8 @@ class ChatState extends Equatable {
       hasMoreMessages: hasMoreMessages ?? this.hasMoreMessages,
       photoTransfers: photoTransfers ?? this.photoTransfers,
       isBlocked: isBlocked ?? this.isBlocked,
+      pendingOutgoingPhotos:
+          pendingOutgoingPhotos ?? this.pendingOutgoingPhotos,
     );
   }
 
@@ -110,5 +140,6 @@ class ChatState extends Equatable {
         hasMoreMessages,
         photoTransfers,
         isBlocked,
+        pendingOutgoingPhotos,
       ];
 }

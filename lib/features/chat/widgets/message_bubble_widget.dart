@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -6,8 +7,15 @@ import 'package:photo_view/photo_view.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../data/local_database/database.dart';
 import '../../../services/image_service.dart';
+import '../bloc/chat_state.dart';
 
-/// Widget displaying a single chat message bubble
+/// Widget displaying a single chat message bubble.
+///
+/// Handles three content types:
+///   - [MessageContentType.text] — plain text
+///   - [MessageContentType.photo] — fully-downloaded image with full-screen viewer
+///   - [MessageContentType.photoPreview] — thumbnail + consent overlay; receiver
+///     taps to request the full photo via [onRequestFullPhoto].
 class MessageBubbleWidget extends StatelessWidget {
   const MessageBubbleWidget({
     super.key,
@@ -15,18 +23,27 @@ class MessageBubbleWidget extends StatelessWidget {
     required this.isSentByMe,
     this.onRetry,
     this.isRelayedPeer = false,
+    this.transferInfo,
+    this.onRequestFullPhoto,
+    this.onCancelTransfer,
   });
 
   final MessageEntry message;
   final bool isSentByMe;
   final VoidCallback? onRetry;
-  /// When true and message is sent by us, show a relay indicator in the
-  /// timestamp row to signal the message was forwarded through the mesh.
+  /// When true and message is sent by us, show a relay indicator.
   final bool isRelayedPeer;
+  /// Progress info for an active photo transfer keyed to this message.
+  final PhotoTransferInfo? transferInfo;
+  /// Called when the receiver taps the preview thumbnail to request the full photo.
+  /// Receives the [photoId] from the preview metadata.
+  final void Function(String photoId)? onRequestFullPhoto;
+  /// Called when the user taps the cancel button during an active transfer.
+  final VoidCallback? onCancelTransfer;
 
   @override
   Widget build(BuildContext context) {
-    final isPhoto = message.contentType == MessageContentType.photo;
+    final contentType = message.contentType;
 
     return Align(
       alignment: isSentByMe ? Alignment.centerRight : Alignment.centerLeft,
@@ -57,16 +74,20 @@ class MessageBubbleWidget extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            // Content (text or photo)
-            if (isPhoto) _buildPhotoContent(context) else _buildTextContent(),
+            if (contentType == MessageContentType.photo)
+              _buildPhotoContent(context)
+            else if (contentType == MessageContentType.photoPreview)
+              _buildPhotoPreviewContent(context)
+            else
+              _buildTextContent(),
 
-            // Timestamp and status
+            // Timestamp and status row
             Padding(
               padding: EdgeInsets.only(
                 left: 12,
                 right: 12,
                 bottom: 8,
-                top: isPhoto ? 8 : 0,
+                top: contentType != MessageContentType.text ? 8 : 0,
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -122,7 +143,33 @@ class MessageBubbleWidget extends StatelessWidget {
     return _PhotoContent(
       photoPath: photoPath,
       status: message.status,
+      transferInfo: transferInfo,
+      isSentByMe: isSentByMe,
       onTap: (file) => _showFullScreen(context, file),
+      onCancel: onCancelTransfer,
+    );
+  }
+
+  Widget _buildPhotoPreviewContent(BuildContext context) {
+    // Parse metadata stored in textContent.
+    String photoId = '';
+    int originalSize = 0;
+    try {
+      final meta =
+          jsonDecode(message.textContent ?? '{}') as Map<String, dynamic>;
+      photoId = meta['photo_id'] as String? ?? '';
+      originalSize = meta['original_size'] as int? ?? 0;
+    } catch (_) {}
+
+    return _PhotoPreviewContent(
+      thumbnailPath: message.photoPath,
+      status: message.status,
+      photoId: photoId,
+      originalSize: originalSize,
+      transferInfo: transferInfo,
+      isSentByMe: isSentByMe,
+      onRequestFullPhoto: onRequestFullPhoto,
+      onCancel: onCancelTransfer,
     );
   }
 
@@ -224,19 +271,269 @@ class MessageBubbleWidget extends StatelessWidget {
   }
 }
 
-/// Stateful wrapper for photo content that caches the path-resolution future
-/// so it survives parent rebuilds (e.g. message status updates) without
-/// re-running the async lookup and flashing the placeholder.
+// ---------------------------------------------------------------------------
+// Photo preview with tap-to-download consent overlay
+// ---------------------------------------------------------------------------
+
+class _PhotoPreviewContent extends StatefulWidget {
+  const _PhotoPreviewContent({
+    required this.thumbnailPath,
+    required this.status,
+    required this.photoId,
+    required this.originalSize,
+    required this.isSentByMe,
+    this.transferInfo,
+    this.onRequestFullPhoto,
+    this.onCancel,
+  });
+
+  final String? thumbnailPath;
+  final MessageStatus status;
+  final String photoId;
+  final int originalSize;
+  final bool isSentByMe;
+  final PhotoTransferInfo? transferInfo;
+  final void Function(String photoId)? onRequestFullPhoto;
+  final VoidCallback? onCancel;
+
+  @override
+  State<_PhotoPreviewContent> createState() => _PhotoPreviewContentState();
+}
+
+class _PhotoPreviewContentState extends State<_PhotoPreviewContent> {
+  late Future<String?> _resolvedPathFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _resolvedPathFuture = resolvePhotoPath(widget.thumbnailPath ?? '');
+  }
+
+  @override
+  void didUpdateWidget(_PhotoPreviewContent oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.thumbnailPath != widget.thumbnailPath) {
+      _resolvedPathFuture = resolvePhotoPath(widget.thumbnailPath ?? '');
+    }
+  }
+
+  String get _formattedSize {
+    final bytes = widget.originalSize;
+    if (bytes <= 0) return '';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(0)} KB';
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+
+  bool get _isDownloading => widget.transferInfo != null;
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<String?>(
+      future: _resolvedPathFuture,
+      builder: (context, snapshot) {
+        final resolvedPath = snapshot.data;
+        final file =
+            resolvedPath != null ? File(resolvedPath) : null;
+
+        return Stack(
+          children: [
+            // Blurred thumbnail background
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: file != null
+                  ? Image.file(
+                      file,
+                      fit: BoxFit.cover,
+                      width: double.infinity,
+                      height: 200,
+                      errorBuilder: (_, __, ___) => _buildPlaceholder(),
+                    )
+                  : _buildPlaceholder(),
+            ),
+
+            // Dark scrim
+            Positioned.fill(
+              child: Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  color: Colors.black.withValues(alpha: 0.45),
+                ),
+              ),
+            ),
+
+            // Consent overlay or progress overlay
+            Positioned.fill(
+              child: _isDownloading
+                  ? _buildProgressOverlay()
+                  : widget.isSentByMe
+                      ? _buildSentOverlay()
+                      : _buildConsentOverlay(context),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  /// Overlay shown on the SENDER's side: "Waiting for recipient to download"
+  Widget _buildSentOverlay() {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        const Icon(Icons.photo_camera_outlined, color: Colors.white70, size: 32),
+        const SizedBox(height: 8),
+        Text(
+          'Preview sent',
+          style: TextStyle(
+            color: Colors.white.withValues(alpha: 0.85),
+            fontWeight: FontWeight.w600,
+            fontSize: 14,
+          ),
+        ),
+        if (_formattedSize.isNotEmpty) ...[
+          const SizedBox(height: 4),
+          Text(
+            _formattedSize,
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.6),
+              fontSize: 12,
+            ),
+          ),
+        ],
+        const SizedBox(height: 4),
+        Text(
+          'Waiting for tap to download',
+          style: TextStyle(
+            color: Colors.white.withValues(alpha: 0.5),
+            fontSize: 11,
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Overlay shown on the RECEIVER's side: tap to download
+  Widget _buildConsentOverlay(BuildContext context) {
+    return GestureDetector(
+      onTap: () => widget.onRequestFullPhoto?.call(widget.photoId),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.15),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.download_rounded,
+              color: Colors.white,
+              size: 32,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _formattedSize.isNotEmpty
+                ? 'Photo ($_formattedSize)'
+                : 'Photo',
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w700,
+              fontSize: 14,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Tap to download full photo',
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.8),
+              fontSize: 12,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Progress overlay shown while the full photo is being transferred.
+  Widget _buildProgressOverlay() {
+    final info = widget.transferInfo!;
+    final percent = info.progressPercent;
+
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        SizedBox(
+          width: 48,
+          height: 48,
+          child: CircularProgressIndicator(
+            value: info.progress > 0 ? info.progress : null,
+            color: Colors.white,
+            strokeWidth: 3,
+          ),
+        ),
+        const SizedBox(height: 10),
+        Text(
+          info.progress > 0 ? 'Downloading $percent%' : 'Starting...',
+          style: TextStyle(
+            color: Colors.white.withValues(alpha: 0.9),
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 8),
+        TextButton.icon(
+          onPressed: widget.onCancel,
+          icon: const Icon(Icons.cancel_outlined, size: 16, color: Colors.white70),
+          label: Text(
+            'Cancel',
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.7),
+              fontSize: 12,
+            ),
+          ),
+          style: TextButton.styleFrom(
+            padding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            minimumSize: Size.zero,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPlaceholder() {
+    return Container(
+      width: double.infinity,
+      height: 200,
+      color: AppTheme.darkSurface,
+      child: const Center(
+        child: Icon(Icons.image, color: AppTheme.textHint, size: 48),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Full photo content (existing, enhanced with cancel support)
+// ---------------------------------------------------------------------------
+
 class _PhotoContent extends StatefulWidget {
   const _PhotoContent({
     required this.photoPath,
     required this.status,
+    required this.isSentByMe,
     required this.onTap,
+    this.transferInfo,
+    this.onCancel,
   });
 
   final String photoPath;
   final MessageStatus status;
+  final bool isSentByMe;
   final void Function(File file) onTap;
+  final PhotoTransferInfo? transferInfo;
+  final VoidCallback? onCancel;
 
   @override
   State<_PhotoContent> createState() => _PhotoContentState();
@@ -269,9 +566,7 @@ class _PhotoContentState extends State<_PhotoContent> {
         }
 
         final resolvedPath = snapshot.data;
-        if (resolvedPath == null) {
-          return _buildPlaceholder();
-        }
+        if (resolvedPath == null) return _buildPlaceholder();
 
         final file = File(resolvedPath);
 
@@ -290,7 +585,60 @@ class _PhotoContentState extends State<_PhotoContent> {
                       _buildPlaceholder(),
                 ),
               ),
-              if (widget.status == MessageStatus.pending)
+              // Upload progress overlay (sender side)
+              if (widget.transferInfo != null)
+                Positioned.fill(
+                  child: Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(12),
+                      color: Colors.black.withValues(alpha: 0.45),
+                    ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        SizedBox(
+                          width: 40,
+                          height: 40,
+                          child: CircularProgressIndicator(
+                            value: widget.transferInfo!.progress > 0
+                                ? widget.transferInfo!.progress
+                                : null,
+                            color: Colors.white,
+                            strokeWidth: 3,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          widget.transferInfo!.progress > 0
+                              ? '${widget.transferInfo!.progressPercent}%'
+                              : 'Sending…',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        TextButton.icon(
+                          onPressed: widget.onCancel,
+                          icon: const Icon(Icons.cancel_outlined,
+                              size: 14, color: Colors.white70),
+                          label: const Text(
+                            'Cancel',
+                            style:
+                                TextStyle(color: Colors.white70, fontSize: 11),
+                          ),
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 2),
+                            minimumSize: Size.zero,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              else if (widget.status == MessageStatus.pending)
                 Positioned.fill(
                   child: Container(
                     color: Colors.black.withValues(alpha: 0.4),
@@ -315,11 +663,7 @@ class _PhotoContentState extends State<_PhotoContent> {
       height: 150,
       color: AppTheme.darkCard,
       child: const Center(
-        child: Icon(
-          Icons.image,
-          color: AppTheme.textHint,
-          size: 48,
-        ),
+        child: Icon(Icons.image, color: AppTheme.textHint, size: 48),
       ),
     );
   }

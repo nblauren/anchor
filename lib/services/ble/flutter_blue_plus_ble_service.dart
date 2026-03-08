@@ -67,6 +67,10 @@ class FlutterBluePlusBleService implements BleServiceInterface {
   final _photoReceivedController = StreamController<ReceivedPhoto>.broadcast();
   final _anchorDropReceivedController =
       StreamController<AnchorDropReceived>.broadcast();
+  final _photoPreviewReceivedController =
+      StreamController<ReceivedPhotoPreview>.broadcast();
+  final _photoRequestReceivedController =
+      StreamController<ReceivedPhotoRequest>.broadcast();
 
   // Peer tracking
   final Map<String, DiscoveredPeer> _visiblePeers = {};
@@ -164,6 +168,11 @@ class FlutterBluePlusBleService implements BleServiceInterface {
   // Stores metadata from the photo_start message so binary chunks
   // can be correlated without carrying their own metadata.
   final Map<String, _IncomingPhotoTransfer> _incomingPhotoTransfers = {};
+
+  // Active incoming thumbnail transfers for the photo-preview consent flow.
+  // Keyed by centralUuid (same as _incomingPhotoTransfers).
+  final Map<String, _IncomingThumbnailTransfer> _incomingThumbnailTransfers =
+      {};
 
   // ==================== Lifecycle ====================
 
@@ -527,6 +536,12 @@ class FlutterBluePlusBleService implements BleServiceInterface {
         return;
       }
 
+      // Binary thumbnail chunk (preview consent flow): first byte is 0x03
+      if (data[0] == 0x03) {
+        _handleBinaryThumbnailChunk(data, args.central.uuid);
+        return;
+      }
+
       // JSON payload (text messages, photo_start, legacy photo_chunk)
       final jsonStr = utf8.decode(data);
       final json = jsonDecode(jsonStr) as Map<String, dynamic>;
@@ -538,6 +553,10 @@ class FlutterBluePlusBleService implements BleServiceInterface {
         _handlePhotoStart(json, fromPeerId);
       } else if (type == 'photo_chunk') {
         _handleReceivedPhotoChunk(json, fromPeerId);
+      } else if (type == 'photo_preview') {
+        _handlePhotoPreviewStart(json, fromPeerId);
+      } else if (type == 'photo_request') {
+        _handlePhotoRequest(json, fromPeerId);
       } else if (type == 'peer_announce') {
         _handlePeerAnnounce(json, fromPeerId);
       } else if (type == 'neighbor_list') {
@@ -2456,6 +2475,261 @@ class FlutterBluePlusBleService implements BleServiceInterface {
     _photoReassembler.cancel(messageId);
   }
 
+  // ==================== Photo Preview / Consent Flow ====================
+
+  @override
+  Future<bool> sendPhotoPreview({
+    required String peerId,
+    required String messageId,
+    required String photoId,
+    required Uint8List thumbnailBytes,
+    required int originalSize,
+  }) async {
+    _ensureInitialized();
+
+    Logger.info(
+      'BleService: Sending photo preview $photoId '
+          '(${thumbnailBytes.length}B thumb) to '
+          '${peerId.substring(0, min(8, peerId.length))}',
+      'BLE',
+    );
+
+    try {
+      var msgChar = _messagingChars[peerId];
+      var peripheral = _discoveredPeripherals[peerId];
+
+      if (msgChar == null && peripheral != null) {
+        await _connectAndReadProfile(peerId, peripheral);
+        msgChar = _messagingChars[peerId];
+      }
+
+      if (msgChar == null || peripheral == null) {
+        Logger.info('BleService: Peer not reachable for preview: $peerId', 'BLE');
+        return false;
+      }
+
+      final maxWriteLen = _maxWriteLengths[peerId] ?? 182;
+      const binaryOverhead = 3; // marker + uint16 index
+      final rawChunkSize = max(20, maxWriteLen - binaryOverhead);
+      final totalChunks =
+          (thumbnailBytes.length + rawChunkSize - 1) ~/ rawChunkSize;
+
+      // Phase 1: JSON metadata (no thumbnail data — fits in one write).
+      final startPayload = utf8.encode(jsonEncode({
+        'type': 'photo_preview',
+        'sender_id': _pendingPayload?.userId ?? '',
+        'message_id': messageId,
+        'photo_id': photoId,
+        'original_size': originalSize,
+        'thumbnail_chunks': totalChunks,
+      }));
+
+      await _central.writeCharacteristic(
+        peripheral,
+        msgChar,
+        value: Uint8List.fromList(startPayload),
+        type: GATTCharacteristicWriteType.withResponse,
+      );
+
+      await Future.delayed(const Duration(milliseconds: 50));
+
+      // Phase 2: binary thumbnail chunks using marker 0x03.
+      for (var i = 0; i < totalChunks; i++) {
+        if (_cancelledTransfers.contains(messageId)) {
+          _cancelledTransfers.remove(messageId);
+          return false;
+        }
+
+        final dataStart = i * rawChunkSize;
+        final dataEnd = min(dataStart + rawChunkSize, thumbnailBytes.length);
+        final chunkData = thumbnailBytes.sublist(dataStart, dataEnd);
+
+        final payload = Uint8List(binaryOverhead + chunkData.length);
+        payload[0] = 0x03; // thumbnail chunk marker
+        payload[1] = (i >> 8) & 0xFF;
+        payload[2] = i & 0xFF;
+        payload.setRange(binaryOverhead, payload.length, chunkData);
+
+        await _central.writeCharacteristic(
+          peripheral,
+          msgChar,
+          value: payload,
+          type: GATTCharacteristicWriteType.withResponse,
+        );
+
+        if (i < totalChunks - 1) {
+          await Future.delayed(const Duration(milliseconds: 50));
+        }
+      }
+
+      Logger.info('BleService: Photo preview sent: $photoId', 'BLE');
+      return true;
+    } catch (e) {
+      Logger.error('BleService: Photo preview send failed', e, null, 'BLE');
+      _messagingChars.remove(peerId);
+      return false;
+    }
+  }
+
+  @override
+  Future<bool> sendPhotoRequest({
+    required String peerId,
+    required String messageId,
+    required String photoId,
+  }) async {
+    _ensureInitialized();
+
+    Logger.info(
+      'BleService: Sending photo_request $photoId to '
+          '${peerId.substring(0, min(8, peerId.length))}',
+      'BLE',
+    );
+
+    try {
+      var msgChar = _messagingChars[peerId];
+      var peripheral = _discoveredPeripherals[peerId];
+
+      if (msgChar == null && peripheral != null) {
+        await _connectAndReadProfile(peerId, peripheral);
+        msgChar = _messagingChars[peerId];
+      }
+
+      if (msgChar == null || peripheral == null) {
+        Logger.info(
+            'BleService: Peer not reachable for photo_request: $peerId', 'BLE');
+        return false;
+      }
+
+      final payload = utf8.encode(jsonEncode({
+        'type': 'photo_request',
+        'sender_id': _pendingPayload?.userId ?? '',
+        'message_id': messageId,
+        'photo_id': photoId,
+      }));
+
+      await _central.writeCharacteristic(
+        peripheral,
+        msgChar,
+        value: Uint8List.fromList(payload),
+        type: GATTCharacteristicWriteType.withResponse,
+      );
+
+      Logger.info('BleService: photo_request sent: $photoId', 'BLE');
+      return true;
+    } catch (e) {
+      Logger.error('BleService: photo_request send failed', e, null, 'BLE');
+      return false;
+    }
+  }
+
+  @override
+  Stream<ReceivedPhotoPreview> get photoPreviewReceivedStream =>
+      _photoPreviewReceivedController.stream;
+
+  @override
+  Stream<ReceivedPhotoRequest> get photoRequestReceivedStream =>
+      _photoRequestReceivedController.stream;
+
+  /// Handle incoming `photo_preview` JSON — stores metadata for the thumbnail
+  /// binary chunks that follow immediately (0x03 marker).
+  void _handlePhotoPreviewStart(
+      Map<String, dynamic> json, String fromPeerId) {
+    final messageId = json['message_id'] as String? ?? '';
+    final photoId = json['photo_id'] as String? ?? '';
+    final originalSize = json['original_size'] as int? ?? 0;
+    final totalChunks = json['thumbnail_chunks'] as int? ?? 0;
+
+    _incomingThumbnailTransfers[fromPeerId] = _IncomingThumbnailTransfer(
+      messageId: messageId,
+      photoId: photoId,
+      originalSize: originalSize,
+      totalChunks: totalChunks,
+      receivedData: BytesBuilder(copy: false),
+      receivedCount: 0,
+    );
+
+    Logger.info(
+      'BleService: Photo preview starting from '
+          '${fromPeerId.substring(0, min(8, fromPeerId.length))}: '
+          '$totalChunks thumb chunks, originalSize=$originalSize',
+      'BLE',
+    );
+  }
+
+  /// Handle a binary thumbnail chunk: [0x03][uint16 chunk_index][raw data]
+  void _handleBinaryThumbnailChunk(Uint8List data, UUID centralUuid) {
+    if (data.length < 3) return;
+
+    final centralId = centralUuid.toString();
+    _IncomingThumbnailTransfer? transfer =
+        _incomingThumbnailTransfers[centralId];
+
+    if (transfer == null) {
+      // Try mapped peerId
+      for (final entry in _incomingThumbnailTransfers.entries) {
+        if (entry.key == centralId) {
+          transfer = entry.value;
+          break;
+        }
+      }
+    }
+
+    if (transfer == null) {
+      Logger.warning(
+        'BleService: Thumbnail chunk received but no active preview transfer '
+            'from $centralId',
+        'BLE',
+      );
+      return;
+    }
+
+    final chunkData = data.sublist(3);
+    transfer.receivedData.add(chunkData);
+    transfer.receivedCount++;
+
+    if (transfer.receivedCount >= transfer.totalChunks) {
+      final thumbnailBytes = transfer.receivedData.toBytes();
+      final fromPeerId = centralId;
+
+      Logger.info(
+        'BleService: Thumbnail complete: ${transfer.messageId} '
+            '(${thumbnailBytes.length} bytes)',
+        'BLE',
+      );
+
+      _photoPreviewReceivedController.add(ReceivedPhotoPreview(
+        fromPeerId: fromPeerId,
+        messageId: transfer.messageId,
+        photoId: transfer.photoId,
+        thumbnailBytes: thumbnailBytes,
+        originalSize: transfer.originalSize,
+        timestamp: DateTime.now(),
+      ));
+
+      _incomingThumbnailTransfers.remove(centralId);
+    }
+  }
+
+  /// Handle incoming `photo_request` — emit to the sender so they can start
+  /// transmitting the full photo.
+  void _handlePhotoRequest(Map<String, dynamic> json, String fromPeerId) {
+    final messageId = json['message_id'] as String? ?? '';
+    final photoId = json['photo_id'] as String? ?? '';
+
+    Logger.info(
+      'BleService: photo_request received from '
+          '${fromPeerId.substring(0, min(8, fromPeerId.length))}: $photoId',
+      'BLE',
+    );
+
+    _photoRequestReceivedController.add(ReceivedPhotoRequest(
+      fromPeerId: fromPeerId,
+      messageId: messageId,
+      photoId: photoId,
+      timestamp: DateTime.now(),
+    ));
+  }
+
   // ==================== Utilities ====================
 
   @override
@@ -2514,6 +2788,25 @@ class _IncomingPhotoTransfer {
   final String messageId;
   final int totalChunks;
   final int totalSize;
+  final BytesBuilder receivedData;
+  int receivedCount;
+}
+
+/// Tracks an incoming binary thumbnail transfer for the preview consent flow.
+class _IncomingThumbnailTransfer {
+  _IncomingThumbnailTransfer({
+    required this.messageId,
+    required this.photoId,
+    required this.originalSize,
+    required this.totalChunks,
+    required this.receivedData,
+    required this.receivedCount,
+  });
+
+  final String messageId;
+  final String photoId;
+  final int originalSize;
+  final int totalChunks;
   final BytesBuilder receivedData;
   int receivedCount;
 }
