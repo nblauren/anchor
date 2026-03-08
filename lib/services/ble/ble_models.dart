@@ -166,6 +166,10 @@ enum MessageType {
   photo,
   typing,
   read,
+  /// Small thumbnail + metadata sent before the receiver consents to the full photo.
+  photoPreview,
+  /// Receiver's consent request — triggers the sender to start the full transfer.
+  photoRequest,
 }
 
 /// Payload for sending a message
@@ -326,6 +330,61 @@ class AnchorDropReceived extends Equatable {
 
   @override
   List<Object?> get props => [fromPeerId, timestamp];
+}
+
+/// A photo preview received from a peer — thumbnail bytes + metadata.
+/// Full photo is NOT included; receiver must send a [ReceivedPhotoRequest]
+/// to trigger the actual transfer.
+class ReceivedPhotoPreview extends Equatable {
+  const ReceivedPhotoPreview({
+    required this.fromPeerId,
+    required this.messageId,
+    required this.photoId,
+    required this.thumbnailBytes,
+    required this.originalSize,
+    required this.timestamp,
+  });
+
+  final String fromPeerId;
+  /// Message ID for this preview packet (stored in DB).
+  final String messageId;
+  /// UUID shared between preview and the subsequent full-photo transfer.
+  final String photoId;
+  final Uint8List thumbnailBytes;
+  /// Original full-photo size in bytes (used for the "Photo (2.1 MB)" label).
+  final int originalSize;
+  final DateTime timestamp;
+
+  /// Formatted original size string (e.g. "2.1 MB").
+  String get formattedOriginalSize {
+    if (originalSize < 1024) return '$originalSize B';
+    if (originalSize < 1024 * 1024) {
+      return '${(originalSize / 1024).toStringAsFixed(1)} KB';
+    }
+    return '${(originalSize / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+
+  @override
+  List<Object?> get props =>
+      [fromPeerId, messageId, photoId, thumbnailBytes, originalSize, timestamp];
+}
+
+/// Consent message from receiver → sender: "please send me the full photo".
+class ReceivedPhotoRequest extends Equatable {
+  const ReceivedPhotoRequest({
+    required this.fromPeerId,
+    required this.messageId,
+    required this.photoId,
+    required this.timestamp,
+  });
+
+  final String fromPeerId;
+  final String messageId;
+  final String photoId;
+  final DateTime timestamp;
+
+  @override
+  List<Object?> get props => [fromPeerId, messageId, photoId, timestamp];
 }
 
 /// BLE error

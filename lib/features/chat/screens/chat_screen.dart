@@ -12,6 +12,7 @@ import '../bloc/chat_event.dart';
 import '../bloc/chat_state.dart';
 import '../widgets/message_bubble_widget.dart';
 
+
 /// Screen for individual chat conversation
 class ChatScreen extends StatefulWidget {
   const ChatScreen({
@@ -189,15 +190,49 @@ class _ChatScreenState extends State<ChatScreen> {
         imageQuality: 80,
       );
 
-      if (image != null && mounted) {
-        context.read<ChatBloc>().add(SendPhotoMessage(image.path));
+      if (image == null || !mounted) return;
+
+      // Warn if peer is far away — full photo download may be slow.
+      if (widget.isRelayedPeer) {
+        final proceed = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Move closer for best results'),
+            content: const Text(
+              'This person is reached via a relay hop. '
+              'A preview thumbnail will be sent now — '
+              'they can tap it to download the full photo once you\'re closer.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Send preview anyway'),
+              ),
+            ],
+          ),
+        );
+        if (proceed != true || !mounted) return;
       }
+
+      context.read<ChatBloc>().add(SendPhotoMessage(image.path));
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Failed to pick photo')),
       );
     }
+  }
+
+  void _requestFullPhoto(String messageId, String photoId, String peerId) {
+    context.read<ChatBloc>().add(RequestFullPhoto(
+          messageId: messageId,
+          photoId: photoId,
+          peerId: peerId,
+        ));
   }
 
   void _retryMessage(String messageId) {
@@ -366,6 +401,22 @@ class _ChatScreenState extends State<ChatScreen> {
                                 isSentByMe: isSentByMe,
                                 onRetry: () => _retryMessage(message.id),
                                 isRelayedPeer: widget.isRelayedPeer,
+                                transferInfo: state
+                                    .getTransferProgress(message.id),
+                                onRequestFullPhoto: isSentByMe
+                                    ? null
+                                    : (photoId) => _requestFullPhoto(
+                                          message.id,
+                                          photoId,
+                                          state.currentConversation!.peerId,
+                                        ),
+                                onCancelTransfer: state
+                                            .getTransferProgress(message.id) !=
+                                        null
+                                    ? () => context.read<ChatBloc>().add(
+                                          CancelPhotoTransfer(message.id),
+                                        )
+                                    : null,
                               ),
                             ],
                           );

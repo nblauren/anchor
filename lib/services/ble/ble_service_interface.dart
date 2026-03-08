@@ -82,6 +82,39 @@ abstract class BleServiceInterface {
   /// Returns true if transfer started successfully
   Future<bool> sendPhoto(String peerId, Uint8List photoData, String messageId);
 
+  /// Send a photo preview (thumbnail + metadata) to a peer.
+  ///
+  /// Phase 1 of the consent-based photo flow.  The receiver sees a small
+  /// thumbnail and chooses whether to download the full image.
+  ///
+  /// [photoId] is a UUID that links this preview to the subsequent
+  /// full-photo transfer triggered by [sendPhotoRequest].
+  /// [thumbnailBytes] must be a compressed JPEG ≤ 15 KB.
+  /// [originalSize] is the size of the BLE-compressed photo in bytes.
+  Future<bool> sendPhotoPreview({
+    required String peerId,
+    required String messageId,
+    required String photoId,
+    required Uint8List thumbnailBytes,
+    required int originalSize,
+  });
+
+  /// Send a photo-request ("consent") message from receiver to sender.
+  ///
+  /// Phase 2 of the consent-based photo flow.  The sender will respond by
+  /// starting the full binary photo transfer via [sendPhoto].
+  Future<bool> sendPhotoRequest({
+    required String peerId,
+    required String messageId,
+    required String photoId,
+  });
+
+  /// Stream of received photo previews (thumbnail + metadata).
+  Stream<ReceivedPhotoPreview> get photoPreviewReceivedStream;
+
+  /// Stream of received photo-requests (consent grants from receivers).
+  Stream<ReceivedPhotoRequest> get photoRequestReceivedStream;
+
   /// Fetch all full-size profile photo thumbnails from a peer on demand.
   ///
   /// Only works when the peer is in direct BLE range (connected via GATT).

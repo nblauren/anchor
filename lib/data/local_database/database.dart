@@ -15,6 +15,10 @@ part 'database.g.dart';
 enum MessageContentType {
   text,
   photo,
+  /// Thumbnail preview sent before receiver consents to the full download.
+  /// textContent stores JSON: {"photo_id":"<uuid>","original_size":<bytes>}
+  /// photoPath stores the local path to the saved thumbnail file.
+  photoPreview,
 }
 
 /// Message delivery status

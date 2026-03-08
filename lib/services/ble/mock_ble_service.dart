@@ -28,6 +28,10 @@ class MockBleService implements BleServiceInterface {
   final _photoProgressController = StreamController<PhotoTransferProgress>.broadcast();
   final _photoReceivedController = StreamController<ReceivedPhoto>.broadcast();
   final _anchorDropReceivedController = StreamController<AnchorDropReceived>.broadcast();
+  final _photoPreviewReceivedController =
+      StreamController<ReceivedPhotoPreview>.broadcast();
+  final _photoRequestReceivedController =
+      StreamController<ReceivedPhotoRequest>.broadcast();
 
   // Mock data
   final Map<String, DiscoveredPeer> _visiblePeers = {};
@@ -381,6 +385,50 @@ class MockBleService implements BleServiceInterface {
 
   @override
   Stream<ReceivedPhoto> get photoReceivedStream => _photoReceivedController.stream;
+
+  @override
+  Future<bool> sendPhotoPreview({
+    required String peerId,
+    required String messageId,
+    required String photoId,
+    required Uint8List thumbnailBytes,
+    required int originalSize,
+  }) async {
+    Logger.info(
+      'MockBleService: sendPhotoPreview $photoId (${thumbnailBytes.length}B)',
+      'BLE',
+    );
+    // Simulate sending and immediately fire a mock photo_request back
+    // so the UI flow can be tested end-to-end in the mock environment.
+    Timer(Duration(milliseconds: 1200 + _random.nextInt(800)), () {
+      _photoRequestReceivedController.add(ReceivedPhotoRequest(
+        fromPeerId: peerId,
+        messageId: _uuid.v4(),
+        photoId: photoId,
+        timestamp: DateTime.now(),
+      ));
+      Logger.info('MockBleService: Simulated photo_request for $photoId', 'BLE');
+    });
+    return true;
+  }
+
+  @override
+  Future<bool> sendPhotoRequest({
+    required String peerId,
+    required String messageId,
+    required String photoId,
+  }) async {
+    Logger.info('MockBleService: sendPhotoRequest $photoId', 'BLE');
+    return true;
+  }
+
+  @override
+  Stream<ReceivedPhotoPreview> get photoPreviewReceivedStream =>
+      _photoPreviewReceivedController.stream;
+
+  @override
+  Stream<ReceivedPhotoRequest> get photoRequestReceivedStream =>
+      _photoRequestReceivedController.stream;
 
   @override
   Future<bool> fetchFullProfilePhotos(String peerId) async {

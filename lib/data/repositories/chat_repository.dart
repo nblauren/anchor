@@ -258,6 +258,67 @@ class ChatRepository {
     );
   }
 
+  /// Persist a received photo preview message.
+  ///
+  /// [textContent] stores JSON-encoded metadata:
+  ///   {"photo_id":"<uuid>","original_size":<bytes>}
+  /// [thumbnailPath] is the relative path to the saved thumbnail file.
+  Future<MessageEntry> receivePhotoPreview({
+    required String conversationId,
+    required String senderId,
+    required String textContent,
+    required String thumbnailPath,
+  }) async {
+    final id = _uuid.v4();
+    final now = DateTime.now();
+
+    final entry = MessagesCompanion.insert(
+      id: id,
+      conversationId: conversationId,
+      senderId: senderId,
+      contentType: MessageContentType.photoPreview,
+      textContent: Value(textContent),
+      photoPath: Value(thumbnailPath),
+      status: MessageStatus.delivered,
+      createdAt: now,
+    );
+
+    await _db.into(_db.messages).insert(entry);
+    await touchConversation(conversationId);
+
+    return MessageEntry(
+      id: id,
+      conversationId: conversationId,
+      senderId: senderId,
+      contentType: MessageContentType.photoPreview,
+      textContent: textContent,
+      photoPath: thumbnailPath,
+      status: MessageStatus.delivered,
+      createdAt: now,
+    );
+  }
+
+  /// Upgrade a [photoPreview] message to a full [photo] message once the
+  /// receiver has downloaded the full photo.
+  ///
+  /// Updates the content type to [photo], replaces the thumbnail path with
+  /// the full-resolution photo path, and clears the metadata JSON.
+  Future<MessageEntry?> upgradePreviewToPhoto({
+    required String messageId,
+    required String fullPhotoPath,
+  }) async {
+    await (_db.update(_db.messages)..where((t) => t.id.equals(messageId)))
+        .write(MessagesCompanion(
+      contentType: const Value(MessageContentType.photo),
+      photoPath: Value(fullPhotoPath),
+      textContent: const Value(null),
+      status: const Value(MessageStatus.read),
+    ));
+
+    return (_db.select(_db.messages)..where((t) => t.id.equals(messageId)))
+        .getSingleOrNull();
+  }
+
   /// Update message status
   Future<void> updateMessageStatus(String id, MessageStatus status) async {
     await (_db.update(_db.messages)..where((t) => t.id.equals(id)))

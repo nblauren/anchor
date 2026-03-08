@@ -10,6 +10,20 @@ abstract class ChatEvent extends Equatable {
   List<Object?> get props => [];
 }
 
+/// Internal event: a downloaded full photo should replace a preview bubble.
+class PhotoPreviewUpgraded extends ChatEvent {
+  const PhotoPreviewUpgraded({
+    required this.previewMessageId,
+    required this.updatedMessage,
+  });
+
+  final String previewMessageId;
+  final MessageEntry updatedMessage;
+
+  @override
+  List<Object?> get props => [previewMessageId, updatedMessage];
+}
+
 /// Load all conversations
 class LoadConversations extends ChatEvent {
   const LoadConversations();
@@ -138,4 +152,53 @@ class PhotoTransferProgressUpdated extends ChatEvent {
 
   @override
   List<Object?> get props => [progress];
+}
+
+// ── Photo preview / consent flow ────────────────────────────────────────────
+
+/// BLE photo preview received from a peer (thumbnail + metadata).
+class PhotoPreviewReceived extends ChatEvent {
+  const PhotoPreviewReceived(this.preview);
+  final ble.ReceivedPhotoPreview preview;
+
+  @override
+  List<Object?> get props => [preview];
+}
+
+/// Receiver taps the thumbnail → sends a [photo_request] to the sender.
+///
+/// [messageId] is the DB ID of the [photoPreview] message bubble.
+/// [photoId]   is the UUID in the preview metadata.
+/// [peerId]    is the sender's peerId so we know where to send the request.
+class RequestFullPhoto extends ChatEvent {
+  const RequestFullPhoto({
+    required this.messageId,
+    required this.photoId,
+    required this.peerId,
+  });
+
+  final String messageId;
+  final String photoId;
+  final String peerId;
+
+  @override
+  List<Object?> get props => [messageId, photoId, peerId];
+}
+
+/// Sender received a consent [photo_request] from the receiver.
+class PhotoRequestReceived extends ChatEvent {
+  const PhotoRequestReceived(this.request);
+  final ble.ReceivedPhotoRequest request;
+
+  @override
+  List<Object?> get props => [request];
+}
+
+/// Cancel an in-progress incoming or outgoing photo transfer.
+class CancelPhotoTransfer extends ChatEvent {
+  const CancelPhotoTransfer(this.messageId);
+  final String messageId;
+
+  @override
+  List<Object?> get props => [messageId];
 }
