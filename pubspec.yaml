@@ -47,6 +47,14 @@ dev_dependencies:
   flutter_lints: ^3.0.1
   drift_dev: ^2.14.1
   build_runner: ^2.4.7
+  flutter_native_splash: ^2.4.7
+  flutter_launcher_icons: "^0.14.4"
 
 flutter:
   uses-material-design: true
+
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/anchor-dark-background.png"
+  min_sdk_android: 21
