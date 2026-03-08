@@ -7,6 +7,7 @@ import '../../../core/utils/logger.dart';
 import '../../../services/ble/ble.dart' as ble;
 import '../../../services/database_service.dart';
 import '../../../services/image_service.dart' show ImageService, resolvePhotoPath;
+import '../../../services/nsfw_detection_service.dart';
 import 'profile_event.dart';
 import 'profile_state.dart';
 
@@ -15,9 +16,11 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
     required DatabaseService databaseService,
     required ImageService imageService,
     required ble.BleServiceInterface bleService,
+    required NsfwDetectionService nsfwDetectionService,
   })  : _databaseService = databaseService,
         _imageService = imageService,
         _bleService = bleService,
+        _nsfwService = nsfwDetectionService,
         super(const ProfileState()) {
     on<LoadProfile>(_onLoadProfile);
     on<CreateProfile>(_onCreateProfile);
@@ -30,11 +33,42 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
     on<PickPhotoFromCamera>(_onPickPhotoFromCamera);
     on<BroadcastProfile>(_onBroadcastProfile);
     on<ClearError>(_onClearError);
+    on<DismissNsfwWarning>(_onDismissNsfwWarning);
   }
 
   final DatabaseService _databaseService;
   final ImageService _imageService;
   final ble.BleServiceInterface _bleService;
+  final NsfwDetectionService _nsfwService;
+
+  /// Runs NSFW check on [absolutePath]. If the photo fails the check, emits
+  /// [ProfileState.nsfwBlockedPhotoId] = [photoId] and returns false.
+  /// Returns true if the photo is safe to broadcast as primary.
+  Future<bool> _passesNsfwCheck(
+    String absolutePath,
+    String photoId,
+    Emitter<ProfileState> emit,
+  ) async {
+    try {
+      final result = await _nsfwService.analyzeImage(absolutePath);
+      if (!result.isSafe) {
+        Logger.warning(
+          'NSFW check blocked photo $photoId (confidence=${result.confidence})',
+          'ProfileBloc',
+        );
+        emit(state.copyWith(
+          isProcessingPhoto: false,
+          nsfwBlockedPhotoId: photoId,
+        ));
+        return false;
+      }
+      return true;
+    } catch (e) {
+      // On detection error, allow the photo — don't block on service failure.
+      Logger.error('NSFW detection failed, allowing photo', e, null, 'ProfileBloc');
+      return true;
+    }
+  }
 
   Future<void> _onLoadProfile(
     LoadProfile event,
@@ -172,8 +206,20 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
       // Process image (compress + generate thumbnail)
       final processed = await _imageService.processImage(event.imageFile);
 
+      // This will be the first (primary) photo — run NSFW check before broadcasting.
+      final willBePrimary = state.photos.isEmpty;
+      bool isPrimary = willBePrimary;
+
+      if (willBePrimary) {
+        final absolutePath = await resolvePhotoPath(processed.photoPath) ?? processed.photoPath;
+        final safe = await _passesNsfwCheck(absolutePath, 'new_primary', emit);
+        if (!safe) {
+          // Save as non-primary secondary so the photo is not lost.
+          isPrimary = false;
+        }
+      }
+
       // Save to database
-      final isPrimary = state.photos.isEmpty;
       final photo = await _databaseService.profileRepository.addPhoto(
         userId: state.profileId!,
         photoPath: processed.photoPath,
@@ -188,12 +234,17 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
         status: ProfileStatus.loaded,
         photos: updatedPhotos,
         isProcessingPhoto: false,
+        // Preserve nsfwBlockedPhotoId if it was set in _passesNsfwCheck above;
+        // use the real DB photo.id now that we have it.
+        nsfwBlockedPhotoId: (!isPrimary && willBePrimary) ? photo.id : null,
       ));
 
-      Logger.info('Photo added: ${photo.id}', 'ProfileBloc');
+      Logger.info('Photo added: ${photo.id} (primary=$isPrimary)', 'ProfileBloc');
 
-      // Rebroadcast so other devices see the updated profile photo
-      add(const BroadcastProfile());
+      // Only rebroadcast when the new photo is actually primary.
+      if (isPrimary) {
+        add(const BroadcastProfile());
+      }
     } catch (e) {
       Logger.error('Failed to add photo', e, null, 'ProfileBloc');
       emit(state.copyWith(
@@ -245,18 +296,51 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
     if (state.profileId == null) return;
 
     try {
+      // Detect whether the effective primary photo is changing.
+      final currentFirstId = state.sortedPhotos.isNotEmpty ? state.sortedPhotos.first.id : null;
+      final newFirstId = event.photoIds.isNotEmpty ? event.photoIds.first : null;
+      final primaryChanging = newFirstId != null && newFirstId != currentFirstId;
+
+      if (primaryChanging) {
+        emit(state.copyWith(isProcessingPhoto: true));
+
+        // Find the photo object for the new position-0 entry.
+        final newPrimaryPhoto = state.photos.firstWhere((p) => p.id == newFirstId);
+        final absolutePath =
+            await resolvePhotoPath(newPrimaryPhoto.photoPath) ?? newPrimaryPhoto.photoPath;
+
+        final safe = await _passesNsfwCheck(absolutePath, newFirstId, emit);
+        if (!safe) {
+          // _passesNsfwCheck already emitted the blocked state; abort reorder.
+          return;
+        }
+
+        emit(state.copyWith(isProcessingPhoto: false));
+      }
+
       await _databaseService.profileRepository.reorderPhotos(
         state.profileId!,
         event.photoIds,
       );
 
-      // Reload photos to get updated order
+      // Sync the isPrimary DB flag to match the new order.
+      if (newFirstId != null) {
+        await _databaseService.profileRepository.setPrimaryPhoto(
+          state.profileId!,
+          newFirstId,
+        );
+      }
+
+      // Reload photos to get updated order and primary flag.
       final photos = await _databaseService.profileRepository.getPhotos(state.profileId!);
       final photoList = photos.map((p) => ProfilePhoto.fromEntry(p)).toList();
 
       emit(state.copyWith(photos: photoList));
 
       Logger.info('Photos reordered', 'ProfileBloc');
+
+      // Rebroadcast whenever order changes (new primary thumbnail may differ).
+      add(const BroadcastProfile());
     } catch (e) {
       Logger.error('Failed to reorder photos', e, null, 'ProfileBloc');
       emit(state.copyWith(errorMessage: 'Failed to reorder photos'));
@@ -269,7 +353,23 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
   ) async {
     if (state.profileId == null) return;
 
+    // No-op if already primary.
+    if (state.sortedPhotos.isNotEmpty && state.sortedPhotos.first.id == event.photoId) {
+      return;
+    }
+
+    emit(state.copyWith(isProcessingPhoto: true));
+
     try {
+      final photo = state.photos.firstWhere((p) => p.id == event.photoId);
+      final absolutePath = await resolvePhotoPath(photo.photoPath) ?? photo.photoPath;
+
+      final safe = await _passesNsfwCheck(absolutePath, event.photoId, emit);
+      if (!safe) {
+        // _passesNsfwCheck already emitted the blocked state.
+        return;
+      }
+
       await _databaseService.profileRepository.setPrimaryPhoto(
         state.profileId!,
         event.photoId,
@@ -279,7 +379,7 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
       final photos = await _databaseService.profileRepository.getPhotos(state.profileId!);
       final photoList = photos.map((p) => ProfilePhoto.fromEntry(p)).toList();
 
-      emit(state.copyWith(photos: photoList));
+      emit(state.copyWith(photos: photoList, isProcessingPhoto: false));
 
       Logger.info('Primary photo set: ${event.photoId}', 'ProfileBloc');
 
@@ -287,7 +387,10 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
       add(const BroadcastProfile());
     } catch (e) {
       Logger.error('Failed to set primary photo', e, null, 'ProfileBloc');
-      emit(state.copyWith(errorMessage: 'Failed to set primary photo'));
+      emit(state.copyWith(
+        isProcessingPhoto: false,
+        errorMessage: 'Failed to set primary photo',
+      ));
     }
   }
 
@@ -382,5 +485,12 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
     Emitter<ProfileState> emit,
   ) {
     emit(state.copyWith(errorMessage: null));
+  }
+
+  void _onDismissNsfwWarning(
+    DismissNsfwWarning event,
+    Emitter<ProfileState> emit,
+  ) {
+    emit(state.copyWith(clearNsfwBlock: true));
   }
 }

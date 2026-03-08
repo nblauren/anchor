@@ -52,6 +52,7 @@ class ProfileState extends Equatable {
     this.photos = const [],
     this.errorMessage,
     this.isProcessingPhoto = false,
+    this.nsfwBlockedPhotoId,
   });
 
   final ProfileStatus status;
@@ -62,6 +63,10 @@ class ProfileState extends Equatable {
   final List<ProfilePhoto> photos;
   final String? errorMessage;
   final bool isProcessingPhoto;
+  /// Non-null when a photo failed the sensitive-content check.
+  /// Contains the photo ID that was blocked so the UI can show a dialog and
+  /// optionally revert/highlight the offending photo.
+  final String? nsfwBlockedPhotoId;
 
   /// Whether a profile exists
   bool get hasProfile => profileId != null;
@@ -103,6 +108,8 @@ class ProfileState extends Equatable {
     List<ProfilePhoto>? photos,
     String? errorMessage,
     bool? isProcessingPhoto,
+    String? nsfwBlockedPhotoId,
+    bool clearNsfwBlock = false,
   }) {
     return ProfileState(
       status: status ?? this.status,
@@ -113,6 +120,8 @@ class ProfileState extends Equatable {
       photos: photos ?? this.photos,
       errorMessage: errorMessage,
       isProcessingPhoto: isProcessingPhoto ?? this.isProcessingPhoto,
+      nsfwBlockedPhotoId:
+          clearNsfwBlock ? null : (nsfwBlockedPhotoId ?? this.nsfwBlockedPhotoId),
     );
   }
 
@@ -126,5 +135,6 @@ class ProfileState extends Equatable {
         photos,
         errorMessage,
         isProcessingPhoto,
+        nsfwBlockedPhotoId,
       ];
 }
