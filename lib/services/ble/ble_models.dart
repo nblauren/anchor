@@ -26,7 +26,15 @@ enum BleStatus {
   error,
 }
 
-/// Payload for broadcasting own profile
+/// Profile payload broadcast over BLE (written to fff1 + fff2 characteristics).
+///
+/// Only compact, ID-mapped fields are included in the BLE broadcast to keep
+/// the payload small and avoid transmitting arbitrary free text over the mesh.
+/// [bio] is carried for completeness but is intentionally omitted from the
+/// JSON serialised to fff1; extended profile data is fetched on-demand via fff4.
+///
+/// [thumbnailBytes] is the primary photo thumbnail (≤30 KB JPEG), written to
+/// fff2. It must pass NSFW detection before being set here.
 class BroadcastPayload extends Equatable {
   const BroadcastPayload({
     required this.userId,
@@ -84,7 +92,15 @@ class BroadcastPayload extends Equatable {
   List<Object?> get props => [userId, name, age, bio, position, interests, thumbnailBytes, thumbnailsList];
 }
 
-/// Discovered peer from BLE scan
+/// A peer discovered via BLE scan and profile read (fff1 + fff2).
+///
+/// [isRelayed] is true when this peer was discovered through a mesh relay
+/// node rather than a direct GATT connection. Relayed peers cannot receive
+/// full photo transfers; only direct peers can.
+///
+/// [rssi] is the raw Received Signal Strength Indicator in dBm.
+/// Negative values closer to 0 indicate a stronger signal (e.g. -40 dBm is
+/// closer than -80 dBm). Used to sort the discovery grid by proximity.
 class DiscoveredPeer extends Equatable {
   const DiscoveredPeer({
     required this.peerId,

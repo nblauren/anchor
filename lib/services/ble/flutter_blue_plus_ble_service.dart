@@ -14,15 +14,29 @@ import 'ble_models.dart';
 import 'ble_service_interface.dart';
 import 'photo_chunker.dart';
 
-/// BLE service using `bluetooth_low_energy` which provides both Central
-/// (scanning/connecting) and Peripheral (GATT server/advertising) in one
-/// package — enabling real peer-to-peer discovery AND messaging on iOS & Android.
+/// Production [BleServiceInterface] implementation using the
+/// `bluetooth_low_energy` package.
 ///
-/// Each device:
-///   1. Runs a GATT server with profile metadata + messaging characteristics.
-///   2. Advertises the Anchor service UUID + local name.
-///   3. Scans for other Anchor devices.
-///   4. Connects to discovered peers to read profile / send messages.
+/// Note: this file is named `flutter_blue_plus_ble_service.dart` for
+/// historical reasons; it no longer uses `flutter_blue_plus`.
+///
+/// The `bluetooth_low_energy` package provides [CentralManager] (scan +
+/// connect) and [PeripheralManager] (GATT server + advertise) in a single
+/// API, enabling true peer-to-peer BLE on both iOS and Android without
+/// platform channels.
+///
+/// Each device simultaneously:
+///   1. Runs a GATT server exposing:
+///        - fff1 (READ/NOTIFY) — profile metadata (name, age, positionId, interestIds)
+///        - fff2 (READ/NOTIFY) — primary thumbnail JPEG (≤30 KB, NSFW-screened)
+///        - fff3 (WRITE/NOTIFY) — messaging (text, photo consent, anchor drop)
+///        - fff4 (READ) — full photo set, served on-demand when a central subscribes
+///   2. Advertises the Anchor service UUID (fff0) + local name.
+///   3. Scans for other Anchor devices and connects to read their profile.
+///
+/// Mesh relay: text messages with TTL > 0 are forwarded to all currently-
+/// connected peers (excluding sender). Photos are never relayed. There is no
+/// store-and-forward: relay is best-effort, to currently-connected peers only.
 class FlutterBluePlusBleService implements BleServiceInterface {
   FlutterBluePlusBleService({
     required this.config,

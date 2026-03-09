@@ -2,6 +2,8 @@
 
 Thank you for your interest in contributing to Anchor! This document provides guidelines and best practices for contributing to the project.
 
+> **March 2026 note**: Anchor now uses the `bluetooth_low_energy` package (central + peripheral in one API) — not `flutter_blue_plus`. Please read the BLE section below before working on BLE features.
+
 ## Table of Contents
 
 - [Code of Conduct](#code-of-conduct)
@@ -53,11 +55,11 @@ Violations of the Code of Conduct should be reported to [your.email@example.com]
 
 Before contributing, ensure you have:
 
-- **Flutter SDK 3.10.0 or higher** installed
+- **Flutter SDK 3.10.0 or higher** installed (see `.fvmrc` for pinned FVM version)
 - **Xcode 14+** (for iOS development)
 - **Android Studio** (for Android development)
 - **Git** for version control
-- **Physical devices** for BLE testing (simulators won't work)
+- **Physical devices** for BLE testing (simulators and emulators cannot use Bluetooth hardware)
 
 ### Fork and Clone
 
@@ -548,16 +550,28 @@ Any other relevant information.
 ### BLE Development
 
 **If you're working on BLE features**:
-- Test on **both iOS and Android** (BLE behaves differently)
-- Use **physical devices** (BLE doesn't work on simulators)
-- Test with **multiple devices** (2-5 devices in range)
-- Monitor **battery usage** (use Battery Profiler)
-- Consider **cruise ship environment** (metal interference, density, movement)
+- Anchor uses **`bluetooth_low_energy`** (not `flutter_blue_plus`); the production file is `flutter_blue_plus_ble_service.dart` for historical reasons
+- Both `CentralManager` (scanning/connecting) and `PeripheralManager` (GATT server/advertising) run simultaneously
+- Test on **both iOS and Android** (BLE behaves very differently between platforms)
+- Use **physical devices only** (BLE does not work on simulators/emulators)
+- Test with **multiple devices** (2–5 devices in range)
+- Monitor **battery usage** (Battery Profiler / DevTools)
+- Consider the **cruise ship environment**: metal interference, 50–100+ nearby peers, frequent movement
+
+**Key BLE constraints to preserve**:
+- Primary thumbnail: ≤30 KB, NSFW-screened before broadcast
+- Mesh relay: TTL-based flooding to currently-connected peers only; no store-and-forward
+- Photo transfer: direct peer-to-peer only; never relayed; requires receiver consent first
+- Position and interests: integer IDs only, never free text in the broadcast payload
 
 **Key files**:
-- `lib/services/ble/flutter_blue_plus_ble_service.dart`
-- `lib/services/ble/ble_models.dart`
-- `lib/services/ble/photo_chunker.dart`
+- `lib/services/ble/flutter_blue_plus_ble_service.dart` — production BLE implementation
+- `lib/services/ble/ble_service_interface.dart` — abstract contract
+- `lib/services/ble/ble_models.dart` — BLE data types
+- `lib/services/ble/photo_chunker.dart` — photo chunking/reassembly
+- `lib/services/ble/ble_config.dart` — runtime BLE configuration
+
+See [BLE_IMPLEMENTATION.md](BLE_IMPLEMENTATION.md) for protocol details and testing guidance.
 
 ### Database Development
 
@@ -589,7 +603,7 @@ Any other relevant information.
 
 **Stuck on something?**
 
-1. **Check documentation** - README, ARCHITECTURE, this file
+1. **Check documentation** - README, ARCHITECTURE, BLE_IMPLEMENTATION, this file
 2. **Search issues** - Someone may have asked already
 3. **Ask in Discussions** - GitHub Discussions for questions
 4. **Ask maintainers** - Comment on related issue or PR
