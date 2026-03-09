@@ -2,8 +2,16 @@ import 'dart:typed_data';
 
 import 'ble_models.dart';
 
-/// Abstract BLE service interface for peer-to-peer communication
-/// Implemented by MockBleService (testing) and FlutterBluePlusBleService (production)
+/// Abstract BLE service interface for offline peer-to-peer communication.
+///
+/// Implemented by:
+///   - [FlutterBluePlusBleService] — production, uses the `bluetooth_low_energy`
+///     package (central + peripheral in one API, supports both iOS and Android).
+///   - [MockBleService] — test double for unit/widget tests without hardware.
+///
+/// The production service runs [CentralManager] (scan/connect) and
+/// [PeripheralManager] (GATT server/advertise) simultaneously, enabling true
+/// two-way peer discovery without a central coordinator.
 abstract class BleServiceInterface {
   // ==================== Lifecycle ====================
 
@@ -55,7 +63,8 @@ abstract class BleServiceInterface {
   /// Stream of discovered peers
   Stream<DiscoveredPeer> get peerDiscoveredStream;
 
-  /// Stream of lost peer IDs (not seen for a while)
+  /// Stream of peer IDs that have not been seen for [BleConfig.peerLostTimeout]
+  /// (default 2 minutes). The UI should mark these peers as out-of-range.
   Stream<String> get peerLostStream;
 
   /// Start scanning for nearby peers
@@ -69,8 +78,11 @@ abstract class BleServiceInterface {
 
   // ==================== Messaging ====================
 
-  /// Send a message to a specific peer
-  /// Returns true if message was queued successfully
+  /// Send a message to a specific peer.
+  ///
+  /// Writes a JSON-encoded [MessagePayload] to the fff3 GATT characteristic.
+  /// Returns true if the write was acknowledged. There is no store-and-forward
+  /// in v1: if the peer is out of range the message is not queued.
   Future<bool> sendMessage(String peerId, MessagePayload payload);
 
   /// Stream of received messages

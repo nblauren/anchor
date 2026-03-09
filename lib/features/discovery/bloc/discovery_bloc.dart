@@ -28,6 +28,18 @@ class _ClearAnchorDropNotification extends DiscoveryEvent {
   List<Object?> get props => [];
 }
 
+/// Manages the peer discovery grid.
+///
+/// Listens to [BleServiceInterface.peerDiscoveredStream] and
+/// [BleServiceInterface.peerLostStream] to keep the grid up-to-date.
+/// All filtering (position, interests) is done locally — no network required.
+/// Peers are sorted by RSSI (closest first) and state updates are debounced
+/// to avoid excessive rebuilds in high-density environments.
+///
+/// Also handles:
+///   - Blocking/unblocking peers (stored in [PeerRepository])
+///   - Drop Anchor ⚓ signals (sent/received via [BleServiceInterface])
+///   - Full profile photo fetch (on-demand via fff4 characteristic)
 class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
   DiscoveryBloc({
     required PeerRepository peerRepository,

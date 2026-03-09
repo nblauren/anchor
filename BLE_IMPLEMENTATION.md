@@ -1,0 +1,318 @@
+# Anchor — BLE Implementation Guide
+
+**Last Updated**: March 2026
+
+> **Historical note**: This file was previously named `FLUTTER_BLUE_PLUS_IMPLEMENTATION.md`. Anchor no longer uses `flutter_blue_plus`; the production BLE service uses the **`bluetooth_low_energy`** package, which provides both `CentralManager` (scan/connect) and `PeripheralManager` (GATT server/advertise) in a single API.
+
+---
+
+## Overview
+
+Anchor's BLE layer enables fully offline peer-to-peer profile discovery, messaging, and photo sharing. Every device acts simultaneously as a **peripheral** (advertising its profile, serving a GATT server) and a **central** (scanning for and connecting to other Anchor devices).
+
+**Package**: `bluetooth_low_energy: ^6.2.1`
+
+---
+
+## What Is Implemented
+
+### Core BLE Service (`FlutterBluePlusBleService`)
+
+Despite the historical filename, this class uses `bluetooth_low_energy` internally.
+
+| Capability | Status |
+|---|---|
+| Adapter state monitoring (on/off/unavailable) | ✅ |
+| Runtime permission handling (Android 12+, iOS) | ✅ |
+| Peripheral (GATT server + advertising) | ✅ |
+| Central (scanning + GATT connect) | ✅ |
+| Profile metadata read (fff1) | ✅ |
+| Primary thumbnail broadcast/read (fff2, ≤30 KB) | ✅ |
+| Text messaging over GATT (fff3) | ✅ |
+| Full photo characteristic (fff4) | ✅ (served on-demand) |
+| Photo consent flow (preview → request → transfer) | ✅ |
+| NSFW detection before broadcast | ✅ |
+| Connection pooling (max 5 concurrent) | ✅ |
+| Adaptive scan intervals (normal / battery saver / high density) | ✅ |
+| Peer timeout and `peerLost` events | ✅ |
+| TTL-based mesh relay (text messages only) | ✅ |
+| Drop Anchor signal (fff3 message type) | ✅ (BLE layer; UI completion pending) |
+| Battery saver mode | ✅ |
+
+---
+
+## Service and Characteristic UUIDs
+
+```
+Main Service:           0000fff0-0000-1000-8000-00805f9b34fb
+
+fff1  Profile metadata    READ, NOTIFY
+      Payload: JSON { userId, name, age, positionId, interestIds[], hopCount }
+
+fff2  Primary thumbnail   READ, NOTIFY
+      Payload: raw JPEG bytes, capped at 30 KB
+      Note: NSFW-screened locally before being written here
+
+fff3  Messaging           WRITE, NOTIFY
+      Payload: JSON { messageId, senderId, timestamp, type, content, ttl? }
+      Message types: text | photo | typing | read | photoPreview | photoRequest | anchorDrop
+
+fff4  Full photo set      READ
+      Payload: profile photo thumbnails concatenated; served on-demand when central subscribes
+```
+
+---
+
+## Platform Configuration
+
+### iOS (`ios/Runner/Info.plist`)
+
+- `NSBluetoothAlwaysUsageDescription` ✅
+- `NSBluetoothPeripheralUsageDescription` ✅
+- `NSLocationWhenInUseUsageDescription` ✅ (required by iOS even though GPS is not used)
+- `UIBackgroundModes`: `bluetooth-central`, `bluetooth-peripheral` ✅
+
+### Android (`AndroidManifest.xml`)
+
+- `BLUETOOTH_SCAN`, `BLUETOOTH_CONNECT`, `BLUETOOTH_ADVERTISE` (Android 12+) ✅
+- `ACCESS_FINE_LOCATION` ✅
+- `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_CONNECTED_DEVICE` ✅
+- `android.hardware.bluetooth_le` (required feature) ✅
+
+---
+
+## Discovery Protocol
+
+```
+Device A (Central)                      Device B (Peripheral)
+      |                                        |
+      |─── scan for fff0 UUID ────────────────>|
+      |<── advertisement (fff0 + local name) ──|
+      |─── GATT connect ──────────────────────>|
+      |─── read fff1 ─────────────────────────>|
+      |<── { userId, name, age, positionId,    |
+      |      interestIds, hopCount } ──────────|
+      |─── read fff2 ─────────────────────────>|
+      |<── JPEG bytes (≤30 KB) ────────────────|
+      |                                        |
+      |  emit DiscoveredPeer                   |
+      |  DiscoveryBloc updates grid            |
+      |                                        |
+      |─── disconnect (idle ≥60 s) ───────────>|
+```
+
+---
+
+## Messaging Protocol
+
+Messages are JSON-encoded and written to fff3. The receiver's GATT server notifies subscribed centrals.
+
+```json
+{
+  "messageId": "uuid",
+  "senderId": "uuid",
+  "timestamp": "2026-03-09T10:30:00Z",
+  "type": "text",
+  "content": "Hello!",
+  "ttl": 3
+}
+```
+
+**Mesh relay**: If `ttl > 0`, a receiving node that is not the intended recipient will decrement TTL and forward to all currently-connected peers (excluding the sender). Messages already seen (by `messageId`) are dropped. This is **not** store-and-forward: relay happens only to currently-connected peers.
+
+---
+
+## Photo Consent Flow
+
+```
+1. Sender selects photo in UI
+   └─> ImageService compresses to target size, generates thumbnail
+   └─> ChatBloc emits SendPhotoMessage
+   └─> BLE: write photoPreview to fff3 { messageId, thumbnailBytes, type:"photoPreview" }
+
+2. Receiver's GATT server receives photoPreview
+   └─> ChatBloc emits PhotoPreviewReceived
+   └─> UI shows preview with Accept / Decline
+
+3. Receiver taps Accept
+   └─> BLE: write photoRequest to fff3 { messageId, accepted:true, type:"photoRequest" }
+
+4. Sender receives photoRequest { accepted:true }
+   └─> Full photo transfer begins over fff3/fff4 in MTU-sized chunks
+   └─> Progress reported via photoProgressStream (0.0 → 1.0)
+
+5. Transfer complete
+   └─> ChatBloc emits PhotoPreviewUpgraded; UI shows full photo
+```
+
+**Constraints**:
+- Full photo transfer is **direct peer-to-peer only** — never relayed through intermediate nodes
+- Compressed target: ≤200 KB JPEG
+- Photo can be cancelled mid-transfer by either party
+
+---
+
+## Connection Configuration (`BleConfig`)
+
+| Parameter | Default | Notes |
+|---|---|---|
+| `useMockService` | `false` | Set `true` for UI-only / unit tests |
+| `enableMeshRelay` | `true` | TTL-based relay of text messages |
+| `meshTtl` | 3 | Max relay hops |
+| `photoChunkSize` | 4096 B | Adjusted per negotiated MTU |
+| `messageTimeout` | 30 s | GATT write timeout |
+| `peerLostTimeout` | 2 min | Emit peerLost after this idle time |
+| `maxThumbnailSize` | 30 KB | fff2 cap |
+| `maxPhotoSize` | 500 KB | Full photo cap before compression |
+| `highDensityPeerThreshold` | 15 | Peers visible before high-density mode |
+| `highDensityScanPause` | 12 s | Scan pause in high-density mode |
+| `normalScanPause` | 15 s | Scan pause in normal mode |
+| `highDensityRelayProbability` | 0.65 | Relay probability in high-density |
+| `batterySaverScanPause` | 30 s | Scan pause in battery saver mode |
+
+---
+
+## Testing Requirements
+
+### Prerequisites
+
+- Physical devices only (BLE is unavailable in simulators/emulators)
+- Minimum: 2 devices
+- Recommended: 3+ devices for mesh relay testing
+
+### Test Scenarios
+
+#### Basic Discovery
+1. Launch app on 2 devices; grant all permissions
+2. **Expected**: Both devices appear in each other's discovery grid within 10 seconds
+3. **Expected**: Nickname, age, position, interests, thumbnail all visible
+4. **Expected**: RSSI signal strength displayed; grid sorted by proximity
+
+#### Text Messaging
+1. Discover peer → open chat
+2. Send a text message
+3. **Expected**: Delivered in ≤3 seconds
+4. **Expected**: Message status transitions: sending → delivered
+
+#### Photo Consent Flow
+1. In chat, tap the photo button and select a photo
+2. **Expected**: Receiver sees thumbnail preview with Accept / Decline
+3. Accept
+4. **Expected**: Transfer progress shown; full photo appears on completion
+
+#### NSFW Detection
+1. Set a photo with explicit content as the primary profile photo
+2. **Expected**: Photo is blocked before being broadcast; UI warns user to choose a different photo
+
+#### Mesh Relay (requires 3 devices)
+1. Device A and Device C cannot directly reach each other; Device B is in range of both
+2. Device A sends a message to Device C
+3. **Expected**: Message relayed through Device B (TTL decremented); Device C receives it
+
+#### Connection Loss
+1. Connect and send a message; then turn off Bluetooth on one device
+2. **Expected**: `peerLost` event emitted after 2-minute timeout; peer removed from grid
+3. Turn Bluetooth back on
+4. **Expected**: Devices rediscover each other within one scan cycle
+
+#### Battery Saver Mode
+1. Enable battery saver in Settings
+2. Check debug logs
+3. **Expected**: Scan duration 2 s, pause 30 s confirmed in logs
+
+#### Permissions Denied
+1. Fresh install; deny Bluetooth permission when prompted
+2. **Expected**: Clear error message shown
+3. **Expected**: "Open Settings" deep-link functions correctly
+4. Grant permission in device Settings
+5. **Expected**: App recovers without requiring restart
+
+#### Multiple Peers (5+)
+1. Launch app on 5+ devices in the same room
+2. **Expected**: All discover each other; no crashes; connection pool limit (5) respected; LRU eviction observed in logs
+
+---
+
+## Known Limitations
+
+| Limitation | Detail |
+|---|---|
+| No store-and-forward | Direct messages sent while peer is out of range are not queued |
+| Photo relay | Full photos are direct only; not relayed through mesh |
+| iOS background | Discovery stops when app is backgrounded (Apple restriction); disclosed in onboarding |
+| iOS connection limit | ~8–10 concurrent BLE connections |
+| iOS MTU | Typically 185 bytes (affects chunk size and throughput) |
+| Android MTU | Negotiable up to 512 bytes |
+
+---
+
+## Performance Expectations
+
+| Metric | Target |
+|---|---|
+| Discovery time | ≤10 seconds from scan start |
+| Text message latency | ≤3 seconds when in range |
+| GATT connection setup | 3–5 seconds |
+| Photo transfer (200 KB) | 30–60 seconds |
+| Battery drain | <10% per hour of active use (target; needs real-device profiling) |
+| Memory (10+ peers) | Stable; no observable leak over 1 hour session |
+
+---
+
+## Code Locations
+
+| Component | File |
+|---|---|
+| Production BLE service | `lib/services/ble/flutter_blue_plus_ble_service.dart` |
+| BLE interface | `lib/services/ble/ble_service_interface.dart` |
+| BLE data models | `lib/services/ble/ble_models.dart` |
+| Configuration | `lib/services/ble/ble_config.dart` |
+| Photo chunker | `lib/services/ble/photo_chunker.dart` |
+| Adapter state bloc | `lib/services/ble/ble_status_bloc.dart` |
+| Service lifecycle bloc | `lib/services/ble/ble_connection_bloc.dart` |
+| Mock service (tests) | `lib/services/ble/mock_ble_service.dart` |
+| Dependency wiring | `lib/injection.dart` |
+
+---
+
+## Debugging
+
+Enable verbose logging in debug builds by checking `Logger` output tagged `'BLE'`. Key log messages:
+
+| Log message | Meaning |
+|---|---|
+| `Discovered device …` | Scan result received |
+| `Connected to …` | GATT connection established |
+| `Discovered peer …` | Profile + thumbnail read successfully |
+| `Message sent successfully` | fff3 write acknowledged |
+| `Relaying message TTL=…` | Mesh relay hop in progress |
+| `Lost peer …` | Timeout; `peerLost` emitted |
+| `NSFW blocked …` | Photo failed NSFW check; not broadcast |
+| `Photo preview sent` | Consent flow step 1 complete |
+| `Photo request accepted` | Consent flow step 2 complete; transfer starting |
+
+**Debug Menu**: Settings → Debug Menu shows live BLE status, peer list, log viewer, and mock peer injection.
+
+---
+
+## Cruise Ship Environment Considerations
+
+| Challenge | Mitigation |
+|---|---|
+| Metal bulkheads degrade BLE signal | Shorter retry intervals; educate users about range limits |
+| 50–100+ passengers in BLE range | Adaptive scanning; high-density relay throttling |
+| Frequent movement / connection churn | Short peer-lost timeout (2 min) for fast re-discovery |
+| Battery life critical (no charging mid-cruise) | Battery saver mode; aggressive connection pooling |
+
+---
+
+## Common Troubleshooting
+
+| Symptom | Check |
+|---|---|
+| "Bluetooth is not available" | Device doesn't support BLE (very rare) or hardware fault |
+| "Permission denied" | User denied permission; guide to Settings → App → Permissions |
+| "Connection timeout" | Peer locked/asleep, too far away, or RF interference |
+| "No peers discovered" | Both devices scanning only with no peripheral — check advertising is running; check iOS foreground requirement |
+| "Message not delivered" | Peer disconnected before write completed; no store-and-forward in v1 |
+| Photo transfer hangs | Check consent was accepted; verify connection is still active; cancel and retry |

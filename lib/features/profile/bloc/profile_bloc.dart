@@ -14,6 +14,20 @@ import '../../../services/nsfw_detection_service.dart';
 import 'profile_event.dart';
 import 'profile_state.dart';
 
+/// Manages the device owner's profile.
+///
+/// Responsibilities:
+///   - Load, create, and update the local profile (stored via Drift).
+///   - Photo management: add, remove, reorder, set primary (up to 4 photos).
+///   - NSFW gate: the primary thumbnail is screened by [NsfwDetectionService]
+///     before being allowed into the BLE broadcast. If blocked, the state
+///     carries [ProfileState.nsfwBlockedPhotoId] and the photo is never
+///     written to the fff2 characteristic.
+///   - Position and interests are stored as integer IDs (see
+///     [ProfileConstants]) — never as free text — to keep the BLE payload
+///     compact and prevent injection of arbitrary strings into the mesh.
+///   - Triggers [BleServiceInterface.broadcastProfile] whenever the profile
+///     is saved or the primary photo changes.
 class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
   ProfileBloc({
     required DatabaseService databaseService,

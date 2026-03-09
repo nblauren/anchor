@@ -1,4 +1,12 @@
-/// Configuration for BLE service
+/// Runtime configuration for the Anchor BLE service.
+///
+/// Shared between [FlutterBluePlusBleService] (production, uses
+/// `bluetooth_low_energy`) and [MockBleService] (tests).
+///
+/// Use [BleConfig.development] in unit/widget tests and
+/// [BleConfig.production] for release builds. All fields have sensible
+/// defaults tuned for the cruise-ship environment (high peer density,
+/// battery sensitivity, metal interference).
 class BleConfig {
   const BleConfig({
     this.useMockService = false,
@@ -17,47 +25,58 @@ class BleConfig {
     this.highDensityRelayProbability = 0.65,
   });
 
-  /// Whether to use MockBleService (for testing) or real BLE service
+  /// Use [MockBleService] instead of the real BLE stack.
+  /// Set to true in unit/widget tests; always false in production.
   final bool useMockService;
 
-  /// Enable mesh relay (messages hop through intermediate devices)
+  /// Enable TTL-based mesh relay: text messages are forwarded through
+  /// currently-connected intermediate peers. Photos are never relayed.
   final bool enableMeshRelay;
 
-  /// Time-to-live for relay messages (number of hops)
+  /// Maximum hops a relayed message may travel (decremented at each relay node).
+  /// Messages with TTL == 0 are dropped without forwarding.
   final int meshTtl;
 
-  /// Size of photo chunks for transfer (4-8KB recommended)
+  /// Preferred chunk size (bytes) for photo binary transfers over fff3/fff4.
+  /// The actual chunk size is capped to the negotiated GATT MTU at runtime.
   final int photoChunkSize;
 
-  /// Timeout for message delivery confirmation
+  /// GATT write timeout for a single message or chunk delivery.
   final Duration messageTimeout;
 
-  /// Interval between scans
+  /// Legacy field — use [normalScanPause] / [highDensityScanPause] instead.
   final Duration scanInterval;
 
-  /// BLE advertising interval
+  /// BLE advertising interval sent to the platform peripheral manager.
   final Duration advertisingInterval;
 
-  /// Time before considering a peer as "lost"
+  /// Duration of no GATT activity after which a peer is declared "lost".
+  /// A [peerLost] event is emitted and the peer is removed from the grid.
   final Duration peerLostTimeout;
 
-  /// Maximum thumbnail size for BLE broadcast (15KB limit)
+  /// Maximum size (bytes) of the primary thumbnail broadcast on fff2.
+  /// [ImageService] compresses thumbnails to stay within this budget.
+  /// The NSFW classifier runs before a photo is allowed to be set here.
   final int maxThumbnailSize;
 
-  /// Maximum photo size for transfer
+  /// Maximum size (bytes) of a full photo before compression is applied
+  /// by [ImageService] prior to transfer.
   final int maxPhotoSize;
 
-  /// Number of direct peers above which "high density" mode is activated
+  /// Number of directly-visible peers that triggers high-density mode,
+  /// which increases scan pauses and throttles relay probability.
   final int highDensityPeerThreshold;
 
-  /// Scan pause duration in high-density mode (longer = less battery drain)
+  /// Scan pause duration used in high-density mode (≥[highDensityPeerThreshold]
+  /// visible peers). Longer pause reduces battery drain and RF congestion.
   final Duration highDensityScanPause;
 
-  /// Scan pause duration in normal mode
+  /// Scan pause duration used in normal mode (<[highDensityPeerThreshold] peers).
   final Duration normalScanPause;
 
-  /// Probability of relaying a mesh message in high-density mode (0.0–1.0).
-  /// Reduces relay flood when many peers are in range.
+  /// Probability (0.0–1.0) that a relay-eligible message is actually forwarded
+  /// in high-density mode. Probabilistic dropping reduces mesh flooding when
+  /// many peers are simultaneously relaying the same message.
   final double highDensityRelayProbability;
 
   /// Create config from environment variables
