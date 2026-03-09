@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/constants/profile_constants.dart';
 import '../../../core/theme/app_theme.dart';
@@ -10,7 +11,10 @@ import '../bloc/discovery_bloc.dart';
 import '../bloc/discovery_event.dart';
 import '../bloc/discovery_state.dart';
 import '../widgets/peer_grid_tile.dart';
+import '../widgets/radar_view.dart';
 import 'peer_detail_screen.dart';
+
+enum _ViewMode { grid, radar }
 
 /// Discovery screen showing grid of nearby peers
 class DiscoveryScreen extends StatefulWidget {
@@ -22,12 +26,43 @@ class DiscoveryScreen extends StatefulWidget {
 
 class _DiscoveryScreenState extends State<DiscoveryScreen> {
   bool _meshTipDismissed = false;
+  _ViewMode _viewMode = _ViewMode.grid;
+  bool _batteryWarningDismissed = false;
+
+  static const _prefKeyViewMode = 'discovery_view_mode';
+  static const _prefKeyBatteryDismissed = 'radar_battery_warning_dismissed';
 
   @override
   void initState() {
     super.initState();
-    // Load peers on screen open
     context.read<DiscoveryBloc>().add(const LoadDiscoveredPeers());
+    _loadPrefs();
+    // Listen for peer taps from inside the RadarView peer sheet
+    RadarView.listenForPeerTaps(_openPeerDetail);
+  }
+
+  Future<void> _loadPrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getString(_prefKeyViewMode);
+    final batteryDismissed = prefs.getBool(_prefKeyBatteryDismissed) ?? false;
+    if (mounted) {
+      setState(() {
+        _viewMode = saved == 'radar' ? _ViewMode.radar : _ViewMode.grid;
+        _batteryWarningDismissed = batteryDismissed;
+      });
+    }
+  }
+
+  Future<void> _setViewMode(_ViewMode mode) async {
+    setState(() => _viewMode = mode);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_prefKeyViewMode, mode.name);
+  }
+
+  Future<void> _dismissBatteryWarning() async {
+    setState(() => _batteryWarningDismissed = true);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_prefKeyBatteryDismissed, true);
   }
 
   Future<void> _onRefresh() async {
@@ -120,9 +155,9 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
               // Peer count badge
               if (state.hasPeers)
                 Container(
-                  margin: const EdgeInsets.only(right: 8),
+                  margin: const EdgeInsets.only(right: 4),
                   padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
                     color: AppTheme.primaryColor.withValues(alpha: 0.2),
                     borderRadius: BorderRadius.circular(16),
@@ -132,7 +167,7 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                     children: [
                       const Icon(
                         Icons.bluetooth_connected,
-                        size: 16,
+                        size: 14,
                         color: AppTheme.primaryColor,
                       ),
                       const SizedBox(width: 4),
@@ -141,35 +176,41 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                         style: const TextStyle(
                           color: AppTheme.primaryColor,
                           fontWeight: FontWeight.bold,
-                          fontSize: 13,
+                          fontSize: 12,
                         ),
                       ),
                     ],
                   ),
                 ),
-              // Filter button
-              Stack(
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.tune_rounded),
-                    tooltip: 'Filter',
-                    onPressed: () => _showFilterSheet(context, state),
-                  ),
-                  if (state.hasActiveFilters)
-                    Positioned(
-                      right: 8,
-                      top: 8,
-                      child: Container(
-                        width: 8,
-                        height: 8,
-                        decoration: const BoxDecoration(
-                          color: AppTheme.primaryColor,
-                          shape: BoxShape.circle,
+              // View mode toggle: Grid / Radar
+              _ViewModeToggle(
+                current: _viewMode,
+                onChanged: _setViewMode,
+              ),
+              // Filter button (grid mode only)
+              if (_viewMode == _ViewMode.grid)
+                Stack(
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.tune_rounded),
+                      tooltip: 'Filter',
+                      onPressed: () => _showFilterSheet(context, state),
+                    ),
+                    if (state.hasActiveFilters)
+                      Positioned(
+                        right: 8,
+                        top: 8,
+                        child: Container(
+                          width: 8,
+                          height: 8,
+                          decoration: const BoxDecoration(
+                            color: AppTheme.primaryColor,
+                            shape: BoxShape.circle,
+                          ),
                         ),
                       ),
-                    ),
-                ],
-              ),
+                  ],
+                ),
               // Debug: Load mock data
               IconButton(
                 icon: const Icon(Icons.bug_report),
@@ -186,13 +227,15 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
 
   Widget _buildBody(DiscoveryState state) {
     if (state.status == DiscoveryStatus.loading) {
-      return const Center(
-        child: CircularProgressIndicator(),
-      );
+      return const Center(child: CircularProgressIndicator());
     }
 
     if (state.status == DiscoveryStatus.error && !state.hasPeers) {
       return _buildErrorState(state);
+    }
+
+    if (_viewMode == _ViewMode.radar) {
+      return _buildRadarBody(state);
     }
 
     if (!state.hasPeers) {
@@ -262,6 +305,26 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
           );
         },
       ),
+    );
+  }
+
+  // ── Radar mode body ──────────────────────────────────────────────────────────
+
+  Widget _buildRadarBody(DiscoveryState state) {
+    return Column(
+      children: [
+        // Battery warning banner (shown until dismissed)
+        if (!_batteryWarningDismissed)
+          _RadarBatteryBanner(onDismiss: _dismissBatteryWarning),
+
+        // Radar canvas — passes ALL visible (unfiltered) peers since radar
+        // shows proximity density, not filtered subsets
+        Expanded(
+          child: RadarView(
+            peers: state.peers.where((p) => !p.isBlocked).toList(),
+          ),
+        ),
+      ],
     );
   }
 
@@ -457,6 +520,134 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ── View mode toggle (Grid / Radar) ───────────────────────────────────────────
+
+class _ViewModeToggle extends StatelessWidget {
+  const _ViewModeToggle({
+    required this.current,
+    required this.onChanged,
+  });
+
+  final _ViewMode current;
+  final ValueChanged<_ViewMode> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+      child: Container(
+        height: 32,
+        decoration: BoxDecoration(
+          color: AppTheme.darkCard,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.white12),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _ToggleButton(
+              icon: Icons.grid_view_rounded,
+              label: 'Grid',
+              selected: current == _ViewMode.grid,
+              onTap: () => onChanged(_ViewMode.grid),
+            ),
+            Container(width: 1, color: Colors.white12),
+            _ToggleButton(
+              icon: Icons.radar,
+              label: 'Radar',
+              selected: current == _ViewMode.radar,
+              onTap: () => onChanged(_ViewMode.radar),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ToggleButton extends StatelessWidget {
+  const _ToggleButton({
+    required this.icon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = selected ? AppTheme.primaryColor : AppTheme.textHint;
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        height: double.infinity,
+        decoration: BoxDecoration(
+          color: selected
+              ? AppTheme.primaryColor.withAlpha(30)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(7),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 14, color: color),
+            const SizedBox(width: 4),
+            Text(
+              label,
+              style: TextStyle(
+                  color: color,
+                  fontSize: 12,
+                  fontWeight:
+                      selected ? FontWeight.w600 : FontWeight.normal),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Radar battery warning banner ──────────────────────────────────────────────
+
+class _RadarBatteryBanner extends StatelessWidget {
+  const _RadarBatteryBanner({required this.onDismiss});
+
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: AppTheme.warning.withAlpha(25),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      child: Row(
+        children: [
+          const Icon(Icons.battery_alert,
+              size: 16, color: AppTheme.warning),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Radar updates every few seconds — turn off when not needed to save battery.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: AppTheme.warning,
+                  ),
+            ),
+          ),
+          GestureDetector(
+            onTap: onDismiss,
+            child: const Icon(Icons.close, size: 14, color: AppTheme.warning),
+          ),
+        ],
       ),
     );
   }
