@@ -29,6 +29,8 @@ class ProfileRepository {
     required String name,
     int? age,
     String? bio,
+    int? position,
+    String? interests,
   }) async {
     final now = DateTime.now();
     final id = _uuid.v4();
@@ -38,6 +40,8 @@ class ProfileRepository {
       name: name,
       age: Value(age),
       bio: Value(bio),
+      position: Value(position),
+      interests: Value(interests),
       createdAt: now,
       updatedAt: now,
     );
@@ -49,6 +53,8 @@ class ProfileRepository {
       name: name,
       age: age,
       bio: bio,
+      position: position,
+      interests: interests,
       createdAt: now,
       updatedAt: now,
     );
@@ -60,11 +66,17 @@ class ProfileRepository {
     String? name,
     int? age,
     String? bio,
+    // Use Value<int?> to allow clearing position to null
+    Value<int?> position = const Value.absent(),
+    // Use Value<String?> to allow clearing interests to null
+    Value<String?> interests = const Value.absent(),
   }) async {
     final companion = UserProfilesCompanion(
       name: name != null ? Value(name) : const Value.absent(),
       age: age != null ? Value(age) : const Value.absent(),
       bio: bio != null ? Value(bio) : const Value.absent(),
+      position: position,
+      interests: interests,
       updatedAt: Value(DateTime.now()),
     );
 

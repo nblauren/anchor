@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../../core/constants/profile_constants.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../chat/bloc/chat_bloc.dart';
 import '../../chat/bloc/chat_event.dart';
@@ -9,7 +11,10 @@ import '../bloc/discovery_bloc.dart';
 import '../bloc/discovery_event.dart';
 import '../bloc/discovery_state.dart';
 import '../widgets/peer_grid_tile.dart';
+import '../widgets/radar_view.dart';
 import 'peer_detail_screen.dart';
+
+enum _ViewMode { grid, radar }
 
 /// Discovery screen showing grid of nearby peers
 class DiscoveryScreen extends StatefulWidget {
@@ -21,12 +26,43 @@ class DiscoveryScreen extends StatefulWidget {
 
 class _DiscoveryScreenState extends State<DiscoveryScreen> {
   bool _meshTipDismissed = false;
+  _ViewMode _viewMode = _ViewMode.grid;
+  bool _batteryWarningDismissed = false;
+
+  static const _prefKeyViewMode = 'discovery_view_mode';
+  static const _prefKeyBatteryDismissed = 'radar_battery_warning_dismissed';
 
   @override
   void initState() {
     super.initState();
-    // Load peers on screen open
     context.read<DiscoveryBloc>().add(const LoadDiscoveredPeers());
+    _loadPrefs();
+    // Listen for peer taps from inside the RadarView peer sheet
+    RadarView.listenForPeerTaps(_openPeerDetail);
+  }
+
+  Future<void> _loadPrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getString(_prefKeyViewMode);
+    final batteryDismissed = prefs.getBool(_prefKeyBatteryDismissed) ?? false;
+    if (mounted) {
+      setState(() {
+        _viewMode = saved == 'radar' ? _ViewMode.radar : _ViewMode.grid;
+        _batteryWarningDismissed = batteryDismissed;
+      });
+    }
+  }
+
+  Future<void> _setViewMode(_ViewMode mode) async {
+    setState(() => _viewMode = mode);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_prefKeyViewMode, mode.name);
+  }
+
+  Future<void> _dismissBatteryWarning() async {
+    setState(() => _batteryWarningDismissed = true);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_prefKeyBatteryDismissed, true);
   }
 
   Future<void> _onRefresh() async {
@@ -70,6 +106,21 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
     }
   }
 
+  void _showFilterSheet(BuildContext context, DiscoveryState state) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppTheme.darkSurface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => BlocProvider.value(
+        value: context.read<DiscoveryBloc>(),
+        child: const _FilterSheet(),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return BlocConsumer<DiscoveryBloc, DiscoveryState>(
@@ -104,9 +155,9 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
               // Peer count badge
               if (state.hasPeers)
                 Container(
-                  margin: const EdgeInsets.only(right: 8),
+                  margin: const EdgeInsets.only(right: 4),
                   padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
                     color: AppTheme.primaryColor.withValues(alpha: 0.2),
                     borderRadius: BorderRadius.circular(16),
@@ -116,7 +167,7 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                     children: [
                       const Icon(
                         Icons.bluetooth_connected,
-                        size: 16,
+                        size: 14,
                         color: AppTheme.primaryColor,
                       ),
                       const SizedBox(width: 4),
@@ -125,11 +176,40 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                         style: const TextStyle(
                           color: AppTheme.primaryColor,
                           fontWeight: FontWeight.bold,
-                          fontSize: 13,
+                          fontSize: 12,
                         ),
                       ),
                     ],
                   ),
+                ),
+              // View mode toggle: Grid / Radar
+              _ViewModeToggle(
+                current: _viewMode,
+                onChanged: _setViewMode,
+              ),
+              // Filter button (grid mode only)
+              if (_viewMode == _ViewMode.grid)
+                Stack(
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.tune_rounded),
+                      tooltip: 'Filter',
+                      onPressed: () => _showFilterSheet(context, state),
+                    ),
+                    if (state.hasActiveFilters)
+                      Positioned(
+                        right: 8,
+                        top: 8,
+                        child: Container(
+                          width: 8,
+                          height: 8,
+                          decoration: const BoxDecoration(
+                            color: AppTheme.primaryColor,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
               // Debug: Load mock data
               IconButton(
@@ -147,13 +227,15 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
 
   Widget _buildBody(DiscoveryState state) {
     if (state.status == DiscoveryStatus.loading) {
-      return const Center(
-        child: CircularProgressIndicator(),
-      );
+      return const Center(child: CircularProgressIndicator());
     }
 
     if (state.status == DiscoveryStatus.error && !state.hasPeers) {
       return _buildErrorState(state);
+    }
+
+    if (_viewMode == _ViewMode.radar) {
+      return _buildRadarBody(state);
     }
 
     if (!state.hasPeers) {
@@ -181,6 +263,11 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
 
               return CustomScrollView(
                 slivers: [
+                  // Active filter strip
+                  if (state.hasActiveFilters)
+                    SliverToBoxAdapter(
+                      child: _buildActiveFilterStrip(context, state),
+                    ),
                   // Tip card: shown once when relayed peers appear
                   if (hasRelayedPeers && !_meshTipDismissed)
                     SliverToBoxAdapter(
@@ -217,6 +304,67 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
             },
           );
         },
+      ),
+    );
+  }
+
+  // ── Radar mode body ──────────────────────────────────────────────────────────
+
+  Widget _buildRadarBody(DiscoveryState state) {
+    return Column(
+      children: [
+        // Battery warning banner (shown until dismissed)
+        if (!_batteryWarningDismissed)
+          _RadarBatteryBanner(onDismiss: _dismissBatteryWarning),
+
+        // Radar canvas — passes ALL visible (unfiltered) peers since radar
+        // shows proximity density, not filtered subsets
+        Expanded(
+          child: RadarView(
+            peers: state.peers.where((p) => !p.isBlocked).toList(),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildActiveFilterStrip(BuildContext context, DiscoveryState state) {
+    final bloc = context.read<DiscoveryBloc>();
+    return Container(
+      color: AppTheme.primaryColor.withAlpha(20),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      child: Row(
+        children: [
+          const Icon(Icons.tune_rounded, size: 14, color: AppTheme.primaryColor),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Wrap(
+              spacing: 6,
+              children: [
+                if (state.filterPositionId != null)
+                  _FilterChip(
+                    label: ProfileConstants.positionMap[state.filterPositionId] ?? '?',
+                    onRemove: () => bloc.add(const SetPositionFilter(null)),
+                  ),
+                for (final id in state.filterInterestIds)
+                  _FilterChip(
+                    label: ProfileConstants.interestMap[id] ?? '?',
+                    onRemove: () => bloc.add(ToggleInterestFilter(id)),
+                  ),
+              ],
+            ),
+          ),
+          TextButton(
+            onPressed: () => bloc.add(const ClearFilters()),
+            style: TextButton.styleFrom(
+              foregroundColor: AppTheme.primaryColor,
+              padding: EdgeInsets.zero,
+              minimumSize: const Size(0, 0),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: const Text('Clear', style: TextStyle(fontSize: 12)),
+          ),
+        ],
       ),
     );
   }
@@ -373,6 +521,365 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
           ],
         ),
       ),
+    );
+  }
+}
+
+// ── View mode toggle (Grid / Radar) ───────────────────────────────────────────
+
+class _ViewModeToggle extends StatelessWidget {
+  const _ViewModeToggle({
+    required this.current,
+    required this.onChanged,
+  });
+
+  final _ViewMode current;
+  final ValueChanged<_ViewMode> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+      child: Container(
+        height: 32,
+        decoration: BoxDecoration(
+          color: AppTheme.darkCard,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.white12),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _ToggleButton(
+              icon: Icons.grid_view_rounded,
+              label: 'Grid',
+              selected: current == _ViewMode.grid,
+              onTap: () => onChanged(_ViewMode.grid),
+            ),
+            Container(width: 1, color: Colors.white12),
+            _ToggleButton(
+              icon: Icons.radar,
+              label: 'Radar',
+              selected: current == _ViewMode.radar,
+              onTap: () => onChanged(_ViewMode.radar),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ToggleButton extends StatelessWidget {
+  const _ToggleButton({
+    required this.icon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = selected ? AppTheme.primaryColor : AppTheme.textHint;
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        height: double.infinity,
+        decoration: BoxDecoration(
+          color: selected
+              ? AppTheme.primaryColor.withAlpha(30)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(7),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 14, color: color),
+            const SizedBox(width: 4),
+            Text(
+              label,
+              style: TextStyle(
+                  color: color,
+                  fontSize: 12,
+                  fontWeight:
+                      selected ? FontWeight.w600 : FontWeight.normal),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Radar battery warning banner ──────────────────────────────────────────────
+
+class _RadarBatteryBanner extends StatelessWidget {
+  const _RadarBatteryBanner({required this.onDismiss});
+
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: AppTheme.warning.withAlpha(25),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      child: Row(
+        children: [
+          const Icon(Icons.battery_alert,
+              size: 16, color: AppTheme.warning),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Radar updates every few seconds — turn off when not needed to save battery.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: AppTheme.warning,
+                  ),
+            ),
+          ),
+          GestureDetector(
+            onTap: onDismiss,
+            child: const Icon(Icons.close, size: 14, color: AppTheme.warning),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Small chip shown in the active filter strip ───────────────────────────────
+
+class _FilterChip extends StatelessWidget {
+  const _FilterChip({required this.label, required this.onRemove});
+  final String label;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: AppTheme.primaryColor.withAlpha(38),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.primaryColor.withAlpha(102)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(
+                color: AppTheme.primaryColor,
+                fontSize: 11,
+                fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(width: 4),
+          GestureDetector(
+            onTap: onRemove,
+            child: const Icon(Icons.close,
+                size: 12, color: AppTheme.primaryColor),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Modal bottom sheet with position + interest filters ───────────────────────
+
+class _FilterSheet extends StatelessWidget {
+  const _FilterSheet();
+
+  @override
+  Widget build(BuildContext context) {
+    return BlocBuilder<DiscoveryBloc, DiscoveryState>(
+      builder: (context, state) {
+        final bloc = context.read<DiscoveryBloc>();
+
+        return DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: 0.75,
+          minChildSize: 0.4,
+          maxChildSize: 0.92,
+          builder: (_, controller) => ListView(
+            controller: controller,
+            padding: EdgeInsets.fromLTRB(
+              20,
+              16,
+              20,
+              MediaQuery.of(context).viewInsets.bottom + 24,
+            ),
+            children: [
+              // Handle
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 20),
+                  decoration: BoxDecoration(
+                    color: Colors.white24,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+
+              // Title row
+              Row(
+                children: [
+                  Text(
+                    'Filter Discovery',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                  ),
+                  const Spacer(),
+                  if (state.hasActiveFilters)
+                    TextButton(
+                      onPressed: () {
+                        bloc.add(const ClearFilters());
+                        Navigator.pop(context);
+                      },
+                      child: const Text('Clear all'),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 20),
+
+              // Position filter
+              Text(
+                'Position',
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      color: AppTheme.textSecondary,
+                      letterSpacing: 0.5,
+                    ),
+              ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  // "Any" chip
+                  ChoiceChip(
+                    label: const Text('Any'),
+                    selected: state.filterPositionId == null,
+                    onSelected: (_) => bloc.add(const SetPositionFilter(null)),
+                    selectedColor: AppTheme.primaryColor.withAlpha(51),
+                    labelStyle: TextStyle(
+                      color: state.filterPositionId == null
+                          ? AppTheme.primaryColor
+                          : AppTheme.textSecondary,
+                      fontWeight: state.filterPositionId == null
+                          ? FontWeight.w600
+                          : FontWeight.normal,
+                    ),
+                    side: BorderSide(
+                      color: state.filterPositionId == null
+                          ? AppTheme.primaryColor
+                          : Colors.white24,
+                    ),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(20)),
+                    backgroundColor: AppTheme.darkCard,
+                  ),
+                  ...ProfileConstants.positionMap.entries.map((e) {
+                    final selected = state.filterPositionId == e.key;
+                    return ChoiceChip(
+                      label: Text(e.value),
+                      selected: selected,
+                      onSelected: (_) => bloc.add(
+                        selected
+                            ? const SetPositionFilter(null)
+                            : SetPositionFilter(e.key),
+                      ),
+                      selectedColor: AppTheme.primaryColor.withAlpha(51),
+                      labelStyle: TextStyle(
+                        color: selected
+                            ? AppTheme.primaryColor
+                            : AppTheme.textSecondary,
+                        fontWeight:
+                            selected ? FontWeight.w600 : FontWeight.normal,
+                      ),
+                      side: BorderSide(
+                        color:
+                            selected ? AppTheme.primaryColor : Colors.white24,
+                      ),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(20)),
+                      backgroundColor: AppTheme.darkCard,
+                    );
+                  }),
+                ],
+              ),
+
+              const SizedBox(height: 24),
+
+              // Interest filter
+              Text(
+                'Interests',
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      color: AppTheme.textSecondary,
+                      letterSpacing: 0.5,
+                    ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Show peers that match at least one selected interest.',
+                style: Theme.of(context)
+                    .textTheme
+                    .bodySmall
+                    ?.copyWith(color: AppTheme.textHint),
+              ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: ProfileConstants.interestMap.entries.map((e) {
+                  final selected = state.filterInterestIds.contains(e.key);
+                  return FilterChip(
+                    label: Text(e.value),
+                    selected: selected,
+                    onSelected: (_) =>
+                        bloc.add(ToggleInterestFilter(e.key)),
+                    selectedColor: AppTheme.primaryColor.withAlpha(51),
+                    checkmarkColor: AppTheme.primaryColor,
+                    backgroundColor: AppTheme.darkCard,
+                    labelStyle: TextStyle(
+                      color: selected
+                          ? AppTheme.primaryColor
+                          : AppTheme.textSecondary,
+                      fontWeight:
+                          selected ? FontWeight.w600 : FontWeight.normal,
+                    ),
+                    side: BorderSide(
+                      color:
+                          selected ? AppTheme.primaryColor : Colors.white24,
+                    ),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(20)),
+                  );
+                }).toList(),
+              ),
+
+              const SizedBox(height: 24),
+
+              // Apply / Done button
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Done'),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

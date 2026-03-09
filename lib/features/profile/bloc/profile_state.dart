@@ -1,5 +1,6 @@
 import 'package:equatable/equatable.dart';
 
+import '../../../core/constants/profile_constants.dart';
 import '../../../data/local_database/database.dart';
 
 enum ProfileStatus {
@@ -49,6 +50,8 @@ class ProfileState extends Equatable {
     this.name,
     this.age,
     this.bio,
+    this.position,
+    this.interestIds = const [],
     this.photos = const [],
     this.errorMessage,
     this.isProcessingPhoto = false,
@@ -60,13 +63,22 @@ class ProfileState extends Equatable {
   final String? name;
   final int? age;
   final String? bio;
+  /// Position preference ID. null = not set.
+  final int? position;
+  /// Selected interest IDs (sorted). Empty = none set.
+  final List<int> interestIds;
   final List<ProfilePhoto> photos;
   final String? errorMessage;
   final bool isProcessingPhoto;
   /// Non-null when a photo failed the sensitive-content check.
-  /// Contains the photo ID that was blocked so the UI can show a dialog and
-  /// optionally revert/highlight the offending photo.
   final String? nsfwBlockedPhotoId;
+
+  /// Human-readable position label, or null when not set.
+  String? get positionLabel => ProfileConstants.positionLabel(position);
+
+  /// Human-readable interest labels (decoded from IDs).
+  List<String> get interestLabels =>
+      interestIds.map((id) => ProfileConstants.interestMap[id] ?? '').where((s) => s.isNotEmpty).toList();
 
   /// Whether a profile exists
   bool get hasProfile => profileId != null;
@@ -105,6 +117,9 @@ class ProfileState extends Equatable {
     String? name,
     int? age,
     String? bio,
+    // Use Object? sentinel to allow explicitly setting position to null.
+    Object? position = _sentinel,
+    List<int>? interestIds,
     List<ProfilePhoto>? photos,
     String? errorMessage,
     bool? isProcessingPhoto,
@@ -117,6 +132,8 @@ class ProfileState extends Equatable {
       name: name ?? this.name,
       age: age ?? this.age,
       bio: bio ?? this.bio,
+      position: position == _sentinel ? this.position : position as int?,
+      interestIds: interestIds ?? this.interestIds,
       photos: photos ?? this.photos,
       errorMessage: errorMessage,
       isProcessingPhoto: isProcessingPhoto ?? this.isProcessingPhoto,
@@ -132,9 +149,14 @@ class ProfileState extends Equatable {
         name,
         age,
         bio,
+        position,
+        interestIds,
         photos,
         errorMessage,
         isProcessingPhoto,
         nsfwBlockedPhotoId,
       ];
 }
+
+/// Sentinel value for copyWith to distinguish "not provided" from explicit null.
+const _sentinel = Object();

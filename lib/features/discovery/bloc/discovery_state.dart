@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:equatable/equatable.dart';
 
+import '../../../core/constants/profile_constants.dart';
 import '../../../data/local_database/database.dart';
 
 enum DiscoveryStatus {
@@ -18,6 +19,8 @@ class DiscoveredPeer extends Equatable {
     required this.name,
     this.age,
     this.bio,
+    this.position,
+    this.interests,
     this.thumbnailData,
     this.photoThumbnails,
     required this.lastSeenAt,
@@ -32,6 +35,10 @@ class DiscoveredPeer extends Equatable {
   final String name;
   final int? age;
   final String? bio;
+  /// Position preference ID from peer's BLE profile. null = not shared.
+  final int? position;
+  /// Comma-separated interest IDs from peer's BLE profile. null = not shared.
+  final String? interests;
   final Uint8List? thumbnailData;
   /// All profile photo thumbnails in display order (up to 4). In-memory only — not persisted to DB.
   final List<Uint8List>? photoThumbnails;
@@ -46,6 +53,15 @@ class DiscoveredPeer extends Equatable {
   /// 0 = unknown, 1 = primary only, >1 = extra photos available on-demand.
   final int fullPhotoCount;
 
+  /// Decoded position label, or null when not shared.
+  String? get positionLabel => ProfileConstants.positionLabel(position);
+
+  /// Decoded interest labels from comma-separated ID string.
+  List<String> get interestLabels => ProfileConstants.decodeInterests(interests);
+
+  /// Parsed interest IDs list.
+  List<int> get interestIds => ProfileConstants.parseInterests(interests);
+
   /// Factory from Drift entry
   factory DiscoveredPeer.fromEntry(DiscoveredPeerEntry entry) {
     return DiscoveredPeer(
@@ -53,6 +69,8 @@ class DiscoveredPeer extends Equatable {
       name: entry.name,
       age: entry.age,
       bio: entry.bio,
+      position: entry.position,
+      interests: entry.interests,
       thumbnailData: entry.thumbnailData,
       lastSeenAt: entry.lastSeenAt,
       rssi: entry.rssi,
@@ -101,6 +119,8 @@ class DiscoveredPeer extends Equatable {
     String? name,
     int? age,
     String? bio,
+    Object? position = _peerSentinel,
+    Object? interests = _peerSentinel,
     Uint8List? thumbnailData,
     List<Uint8List>? photoThumbnails,
     DateTime? lastSeenAt,
@@ -115,6 +135,8 @@ class DiscoveredPeer extends Equatable {
       name: name ?? this.name,
       age: age ?? this.age,
       bio: bio ?? this.bio,
+      position: position == _peerSentinel ? this.position : position as int?,
+      interests: interests == _peerSentinel ? this.interests : interests as String?,
       thumbnailData: thumbnailData ?? this.thumbnailData,
       photoThumbnails: photoThumbnails ?? this.photoThumbnails,
       lastSeenAt: lastSeenAt ?? this.lastSeenAt,
@@ -132,6 +154,8 @@ class DiscoveredPeer extends Equatable {
         name,
         age,
         bio,
+        position,
+        interests,
         thumbnailData,
         photoThumbnails,
         lastSeenAt,
@@ -143,6 +167,8 @@ class DiscoveredPeer extends Equatable {
       ];
 }
 
+const _peerSentinel = Object();
+
 class DiscoveryState extends Equatable {
   const DiscoveryState({
     this.status = DiscoveryStatus.initial,
@@ -152,6 +178,8 @@ class DiscoveryState extends Equatable {
     this.isScanning = false,
     this.droppedAnchorPeerIds = const {},
     this.incomingAnchorDropName,
+    this.filterPositionId,
+    this.filterInterestIds = const {},
   });
 
   final DiscoveryStatus status;
@@ -164,14 +192,39 @@ class DiscoveryState extends Equatable {
   /// Set briefly when a peer drops anchor on us — used to show a SnackBar
   final String? incomingAnchorDropName;
 
+  // ── Local-only discovery filters (no BLE impact) ─────────────────────────
+
+  /// When non-null, only show peers with this exact position ID (or no position set).
+  final int? filterPositionId;
+  /// When non-empty, only show peers that share at least one of these interest IDs.
+  final Set<int> filterInterestIds;
+
+  bool get hasActiveFilters =>
+      filterPositionId != null || filterInterestIds.isNotEmpty;
+
   /// Visible peers (excluding blocked), sorted by last seen.
   /// Deduplicates by peerId in case a MAC rotation briefly produces two entries.
+  /// Applies local position + interest filters when set.
   List<DiscoveredPeer> get visiblePeers {
     final seen = <String>{};
     return peers
         .where((p) => !p.isBlocked && seen.add(p.peerId))
+        .where(_passesFilters)
         .toList()
       ..sort((a, b) => b.lastSeenAt.compareTo(a.lastSeenAt));
+  }
+
+  bool _passesFilters(DiscoveredPeer p) {
+    if (filterPositionId != null && p.position != null &&
+        p.position != filterPositionId) {
+      return false;
+    }
+    if (filterInterestIds.isNotEmpty && p.interestIds.isNotEmpty) {
+      if (!p.interestIds.any((id) => filterInterestIds.contains(id))) {
+        return false;
+      }
+    }
+    return true;
   }
 
   /// Peers seen recently (within last 60 seconds)
@@ -198,6 +251,8 @@ class DiscoveryState extends Equatable {
     bool? isScanning,
     Set<String>? droppedAnchorPeerIds,
     Object? incomingAnchorDropName = _sentinel,
+    Object? filterPositionId = _sentinel,
+    Set<int>? filterInterestIds,
   }) {
     return DiscoveryState(
       status: status ?? this.status,
@@ -209,6 +264,10 @@ class DiscoveryState extends Equatable {
       incomingAnchorDropName: incomingAnchorDropName == _sentinel
           ? this.incomingAnchorDropName
           : incomingAnchorDropName as String?,
+      filterPositionId: filterPositionId == _sentinel
+          ? this.filterPositionId
+          : filterPositionId as int?,
+      filterInterestIds: filterInterestIds ?? this.filterInterestIds,
     );
   }
 
@@ -221,6 +280,8 @@ class DiscoveryState extends Equatable {
         isScanning,
         droppedAnchorPeerIds,
         incomingAnchorDropName,
+        filterPositionId,
+        filterInterestIds,
       ];
 }
 

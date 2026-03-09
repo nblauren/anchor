@@ -314,6 +314,93 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
                     ),
                   ),
 
+                  // ── Position & Interests (full profile only, not grid) ────
+                  if (_peer.positionLabel != null ||
+                      _peer.interestLabels.isNotEmpty) ...[
+                    const SizedBox(height: 20),
+                    const Divider(),
+                    const SizedBox(height: 16),
+                  ],
+
+                  // Position
+                  if (_peer.positionLabel != null) ...[
+                    Row(
+                      children: [
+                        const Icon(Icons.swap_vert_rounded,
+                            size: 18, color: AppTheme.textSecondary),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Position',
+                          style: Theme.of(context)
+                              .textTheme
+                              .labelMedium
+                              ?.copyWith(color: AppTheme.textSecondary),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primaryColor.withAlpha(26),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: AppTheme.primaryColor.withAlpha(77)),
+                      ),
+                      child: Text(
+                        _peer.positionLabel!,
+                        style: const TextStyle(
+                          color: AppTheme.primaryColor,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+
+                  // Interests
+                  if (_peer.interestLabels.isNotEmpty) ...[
+                    Row(
+                      children: [
+                        const Icon(Icons.interests_outlined,
+                            size: 18, color: AppTheme.textSecondary),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Interests',
+                          style: Theme.of(context)
+                              .textTheme
+                              .labelMedium
+                              ?.copyWith(color: AppTheme.textSecondary),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      children: _peer.interestLabels.map((label) {
+                        return Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: AppTheme.darkCard,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: Colors.white24),
+                          ),
+                          child: Text(
+                            label,
+                            style: const TextStyle(
+                              color: AppTheme.textSecondary,
+                              fontSize: 13,
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+
                   const SizedBox(height: 32),
 
                   // Action buttons

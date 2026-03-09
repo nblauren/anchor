@@ -3,6 +3,9 @@ import 'dart:typed_data';
 
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import 'package:drift/drift.dart' show Value;
+
+import '../../../core/constants/profile_constants.dart';
 import '../../../core/utils/logger.dart';
 import '../../../services/ble/ble.dart' as ble;
 import '../../../services/database_service.dart';
@@ -93,6 +96,8 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
         name: profile.name,
         age: profile.age,
         bio: profile.bio,
+        position: profile.position,
+        interestIds: ProfileConstants.parseInterests(profile.interests),
         photos: photoList,
       ));
 
@@ -123,6 +128,8 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
         name: event.name.trim(),
         age: event.age,
         bio: event.bio?.trim(),
+        position: event.position,
+        interests: ProfileConstants.encodeInterests(event.interests),
       );
 
       emit(state.copyWith(
@@ -131,6 +138,8 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
         name: profile.name,
         age: profile.age,
         bio: profile.bio,
+        position: profile.position,
+        interestIds: ProfileConstants.parseInterests(profile.interests),
         photos: [],
       ));
 
@@ -159,18 +168,40 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
     emit(state.copyWith(status: ProfileStatus.saving));
 
     try {
+      // Build position Value — explicit clear vs. no-op vs. new value.
+      final Value<int?> positionValue = event.clearPosition
+          ? const Value(null)
+          : event.position != null
+              ? Value(event.position)
+              : const Value.absent();
+
+      // Build interests Value — null list = no-op, empty = clear.
+      final Value<String?> interestsValue = event.interests != null
+          ? Value(ProfileConstants.encodeInterests(event.interests!))
+          : const Value.absent();
+
       await _databaseService.profileRepository.updateProfile(
         id: state.profileId!,
         name: event.name?.trim(),
         age: event.age,
         bio: event.bio?.trim(),
+        position: positionValue,
+        interests: interestsValue,
       );
+
+      // Compute updated state values
+      final newPosition = event.clearPosition
+          ? null
+          : (event.position ?? state.position);
+      final newInterestIds = event.interests ?? state.interestIds;
 
       emit(state.copyWith(
         status: ProfileStatus.saved,
         name: event.name?.trim() ?? state.name,
         age: event.age ?? state.age,
         bio: event.bio?.trim() ?? state.bio,
+        position: newPosition,
+        interestIds: newInterestIds,
       ));
 
       Logger.info('Profile updated', 'ProfileBloc');
@@ -456,12 +487,16 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
         }
       }
 
-      // Create broadcast payload
+      // Create broadcast payload — position/interests are optional compact IDs
       final payload = ble.BroadcastPayload(
         userId: state.profileId!,
         name: state.name!,
         age: state.age,
         bio: state.bio,
+        position: state.position,
+        interests: state.interestIds.isNotEmpty
+            ? ProfileConstants.encodeInterests(state.interestIds)
+            : null,
         thumbnailBytes: allThumbnails.isNotEmpty ? allThumbnails.first : null,
         thumbnailsList: allThumbnails.isNotEmpty ? allThumbnails : null,
       );

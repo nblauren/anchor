@@ -57,6 +57,14 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
       (event, emit) => emit(state.copyWith(incomingAnchorDropName: null)),
     );
     on<_ApplyDebouncedState>((event, emit) => emit(event.newState));
+    on<SetPositionFilter>(_onSetPositionFilter);
+    on<ToggleInterestFilter>(_onToggleInterestFilter);
+    on<ClearFilters>(
+      (event, emit) => emit(state.copyWith(
+        filterPositionId: null,
+        filterInterestIds: const {},
+      )),
+    );
 
     // Subscribe to BLE peer discovery stream
     _peerDiscoveredSubscription = _bleService.peerDiscoveredStream.listen(
@@ -97,6 +105,8 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
           name: peer.name,
           age: peer.age,
           bio: peer.bio,
+          position: peer.position,
+          interests: peer.interests,
           thumbnailData: peer.thumbnailBytes,
           photoThumbnails: peer.photoThumbnails,
           rssi: peer.rssi,
@@ -185,6 +195,8 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
           name: event.name,
           age: event.age,
           bio: event.bio,
+          position: event.position,
+          interests: event.interests,
           thumbnailData: event.thumbnailData,
           photoThumbnails: event.photoThumbnails,
           lastSeenAt: DateTime.now(),
@@ -200,6 +212,8 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
           name: event.name,
           age: event.age,
           bio: event.bio,
+          position: event.position,
+          interests: event.interests,
           thumbnailData: event.thumbnailData,
           rssi: event.rssi,
         );
@@ -589,6 +603,28 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
         isBlocked: false,
       );
     });
+  }
+
+  // ── Local filter handlers ─────────────────────────────────────────────────
+
+  void _onSetPositionFilter(
+    SetPositionFilter event,
+    Emitter<DiscoveryState> emit,
+  ) {
+    emit(state.copyWith(filterPositionId: event.positionId));
+  }
+
+  void _onToggleInterestFilter(
+    ToggleInterestFilter event,
+    Emitter<DiscoveryState> emit,
+  ) {
+    final updated = Set<int>.from(state.filterInterestIds);
+    if (updated.contains(event.interestId)) {
+      updated.remove(event.interestId);
+    } else {
+      updated.add(event.interestId);
+    }
+    emit(state.copyWith(filterInterestIds: updated));
   }
 
   @override
