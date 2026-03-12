@@ -29,6 +29,18 @@ class $UserProfilesTable extends UserProfiles
   late final GeneratedColumn<String> bio = GeneratedColumn<String>(
       'bio', aliasedName, true,
       type: DriftSqlType.string, requiredDuringInsert: false);
+  static const VerificationMeta _positionMeta =
+      const VerificationMeta('position');
+  @override
+  late final GeneratedColumn<int> position = GeneratedColumn<int>(
+      'position', aliasedName, true,
+      type: DriftSqlType.int, requiredDuringInsert: false);
+  static const VerificationMeta _interestsMeta =
+      const VerificationMeta('interests');
+  @override
+  late final GeneratedColumn<String> interests = GeneratedColumn<String>(
+      'interests', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
   static const VerificationMeta _createdAtMeta =
       const VerificationMeta('createdAt');
   @override
@@ -43,7 +55,7 @@ class $UserProfilesTable extends UserProfiles
       type: DriftSqlType.dateTime, requiredDuringInsert: true);
   @override
   List<GeneratedColumn> get $columns =>
-      [id, name, age, bio, createdAt, updatedAt];
+      [id, name, age, bio, position, interests, createdAt, updatedAt];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
@@ -72,6 +84,14 @@ class $UserProfilesTable extends UserProfiles
     if (data.containsKey('bio')) {
       context.handle(
           _bioMeta, bio.isAcceptableOrUnknown(data['bio']!, _bioMeta));
+    }
+    if (data.containsKey('position')) {
+      context.handle(_positionMeta,
+          position.isAcceptableOrUnknown(data['position']!, _positionMeta));
+    }
+    if (data.containsKey('interests')) {
+      context.handle(_interestsMeta,
+          interests.isAcceptableOrUnknown(data['interests']!, _interestsMeta));
     }
     if (data.containsKey('created_at')) {
       context.handle(_createdAtMeta,
@@ -102,6 +122,10 @@ class $UserProfilesTable extends UserProfiles
           .read(DriftSqlType.int, data['${effectivePrefix}age']),
       bio: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}bio']),
+      position: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}position']),
+      interests: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}interests']),
       createdAt: attachedDatabase.typeMapping
           .read(DriftSqlType.dateTime, data['${effectivePrefix}created_at'])!,
       updatedAt: attachedDatabase.typeMapping
@@ -121,6 +145,14 @@ class UserProfileEntry extends DataClass
   final String name;
   final int? age;
   final String? bio;
+
+  /// Sexual position preference stored as a compact integer ID (see ProfileConstants.positionMap).
+  /// null = not set.
+  final int? position;
+
+  /// Comma-separated interest IDs (e.g. "0,3,7"). null / empty = not set.
+  /// See ProfileConstants.interestMap and encodeInterests / parseInterests.
+  final String? interests;
   final DateTime createdAt;
   final DateTime updatedAt;
   const UserProfileEntry(
@@ -128,6 +160,8 @@ class UserProfileEntry extends DataClass
       required this.name,
       this.age,
       this.bio,
+      this.position,
+      this.interests,
       required this.createdAt,
       required this.updatedAt});
   @override
@@ -141,6 +175,12 @@ class UserProfileEntry extends DataClass
     if (!nullToAbsent || bio != null) {
       map['bio'] = Variable<String>(bio);
     }
+    if (!nullToAbsent || position != null) {
+      map['position'] = Variable<int>(position);
+    }
+    if (!nullToAbsent || interests != null) {
+      map['interests'] = Variable<String>(interests);
+    }
     map['created_at'] = Variable<DateTime>(createdAt);
     map['updated_at'] = Variable<DateTime>(updatedAt);
     return map;
@@ -152,6 +192,12 @@ class UserProfileEntry extends DataClass
       name: Value(name),
       age: age == null && nullToAbsent ? const Value.absent() : Value(age),
       bio: bio == null && nullToAbsent ? const Value.absent() : Value(bio),
+      position: position == null && nullToAbsent
+          ? const Value.absent()
+          : Value(position),
+      interests: interests == null && nullToAbsent
+          ? const Value.absent()
+          : Value(interests),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
     );
@@ -165,6 +211,8 @@ class UserProfileEntry extends DataClass
       name: serializer.fromJson<String>(json['name']),
       age: serializer.fromJson<int?>(json['age']),
       bio: serializer.fromJson<String?>(json['bio']),
+      position: serializer.fromJson<int?>(json['position']),
+      interests: serializer.fromJson<String?>(json['interests']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
     );
@@ -177,6 +225,8 @@ class UserProfileEntry extends DataClass
       'name': serializer.toJson<String>(name),
       'age': serializer.toJson<int?>(age),
       'bio': serializer.toJson<String?>(bio),
+      'position': serializer.toJson<int?>(position),
+      'interests': serializer.toJson<String?>(interests),
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
     };
@@ -187,6 +237,8 @@ class UserProfileEntry extends DataClass
           String? name,
           Value<int?> age = const Value.absent(),
           Value<String?> bio = const Value.absent(),
+          Value<int?> position = const Value.absent(),
+          Value<String?> interests = const Value.absent(),
           DateTime? createdAt,
           DateTime? updatedAt}) =>
       UserProfileEntry(
@@ -194,6 +246,8 @@ class UserProfileEntry extends DataClass
         name: name ?? this.name,
         age: age.present ? age.value : this.age,
         bio: bio.present ? bio.value : this.bio,
+        position: position.present ? position.value : this.position,
+        interests: interests.present ? interests.value : this.interests,
         createdAt: createdAt ?? this.createdAt,
         updatedAt: updatedAt ?? this.updatedAt,
       );
@@ -203,6 +257,8 @@ class UserProfileEntry extends DataClass
       name: data.name.present ? data.name.value : this.name,
       age: data.age.present ? data.age.value : this.age,
       bio: data.bio.present ? data.bio.value : this.bio,
+      position: data.position.present ? data.position.value : this.position,
+      interests: data.interests.present ? data.interests.value : this.interests,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
     );
@@ -215,6 +271,8 @@ class UserProfileEntry extends DataClass
           ..write('name: $name, ')
           ..write('age: $age, ')
           ..write('bio: $bio, ')
+          ..write('position: $position, ')
+          ..write('interests: $interests, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt')
           ..write(')'))
@@ -222,7 +280,8 @@ class UserProfileEntry extends DataClass
   }
 
   @override
-  int get hashCode => Object.hash(id, name, age, bio, createdAt, updatedAt);
+  int get hashCode => Object.hash(
+      id, name, age, bio, position, interests, createdAt, updatedAt);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -231,6 +290,8 @@ class UserProfileEntry extends DataClass
           other.name == this.name &&
           other.age == this.age &&
           other.bio == this.bio &&
+          other.position == this.position &&
+          other.interests == this.interests &&
           other.createdAt == this.createdAt &&
           other.updatedAt == this.updatedAt);
 }
@@ -240,6 +301,8 @@ class UserProfilesCompanion extends UpdateCompanion<UserProfileEntry> {
   final Value<String> name;
   final Value<int?> age;
   final Value<String?> bio;
+  final Value<int?> position;
+  final Value<String?> interests;
   final Value<DateTime> createdAt;
   final Value<DateTime> updatedAt;
   final Value<int> rowid;
@@ -248,6 +311,8 @@ class UserProfilesCompanion extends UpdateCompanion<UserProfileEntry> {
     this.name = const Value.absent(),
     this.age = const Value.absent(),
     this.bio = const Value.absent(),
+    this.position = const Value.absent(),
+    this.interests = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
     this.rowid = const Value.absent(),
@@ -257,6 +322,8 @@ class UserProfilesCompanion extends UpdateCompanion<UserProfileEntry> {
     required String name,
     this.age = const Value.absent(),
     this.bio = const Value.absent(),
+    this.position = const Value.absent(),
+    this.interests = const Value.absent(),
     required DateTime createdAt,
     required DateTime updatedAt,
     this.rowid = const Value.absent(),
@@ -269,6 +336,8 @@ class UserProfilesCompanion extends UpdateCompanion<UserProfileEntry> {
     Expression<String>? name,
     Expression<int>? age,
     Expression<String>? bio,
+    Expression<int>? position,
+    Expression<String>? interests,
     Expression<DateTime>? createdAt,
     Expression<DateTime>? updatedAt,
     Expression<int>? rowid,
@@ -278,6 +347,8 @@ class UserProfilesCompanion extends UpdateCompanion<UserProfileEntry> {
       if (name != null) 'name': name,
       if (age != null) 'age': age,
       if (bio != null) 'bio': bio,
+      if (position != null) 'position': position,
+      if (interests != null) 'interests': interests,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
       if (rowid != null) 'rowid': rowid,
@@ -289,6 +360,8 @@ class UserProfilesCompanion extends UpdateCompanion<UserProfileEntry> {
       Value<String>? name,
       Value<int?>? age,
       Value<String?>? bio,
+      Value<int?>? position,
+      Value<String?>? interests,
       Value<DateTime>? createdAt,
       Value<DateTime>? updatedAt,
       Value<int>? rowid}) {
@@ -297,6 +370,8 @@ class UserProfilesCompanion extends UpdateCompanion<UserProfileEntry> {
       name: name ?? this.name,
       age: age ?? this.age,
       bio: bio ?? this.bio,
+      position: position ?? this.position,
+      interests: interests ?? this.interests,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       rowid: rowid ?? this.rowid,
@@ -318,6 +393,12 @@ class UserProfilesCompanion extends UpdateCompanion<UserProfileEntry> {
     if (bio.present) {
       map['bio'] = Variable<String>(bio.value);
     }
+    if (position.present) {
+      map['position'] = Variable<int>(position.value);
+    }
+    if (interests.present) {
+      map['interests'] = Variable<String>(interests.value);
+    }
     if (createdAt.present) {
       map['created_at'] = Variable<DateTime>(createdAt.value);
     }
@@ -337,6 +418,8 @@ class UserProfilesCompanion extends UpdateCompanion<UserProfileEntry> {
           ..write('name: $name, ')
           ..write('age: $age, ')
           ..write('bio: $bio, ')
+          ..write('position: $position, ')
+          ..write('interests: $interests, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('rowid: $rowid')
@@ -792,9 +875,31 @@ class $DiscoveredPeersTable extends DiscoveredPeers
       defaultConstraints:
           GeneratedColumn.constraintIsAlways('CHECK ("is_blocked" IN (0, 1))'),
       defaultValue: const Constant(false));
+  static const VerificationMeta _positionMeta =
+      const VerificationMeta('position');
   @override
-  List<GeneratedColumn> get $columns =>
-      [peerId, name, age, bio, thumbnailData, lastSeenAt, rssi, isBlocked];
+  late final GeneratedColumn<int> position = GeneratedColumn<int>(
+      'position', aliasedName, true,
+      type: DriftSqlType.int, requiredDuringInsert: false);
+  static const VerificationMeta _interestsMeta =
+      const VerificationMeta('interests');
+  @override
+  late final GeneratedColumn<String> interests = GeneratedColumn<String>(
+      'interests', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
+  @override
+  List<GeneratedColumn> get $columns => [
+        peerId,
+        name,
+        age,
+        bio,
+        thumbnailData,
+        lastSeenAt,
+        rssi,
+        isBlocked,
+        position,
+        interests
+      ];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
@@ -848,6 +953,14 @@ class $DiscoveredPeersTable extends DiscoveredPeers
       context.handle(_isBlockedMeta,
           isBlocked.isAcceptableOrUnknown(data['is_blocked']!, _isBlockedMeta));
     }
+    if (data.containsKey('position')) {
+      context.handle(_positionMeta,
+          position.isAcceptableOrUnknown(data['position']!, _positionMeta));
+    }
+    if (data.containsKey('interests')) {
+      context.handle(_interestsMeta,
+          interests.isAcceptableOrUnknown(data['interests']!, _interestsMeta));
+    }
     return context;
   }
 
@@ -873,6 +986,10 @@ class $DiscoveredPeersTable extends DiscoveredPeers
           .read(DriftSqlType.int, data['${effectivePrefix}rssi']),
       isBlocked: attachedDatabase.typeMapping
           .read(DriftSqlType.bool, data['${effectivePrefix}is_blocked'])!,
+      position: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}position']),
+      interests: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}interests']),
     );
   }
 
@@ -892,6 +1009,12 @@ class DiscoveredPeerEntry extends DataClass
   final DateTime lastSeenAt;
   final int? rssi;
   final bool isBlocked;
+
+  /// Position ID received from peer's BLE profile characteristic. null = not shared.
+  final int? position;
+
+  /// Comma-separated interest IDs received from peer. null / empty = not shared.
+  final String? interests;
   const DiscoveredPeerEntry(
       {required this.peerId,
       required this.name,
@@ -900,7 +1023,9 @@ class DiscoveredPeerEntry extends DataClass
       this.thumbnailData,
       required this.lastSeenAt,
       this.rssi,
-      required this.isBlocked});
+      required this.isBlocked,
+      this.position,
+      this.interests});
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
@@ -920,6 +1045,12 @@ class DiscoveredPeerEntry extends DataClass
       map['rssi'] = Variable<int>(rssi);
     }
     map['is_blocked'] = Variable<bool>(isBlocked);
+    if (!nullToAbsent || position != null) {
+      map['position'] = Variable<int>(position);
+    }
+    if (!nullToAbsent || interests != null) {
+      map['interests'] = Variable<String>(interests);
+    }
     return map;
   }
 
@@ -935,6 +1066,12 @@ class DiscoveredPeerEntry extends DataClass
       lastSeenAt: Value(lastSeenAt),
       rssi: rssi == null && nullToAbsent ? const Value.absent() : Value(rssi),
       isBlocked: Value(isBlocked),
+      position: position == null && nullToAbsent
+          ? const Value.absent()
+          : Value(position),
+      interests: interests == null && nullToAbsent
+          ? const Value.absent()
+          : Value(interests),
     );
   }
 
@@ -950,6 +1087,8 @@ class DiscoveredPeerEntry extends DataClass
       lastSeenAt: serializer.fromJson<DateTime>(json['lastSeenAt']),
       rssi: serializer.fromJson<int?>(json['rssi']),
       isBlocked: serializer.fromJson<bool>(json['isBlocked']),
+      position: serializer.fromJson<int?>(json['position']),
+      interests: serializer.fromJson<String?>(json['interests']),
     );
   }
   @override
@@ -964,6 +1103,8 @@ class DiscoveredPeerEntry extends DataClass
       'lastSeenAt': serializer.toJson<DateTime>(lastSeenAt),
       'rssi': serializer.toJson<int?>(rssi),
       'isBlocked': serializer.toJson<bool>(isBlocked),
+      'position': serializer.toJson<int?>(position),
+      'interests': serializer.toJson<String?>(interests),
     };
   }
 
@@ -975,7 +1116,9 @@ class DiscoveredPeerEntry extends DataClass
           Value<Uint8List?> thumbnailData = const Value.absent(),
           DateTime? lastSeenAt,
           Value<int?> rssi = const Value.absent(),
-          bool? isBlocked}) =>
+          bool? isBlocked,
+          Value<int?> position = const Value.absent(),
+          Value<String?> interests = const Value.absent()}) =>
       DiscoveredPeerEntry(
         peerId: peerId ?? this.peerId,
         name: name ?? this.name,
@@ -986,6 +1129,8 @@ class DiscoveredPeerEntry extends DataClass
         lastSeenAt: lastSeenAt ?? this.lastSeenAt,
         rssi: rssi.present ? rssi.value : this.rssi,
         isBlocked: isBlocked ?? this.isBlocked,
+        position: position.present ? position.value : this.position,
+        interests: interests.present ? interests.value : this.interests,
       );
   DiscoveredPeerEntry copyWithCompanion(DiscoveredPeersCompanion data) {
     return DiscoveredPeerEntry(
@@ -1000,6 +1145,8 @@ class DiscoveredPeerEntry extends DataClass
           data.lastSeenAt.present ? data.lastSeenAt.value : this.lastSeenAt,
       rssi: data.rssi.present ? data.rssi.value : this.rssi,
       isBlocked: data.isBlocked.present ? data.isBlocked.value : this.isBlocked,
+      position: data.position.present ? data.position.value : this.position,
+      interests: data.interests.present ? data.interests.value : this.interests,
     );
   }
 
@@ -1013,14 +1160,25 @@ class DiscoveredPeerEntry extends DataClass
           ..write('thumbnailData: $thumbnailData, ')
           ..write('lastSeenAt: $lastSeenAt, ')
           ..write('rssi: $rssi, ')
-          ..write('isBlocked: $isBlocked')
+          ..write('isBlocked: $isBlocked, ')
+          ..write('position: $position, ')
+          ..write('interests: $interests')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(peerId, name, age, bio,
-      $driftBlobEquality.hash(thumbnailData), lastSeenAt, rssi, isBlocked);
+  int get hashCode => Object.hash(
+      peerId,
+      name,
+      age,
+      bio,
+      $driftBlobEquality.hash(thumbnailData),
+      lastSeenAt,
+      rssi,
+      isBlocked,
+      position,
+      interests);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -1032,7 +1190,9 @@ class DiscoveredPeerEntry extends DataClass
           $driftBlobEquality.equals(other.thumbnailData, this.thumbnailData) &&
           other.lastSeenAt == this.lastSeenAt &&
           other.rssi == this.rssi &&
-          other.isBlocked == this.isBlocked);
+          other.isBlocked == this.isBlocked &&
+          other.position == this.position &&
+          other.interests == this.interests);
 }
 
 class DiscoveredPeersCompanion extends UpdateCompanion<DiscoveredPeerEntry> {
@@ -1044,6 +1204,8 @@ class DiscoveredPeersCompanion extends UpdateCompanion<DiscoveredPeerEntry> {
   final Value<DateTime> lastSeenAt;
   final Value<int?> rssi;
   final Value<bool> isBlocked;
+  final Value<int?> position;
+  final Value<String?> interests;
   final Value<int> rowid;
   const DiscoveredPeersCompanion({
     this.peerId = const Value.absent(),
@@ -1054,6 +1216,8 @@ class DiscoveredPeersCompanion extends UpdateCompanion<DiscoveredPeerEntry> {
     this.lastSeenAt = const Value.absent(),
     this.rssi = const Value.absent(),
     this.isBlocked = const Value.absent(),
+    this.position = const Value.absent(),
+    this.interests = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   DiscoveredPeersCompanion.insert({
@@ -1065,6 +1229,8 @@ class DiscoveredPeersCompanion extends UpdateCompanion<DiscoveredPeerEntry> {
     required DateTime lastSeenAt,
     this.rssi = const Value.absent(),
     this.isBlocked = const Value.absent(),
+    this.position = const Value.absent(),
+    this.interests = const Value.absent(),
     this.rowid = const Value.absent(),
   })  : peerId = Value(peerId),
         name = Value(name),
@@ -1078,6 +1244,8 @@ class DiscoveredPeersCompanion extends UpdateCompanion<DiscoveredPeerEntry> {
     Expression<DateTime>? lastSeenAt,
     Expression<int>? rssi,
     Expression<bool>? isBlocked,
+    Expression<int>? position,
+    Expression<String>? interests,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -1089,6 +1257,8 @@ class DiscoveredPeersCompanion extends UpdateCompanion<DiscoveredPeerEntry> {
       if (lastSeenAt != null) 'last_seen_at': lastSeenAt,
       if (rssi != null) 'rssi': rssi,
       if (isBlocked != null) 'is_blocked': isBlocked,
+      if (position != null) 'position': position,
+      if (interests != null) 'interests': interests,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -1102,6 +1272,8 @@ class DiscoveredPeersCompanion extends UpdateCompanion<DiscoveredPeerEntry> {
       Value<DateTime>? lastSeenAt,
       Value<int?>? rssi,
       Value<bool>? isBlocked,
+      Value<int?>? position,
+      Value<String?>? interests,
       Value<int>? rowid}) {
     return DiscoveredPeersCompanion(
       peerId: peerId ?? this.peerId,
@@ -1112,6 +1284,8 @@ class DiscoveredPeersCompanion extends UpdateCompanion<DiscoveredPeerEntry> {
       lastSeenAt: lastSeenAt ?? this.lastSeenAt,
       rssi: rssi ?? this.rssi,
       isBlocked: isBlocked ?? this.isBlocked,
+      position: position ?? this.position,
+      interests: interests ?? this.interests,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -1143,6 +1317,12 @@ class DiscoveredPeersCompanion extends UpdateCompanion<DiscoveredPeerEntry> {
     if (isBlocked.present) {
       map['is_blocked'] = Variable<bool>(isBlocked.value);
     }
+    if (position.present) {
+      map['position'] = Variable<int>(position.value);
+    }
+    if (interests.present) {
+      map['interests'] = Variable<String>(interests.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -1160,6 +1340,8 @@ class DiscoveredPeersCompanion extends UpdateCompanion<DiscoveredPeerEntry> {
           ..write('lastSeenAt: $lastSeenAt, ')
           ..write('rssi: $rssi, ')
           ..write('isBlocked: $isBlocked, ')
+          ..write('position: $position, ')
+          ..write('interests: $interests, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -2435,6 +2617,8 @@ typedef $$UserProfilesTableCreateCompanionBuilder = UserProfilesCompanion
   required String name,
   Value<int?> age,
   Value<String?> bio,
+  Value<int?> position,
+  Value<String?> interests,
   required DateTime createdAt,
   required DateTime updatedAt,
   Value<int> rowid,
@@ -2445,6 +2629,8 @@ typedef $$UserProfilesTableUpdateCompanionBuilder = UserProfilesCompanion
   Value<String> name,
   Value<int?> age,
   Value<String?> bio,
+  Value<int?> position,
+  Value<String?> interests,
   Value<DateTime> createdAt,
   Value<DateTime> updatedAt,
   Value<int> rowid,
@@ -2490,6 +2676,12 @@ class $$UserProfilesTableFilterComposer
 
   ColumnFilters<String> get bio => $composableBuilder(
       column: $table.bio, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<int> get position => $composableBuilder(
+      column: $table.position, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get interests => $composableBuilder(
+      column: $table.interests, builder: (column) => ColumnFilters(column));
 
   ColumnFilters<DateTime> get createdAt => $composableBuilder(
       column: $table.createdAt, builder: (column) => ColumnFilters(column));
@@ -2540,6 +2732,12 @@ class $$UserProfilesTableOrderingComposer
   ColumnOrderings<String> get bio => $composableBuilder(
       column: $table.bio, builder: (column) => ColumnOrderings(column));
 
+  ColumnOrderings<int> get position => $composableBuilder(
+      column: $table.position, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get interests => $composableBuilder(
+      column: $table.interests, builder: (column) => ColumnOrderings(column));
+
   ColumnOrderings<DateTime> get createdAt => $composableBuilder(
       column: $table.createdAt, builder: (column) => ColumnOrderings(column));
 
@@ -2567,6 +2765,12 @@ class $$UserProfilesTableAnnotationComposer
 
   GeneratedColumn<String> get bio =>
       $composableBuilder(column: $table.bio, builder: (column) => column);
+
+  GeneratedColumn<int> get position =>
+      $composableBuilder(column: $table.position, builder: (column) => column);
+
+  GeneratedColumn<String> get interests =>
+      $composableBuilder(column: $table.interests, builder: (column) => column);
 
   GeneratedColumn<DateTime> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
@@ -2623,6 +2827,8 @@ class $$UserProfilesTableTableManager extends RootTableManager<
             Value<String> name = const Value.absent(),
             Value<int?> age = const Value.absent(),
             Value<String?> bio = const Value.absent(),
+            Value<int?> position = const Value.absent(),
+            Value<String?> interests = const Value.absent(),
             Value<DateTime> createdAt = const Value.absent(),
             Value<DateTime> updatedAt = const Value.absent(),
             Value<int> rowid = const Value.absent(),
@@ -2632,6 +2838,8 @@ class $$UserProfilesTableTableManager extends RootTableManager<
             name: name,
             age: age,
             bio: bio,
+            position: position,
+            interests: interests,
             createdAt: createdAt,
             updatedAt: updatedAt,
             rowid: rowid,
@@ -2641,6 +2849,8 @@ class $$UserProfilesTableTableManager extends RootTableManager<
             required String name,
             Value<int?> age = const Value.absent(),
             Value<String?> bio = const Value.absent(),
+            Value<int?> position = const Value.absent(),
+            Value<String?> interests = const Value.absent(),
             required DateTime createdAt,
             required DateTime updatedAt,
             Value<int> rowid = const Value.absent(),
@@ -2650,6 +2860,8 @@ class $$UserProfilesTableTableManager extends RootTableManager<
             name: name,
             age: age,
             bio: bio,
+            position: position,
+            interests: interests,
             createdAt: createdAt,
             updatedAt: updatedAt,
             rowid: rowid,
@@ -3011,6 +3223,8 @@ typedef $$DiscoveredPeersTableCreateCompanionBuilder = DiscoveredPeersCompanion
   required DateTime lastSeenAt,
   Value<int?> rssi,
   Value<bool> isBlocked,
+  Value<int?> position,
+  Value<String?> interests,
   Value<int> rowid,
 });
 typedef $$DiscoveredPeersTableUpdateCompanionBuilder = DiscoveredPeersCompanion
@@ -3023,6 +3237,8 @@ typedef $$DiscoveredPeersTableUpdateCompanionBuilder = DiscoveredPeersCompanion
   Value<DateTime> lastSeenAt,
   Value<int?> rssi,
   Value<bool> isBlocked,
+  Value<int?> position,
+  Value<String?> interests,
   Value<int> rowid,
 });
 
@@ -3080,6 +3296,12 @@ class $$DiscoveredPeersTableFilterComposer
   ColumnFilters<bool> get isBlocked => $composableBuilder(
       column: $table.isBlocked, builder: (column) => ColumnFilters(column));
 
+  ColumnFilters<int> get position => $composableBuilder(
+      column: $table.position, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get interests => $composableBuilder(
+      column: $table.interests, builder: (column) => ColumnFilters(column));
+
   Expression<bool> conversationsRefs(
       Expression<bool> Function($$ConversationsTableFilterComposer f) f) {
     final $$ConversationsTableFilterComposer composer = $composerBuilder(
@@ -3135,6 +3357,12 @@ class $$DiscoveredPeersTableOrderingComposer
 
   ColumnOrderings<bool> get isBlocked => $composableBuilder(
       column: $table.isBlocked, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<int> get position => $composableBuilder(
+      column: $table.position, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get interests => $composableBuilder(
+      column: $table.interests, builder: (column) => ColumnOrderings(column));
 }
 
 class $$DiscoveredPeersTableAnnotationComposer
@@ -3169,6 +3397,12 @@ class $$DiscoveredPeersTableAnnotationComposer
 
   GeneratedColumn<bool> get isBlocked =>
       $composableBuilder(column: $table.isBlocked, builder: (column) => column);
+
+  GeneratedColumn<int> get position =>
+      $composableBuilder(column: $table.position, builder: (column) => column);
+
+  GeneratedColumn<String> get interests =>
+      $composableBuilder(column: $table.interests, builder: (column) => column);
 
   Expression<T> conversationsRefs<T extends Object>(
       Expression<T> Function($$ConversationsTableAnnotationComposer a) f) {
@@ -3224,6 +3458,8 @@ class $$DiscoveredPeersTableTableManager extends RootTableManager<
             Value<DateTime> lastSeenAt = const Value.absent(),
             Value<int?> rssi = const Value.absent(),
             Value<bool> isBlocked = const Value.absent(),
+            Value<int?> position = const Value.absent(),
+            Value<String?> interests = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
               DiscoveredPeersCompanion(
@@ -3235,6 +3471,8 @@ class $$DiscoveredPeersTableTableManager extends RootTableManager<
             lastSeenAt: lastSeenAt,
             rssi: rssi,
             isBlocked: isBlocked,
+            position: position,
+            interests: interests,
             rowid: rowid,
           ),
           createCompanionCallback: ({
@@ -3246,6 +3484,8 @@ class $$DiscoveredPeersTableTableManager extends RootTableManager<
             required DateTime lastSeenAt,
             Value<int?> rssi = const Value.absent(),
             Value<bool> isBlocked = const Value.absent(),
+            Value<int?> position = const Value.absent(),
+            Value<String?> interests = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
               DiscoveredPeersCompanion.insert(
@@ -3257,6 +3497,8 @@ class $$DiscoveredPeersTableTableManager extends RootTableManager<
             lastSeenAt: lastSeenAt,
             rssi: rssi,
             isBlocked: isBlocked,
+            position: position,
+            interests: interests,
             rowid: rowid,
           ),
           withReferenceMapper: (p0) => p0

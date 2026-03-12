@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../bloc/discovery_state.dart';
+import 'radar_peer_sheet.dart';
 
 // ── Ring bucketing ────────────────────────────────────────────────────────────
 
@@ -84,6 +85,21 @@ class RadarView extends StatefulWidget {
   final List<DiscoveredPeer> peers;
   final Duration refreshInterval;
   final int highDensityThreshold;
+
+  /// A [ValueNotifier] that the parent [DiscoveryScreen] listens to in order
+  /// to open a [PeerDetailScreen] when the user taps a dot inside the sheet.
+  static final ValueNotifier<DiscoveredPeer?> _peerTapNotifier =
+      ValueNotifier(null);
+
+  static void listenForPeerTaps(ValueChanged<DiscoveredPeer> onTap) {
+    _peerTapNotifier.addListener(() {
+      final peer = _peerTapNotifier.value;
+      if (peer != null) {
+        _peerTapNotifier.value = null;
+        onTap(peer);
+      }
+    });
+  }
 
   @override
   State<RadarView> createState() => _RadarViewState();
@@ -268,21 +284,6 @@ class _RadarViewState extends State<RadarView>
     );
   }
 
-  /// A [ValueNotifier] that the parent [DiscoveryScreen] listens to in order
-  /// to open a [PeerDetailScreen] when the user taps a dot inside the sheet.
-  static final ValueNotifier<DiscoveredPeer?> _peerTapNotifier =
-      ValueNotifier(null);
-
-  static void listenForPeerTaps(ValueChanged<DiscoveredPeer> onTap) {
-    _peerTapNotifier.addListener(() {
-      final peer = _peerTapNotifier.value;
-      if (peer != null) {
-        _peerTapNotifier.value = null;
-        onTap(peer);
-      }
-    });
-  }
-
   // ── Build ──────────────────────────────────────────────────────────────────
 
   @override
@@ -432,12 +433,12 @@ class _RadarPainter extends CustomPainter {
 
     // Dark radial gradient background
     final bgPaint = Paint()
-      ..shader = RadialGradient(
+      ..shader = const RadialGradient(
         colors: [
-          const Color(0xFF1A2332),
-          const Color(0xFF0D1520),
+          Color(0xFF1A2332),
+          Color(0xFF0D1520),
         ],
-        stops: const [0.0, 1.0],
+        stops: [0.0, 1.0],
       ).createShader(Rect.fromCircle(center: center, radius: maxRadius));
     canvas.drawCircle(center, maxRadius, bgPaint);
 

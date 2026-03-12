@@ -65,12 +65,18 @@ class NsfwDetectorFlutterService implements NsfwDetectionService {
     final detector = await _getDetector();
     final result = await detector.detectNSFWFromFile(File(absolutePath));
     Logger.info(
-      'NsfwDetection: score=${result.score.toStringAsFixed(3)} '
-      'isNsfw=${result.isNsfw} path=$absolutePath',
+      'NsfwDetection: score=${result?.score.toStringAsFixed(3)} '
+          'isNsfw=${result?.isNsfw} path=$absolutePath',
       'NSFW',
     );
+
+    if (result == null) {
+      Logger.error('NSFW detection failed for $absolutePath', 'NSFW');
+      return const NsfwCheckResult(isSafe: true, confidence: 1.0);
+    }
+
     return NsfwCheckResult(
-      isSafe: !result.isNsfw,
+      isSafe: result.isNsfw ? false : true,
       confidence: result.score.toDouble(),
     );
   }
