@@ -1,15 +1,15 @@
 flutter_native_splash:
   color: "#09244B"
-  image: assets/anchor-dark-background.png
+  image: assets/images/anchor-dark-background.png
 
   color_dark: "#ffffff"
-  image_dark: assets/anchor-dark-background.png
+  image_dark: assets/images/anchor-white-background.png
 
   android_12:
-    image: assets/anchor-dark-background.png
+    image: assets/images/anchor-dark-background.png
     icon_background_color: "#09244B"
 
-    image_dark: assets/anchor-dark-background.png
+    image_dark: assets/images/anchor-white-background.png
     icon_background_color_dark: "#ffffff"
 
   web: false
