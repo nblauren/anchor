@@ -152,7 +152,7 @@ class SettingsScreen extends StatelessWidget {
                 Icon(
                   Icons.anchor,
                   size: 32,
-                  color: AppTheme.primaryColor.withValues(alpha: 0.5),
+                  color: AppTheme.primaryLight.withValues(alpha: 0.5),
                 ),
                 const SizedBox(height: 8),
                 const Text(
@@ -206,12 +206,12 @@ class SettingsScreen extends StatelessWidget {
       leading: Container(
         padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
-          color: (textColor ?? AppTheme.primaryColor).withValues(alpha: 0.1),
+          color: (textColor ?? AppTheme.primaryLight).withValues(alpha: 0.1),
           borderRadius: BorderRadius.circular(8),
         ),
         child: Icon(
           icon,
-          color: textColor ?? AppTheme.primaryColor,
+          color: textColor ?? AppTheme.primaryLight,
           size: 20,
         ),
       ),
@@ -258,12 +258,12 @@ class SettingsScreen extends StatelessWidget {
       leading: Container(
         padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
-          color: AppTheme.primaryColor.withValues(alpha: 0.1),
+          color: AppTheme.primaryLight.withValues(alpha: 0.1),
           borderRadius: BorderRadius.circular(8),
         ),
         child: Icon(
           icon,
-          color: AppTheme.primaryColor,
+          color: AppTheme.primaryLight,
           size: 20,
         ),
       ),
@@ -285,7 +285,7 @@ class SettingsScreen extends StatelessWidget {
       trailing: Switch(
         value: value,
         onChanged: onChanged,
-        activeThumbColor: AppTheme.primaryColor,
+        activeThumbColor: AppTheme.primaryLight,
       ),
     );
   }
@@ -401,7 +401,7 @@ class SettingsScreen extends StatelessWidget {
         child: Icon(
           Icons.anchor,
           size: 48,
-          color: AppTheme.primaryColor,
+          color: AppTheme.primaryLight,
         ),
       ),
     );

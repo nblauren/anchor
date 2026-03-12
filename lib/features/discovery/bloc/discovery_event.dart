@@ -157,11 +157,10 @@ class AnchorDropSignalReceived extends DiscoveryEvent {
   List<Object?> get props => [fromPeerId];
 }
 
-/// Apply a local-only position filter to the discovery grid. Pass null to clear.
-class SetPositionFilter extends DiscoveryEvent {
-  const SetPositionFilter(this.positionId);
-  /// null clears the position filter.
-  final int? positionId;
+/// Toggle a position ID in the local-only multi-select position filter.
+class TogglePositionFilter extends DiscoveryEvent {
+  const TogglePositionFilter(this.positionId);
+  final int positionId;
 
   @override
   List<Object?> get props => [positionId];

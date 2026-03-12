@@ -568,13 +568,13 @@ class _RadarPainter extends CustomPainter {
   void _drawYou(Canvas canvas, Offset center) {
     // Outer glow
     final glowPaint = Paint()
-      ..color = AppTheme.primaryColor.withAlpha(50)
+      ..color = AppTheme.primaryLight.withAlpha(50)
       ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10);
     canvas.drawCircle(center, 14, glowPaint);
 
     // Filled circle
     final fillPaint = Paint()
-      ..color = AppTheme.primaryColor
+      ..color = AppTheme.primaryLight
       ..style = PaintingStyle.fill;
     canvas.drawCircle(center, 9, fillPaint);
 

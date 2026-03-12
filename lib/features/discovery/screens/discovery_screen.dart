@@ -162,7 +162,7 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
-                    color: AppTheme.primaryColor.withValues(alpha: 0.2),
+                    color: AppTheme.primaryLight.withValues(alpha: 0.2),
                     borderRadius: BorderRadius.circular(16),
                   ),
                   child: Row(
@@ -171,13 +171,13 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                       const Icon(
                         Icons.bluetooth_connected,
                         size: 14,
-                        color: AppTheme.primaryColor,
+                        color: AppTheme.primaryLight,
                       ),
                       const SizedBox(width: 4),
                       Text(
                         _peerCountLabel(state),
                         style: const TextStyle(
-                          color: AppTheme.primaryColor,
+                          color: AppTheme.primaryLight,
                           fontWeight: FontWeight.bold,
                           fontSize: 12,
                         ),
@@ -230,7 +230,7 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                           width: 8,
                           height: 8,
                           decoration: const BoxDecoration(
-                            color: AppTheme.primaryColor,
+                            color: AppTheme.primaryLight,
                             shape: BoxShape.circle,
                           ),
                         ),
@@ -357,20 +357,20 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
   Widget _buildActiveFilterStrip(BuildContext context, DiscoveryState state) {
     final bloc = context.read<DiscoveryBloc>();
     return Container(
-      color: AppTheme.primaryColor.withAlpha(20),
+      color: AppTheme.primaryLight.withAlpha(20),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       child: Row(
         children: [
-          const Icon(Icons.tune_rounded, size: 14, color: AppTheme.primaryColor),
+          const Icon(Icons.tune_rounded, size: 14, color: AppTheme.primaryLight),
           const SizedBox(width: 6),
           Expanded(
             child: Wrap(
               spacing: 6,
               children: [
-                if (state.filterPositionId != null)
+                for (final id in state.filterPositionIds)
                   _FilterChip(
-                    label: ProfileConstants.positionMap[state.filterPositionId] ?? '?',
-                    onRemove: () => bloc.add(const SetPositionFilter(null)),
+                    label: ProfileConstants.positionMap[id] ?? '?',
+                    onRemove: () => bloc.add(TogglePositionFilter(id)),
                   ),
                 for (final id in state.filterInterestIds)
                   _FilterChip(
@@ -383,7 +383,7 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
           TextButton(
             onPressed: () => bloc.add(const ClearFilters()),
             style: TextButton.styleFrom(
-              foregroundColor: AppTheme.primaryColor,
+              foregroundColor: AppTheme.primaryLight,
               padding: EdgeInsets.zero,
               minimumSize: const Size(0, 0),
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -452,13 +452,13 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                       width: 120,
                       height: 120,
                       decoration: BoxDecoration(
-                        color: AppTheme.primaryColor.withValues(alpha: 0.1),
+                        color: AppTheme.primaryLight.withValues(alpha: 0.1),
                         shape: BoxShape.circle,
                       ),
                       child: Icon(
                         Icons.radar,
                         size: 64,
-                        color: AppTheme.primaryColor.withValues(alpha: 0.6),
+                        color: AppTheme.primaryLight.withValues(alpha: 0.6),
                       ),
                     ),
                     const SizedBox(height: 24),
@@ -611,7 +611,7 @@ class _ToggleButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = selected ? AppTheme.primaryColor : AppTheme.textHint;
+    final color = selected ? AppTheme.primaryLight : AppTheme.textHint;
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
@@ -620,7 +620,7 @@ class _ToggleButton extends StatelessWidget {
         height: double.infinity,
         decoration: BoxDecoration(
           color: selected
-              ? AppTheme.primaryColor.withAlpha(30)
+              ? AppTheme.primaryLight.withAlpha(30)
               : Colors.transparent,
           borderRadius: BorderRadius.circular(7),
         ),
@@ -691,9 +691,9 @@ class _FilterChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(
-        color: AppTheme.primaryColor.withAlpha(38),
+        color: AppTheme.primaryLight.withAlpha(38),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.primaryColor.withAlpha(102)),
+        border: Border.all(color: AppTheme.primaryLight.withAlpha(102)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -701,7 +701,7 @@ class _FilterChip extends StatelessWidget {
           Text(
             label,
             style: const TextStyle(
-                color: AppTheme.primaryColor,
+                color: AppTheme.primaryLight,
                 fontSize: 11,
                 fontWeight: FontWeight.w600),
           ),
@@ -709,7 +709,7 @@ class _FilterChip extends StatelessWidget {
           GestureDetector(
             onTap: onRemove,
             child: const Icon(Icons.close,
-                size: 12, color: AppTheme.primaryColor),
+                size: 12, color: AppTheme.primaryLight),
           ),
         ],
       ),
@@ -790,23 +790,23 @@ class _FilterSheet extends StatelessWidget {
                 spacing: 8,
                 runSpacing: 8,
                 children: [
-                  // "Any" chip
-                  ChoiceChip(
+                  // "Any" chip — selected when no position filters active
+                  FilterChip(
                     label: const Text('Any'),
-                    selected: state.filterPositionId == null,
-                    onSelected: (_) => bloc.add(const SetPositionFilter(null)),
-                    selectedColor: AppTheme.primaryColor.withAlpha(51),
+                    selected: state.filterPositionIds.isEmpty,
+                    onSelected: (_) => bloc.add(const ClearFilters()),
+                    selectedColor: AppTheme.primaryLight.withAlpha(51),
                     labelStyle: TextStyle(
-                      color: state.filterPositionId == null
-                          ? AppTheme.primaryColor
+                      color: state.filterPositionIds.isEmpty
+                          ? AppTheme.primaryLight
                           : AppTheme.textSecondary,
-                      fontWeight: state.filterPositionId == null
+                      fontWeight: state.filterPositionIds.isEmpty
                           ? FontWeight.w600
                           : FontWeight.normal,
                     ),
                     side: BorderSide(
-                      color: state.filterPositionId == null
-                          ? AppTheme.primaryColor
+                      color: state.filterPositionIds.isEmpty
+                          ? AppTheme.primaryLight
                           : Colors.white24,
                     ),
                     shape: RoundedRectangleBorder(
@@ -814,26 +814,23 @@ class _FilterSheet extends StatelessWidget {
                     backgroundColor: AppTheme.darkCard,
                   ),
                   ...ProfileConstants.positionMap.entries.map((e) {
-                    final selected = state.filterPositionId == e.key;
-                    return ChoiceChip(
+                    final selected = state.filterPositionIds.contains(e.key);
+                    return FilterChip(
                       label: Text(e.value),
                       selected: selected,
-                      onSelected: (_) => bloc.add(
-                        selected
-                            ? const SetPositionFilter(null)
-                            : SetPositionFilter(e.key),
-                      ),
-                      selectedColor: AppTheme.primaryColor.withAlpha(51),
+                      onSelected: (_) =>
+                          bloc.add(TogglePositionFilter(e.key)),
+                      selectedColor: AppTheme.primaryLight.withAlpha(51),
                       labelStyle: TextStyle(
                         color: selected
-                            ? AppTheme.primaryColor
+                            ? AppTheme.primaryLight
                             : AppTheme.textSecondary,
                         fontWeight:
                             selected ? FontWeight.w600 : FontWeight.normal,
                       ),
                       side: BorderSide(
                         color:
-                            selected ? AppTheme.primaryColor : Colors.white24,
+                            selected ? AppTheme.primaryLight : Colors.white24,
                       ),
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(20)),
@@ -872,19 +869,19 @@ class _FilterSheet extends StatelessWidget {
                     selected: selected,
                     onSelected: (_) =>
                         bloc.add(ToggleInterestFilter(e.key)),
-                    selectedColor: AppTheme.primaryColor.withAlpha(51),
-                    checkmarkColor: AppTheme.primaryColor,
+                    selectedColor: AppTheme.primaryLight.withAlpha(51),
+                    checkmarkColor: AppTheme.primaryLight,
                     backgroundColor: AppTheme.darkCard,
                     labelStyle: TextStyle(
                       color: selected
-                          ? AppTheme.primaryColor
+                          ? AppTheme.primaryLight
                           : AppTheme.textSecondary,
                       fontWeight:
                           selected ? FontWeight.w600 : FontWeight.normal,
                     ),
                     side: BorderSide(
                       color:
-                          selected ? AppTheme.primaryColor : Colors.white24,
+                          selected ? AppTheme.primaryLight : Colors.white24,
                     ),
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(20)),

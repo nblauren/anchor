@@ -343,14 +343,14 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 12, vertical: 6),
                       decoration: BoxDecoration(
-                        color: AppTheme.primaryColor.withAlpha(26),
+                        color: AppTheme.primaryLight.withAlpha(26),
                         borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: AppTheme.primaryColor.withAlpha(77)),
+                        border: Border.all(color: AppTheme.primaryLight.withAlpha(77)),
                       ),
                       child: Text(
                         _peer.positionLabel!,
                         style: const TextStyle(
-                          color: AppTheme.primaryColor,
+                          color: AppTheme.primaryLight,
                           fontWeight: FontWeight.w600,
                           fontSize: 14,
                         ),
@@ -732,8 +732,8 @@ class _ActionIconButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final effectiveColor = onPressed == null
-        ? color ?? AppTheme.primaryColor
-        : color ?? AppTheme.primaryColor;
+        ? color ?? AppTheme.primaryLight
+        : color ?? AppTheme.primaryLight;
     final dimmed = onPressed == null;
 
     return GestureDetector(

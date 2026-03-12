@@ -69,11 +69,11 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
       (event, emit) => emit(state.copyWith(incomingAnchorDropName: null)),
     );
     on<_ApplyDebouncedState>((event, emit) => emit(event.newState));
-    on<SetPositionFilter>(_onSetPositionFilter);
+    on<TogglePositionFilter>(_onTogglePositionFilter);
     on<ToggleInterestFilter>(_onToggleInterestFilter);
     on<ClearFilters>(
       (event, emit) => emit(state.copyWith(
-        filterPositionId: null,
+        filterPositionIds: const {},
         filterInterestIds: const {},
       )),
     );
@@ -619,11 +619,17 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
 
   // ── Local filter handlers ─────────────────────────────────────────────────
 
-  void _onSetPositionFilter(
-    SetPositionFilter event,
+  void _onTogglePositionFilter(
+    TogglePositionFilter event,
     Emitter<DiscoveryState> emit,
   ) {
-    emit(state.copyWith(filterPositionId: event.positionId));
+    final updated = Set<int>.from(state.filterPositionIds);
+    if (updated.contains(event.positionId)) {
+      updated.remove(event.positionId);
+    } else {
+      updated.add(event.positionId);
+    }
+    emit(state.copyWith(filterPositionIds: updated));
   }
 
   void _onToggleInterestFilter(

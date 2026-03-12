@@ -39,7 +39,7 @@ class PermissionsScreen extends StatelessWidget {
                     width: 120,
                     height: 120,
                     decoration: BoxDecoration(
-                      color: AppTheme.primaryColor.withValues(alpha: 0.1),
+                      color: AppTheme.primaryLight.withValues(alpha: 0.1),
                       shape: BoxShape.circle,
                     ),
                     child: Icon(
@@ -110,7 +110,7 @@ class PermissionsScreen extends StatelessWidget {
       case BleConnectionStatus.error:
         return AppTheme.error;
       default:
-        return AppTheme.primaryColor;
+        return AppTheme.primaryLight;
     }
   }
 
@@ -189,10 +189,10 @@ class PermissionsScreen extends StatelessWidget {
         Container(
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: AppTheme.primaryColor.withValues(alpha: 0.1),
+            color: AppTheme.primaryLight.withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(8),
           ),
-          child: Icon(icon, color: AppTheme.primaryColor, size: 20),
+          child: Icon(icon, color: AppTheme.primaryLight, size: 20),
         ),
         const SizedBox(width: 16),
         Expanded(

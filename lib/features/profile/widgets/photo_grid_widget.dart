@@ -266,7 +266,7 @@ class _AddPhotoButton extends StatelessWidget {
             color: AppTheme.darkCard,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: AppTheme.primaryColor.withValues(alpha: 0.5),
+              color: AppTheme.primaryLight.withValues(alpha: 0.5),
               width: 2,
               strokeAlign: BorderSide.strokeAlignInside,
             ),
@@ -278,7 +278,7 @@ class _AddPhotoButton extends StatelessWidget {
                     height: 24,
                     child: CircularProgressIndicator(
                       strokeWidth: 2,
-                      color: AppTheme.primaryColor,
+                      color: AppTheme.primaryLight,
                     ),
                   )
                 : const Column(
@@ -286,14 +286,14 @@ class _AddPhotoButton extends StatelessWidget {
                     children: [
                       Icon(
                         Icons.add_photo_alternate,
-                        color: AppTheme.primaryColor,
+                        color: AppTheme.primaryLight,
                         size: 32,
                       ),
                       SizedBox(height: 4),
                       Text(
                         'Add Photo',
                         style: TextStyle(
-                          color: AppTheme.primaryColor,
+                          color: AppTheme.primaryLight,
                           fontSize: 14,
                         ),
                       ),

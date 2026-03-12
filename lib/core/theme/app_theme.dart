@@ -1,23 +1,28 @@
 import 'package:flutter/material.dart';
 
-/// Dark theme for the Anchor dating app
+/// Vibrant, gay-friendly dark theme for the Anchor dating app
 class AppTheme {
   AppTheme._();
 
   // Brand colors
-  static const Color primaryColor = Color(0xFFE91E63); // Pink accent
-  static const Color secondaryColor = Color(0xFF9C27B0); // Purple
-  static const Color accentColor = Color(0xFFFF4081);
+  static const Color primaryColor = Color(0xFFFF3366); // Hot Pink - main
+  static const Color primaryLight =
+      Color(0xFFFF7FA0); // Soft pink for cards, hover
+  static const Color secondaryColor =
+      Color(0xFF2C2F8C); // Deep indigo for contrast
+  static const Color accentColor =
+      Color(0xFF00D1FF); // Electric cyan for highlights
 
   // Dark theme colors
-  static const Color darkBackground = Color(0xFF121212);
-  static const Color darkSurface = Color(0xFF1E1E1E);
-  static const Color darkCard = Color(0xFF2C2C2C);
+  static const Color darkBackground =
+      Color(0xFF1A1A2E); // Slightly lighter than pure black
+  static const Color darkSurface = Color(0xFF27293D); // Elevated surfaces
+  static const Color darkCard = Color(0xFF33365C); // Cards
 
   // Text colors
   static const Color textPrimary = Color(0xFFFFFFFF);
-  static const Color textSecondary = Color(0xFFB3B3B3);
-  static const Color textHint = Color(0xFF757575);
+  static const Color textSecondary = Color(0xFFCCCCCC);
+  static const Color textHint = Color(0xFFAAAAAA);
 
   // Status colors
   static const Color success = Color(0xFF4CAF50);
@@ -35,6 +40,7 @@ class AppTheme {
       colorScheme: const ColorScheme.dark(
         primary: primaryColor,
         secondary: secondaryColor,
+        tertiary: accentColor,
         surface: darkSurface,
         error: error,
         onPrimary: textPrimary,
@@ -55,7 +61,7 @@ class AppTheme {
       ),
       cardTheme: const CardThemeData(
         color: darkCard,
-        elevation: 2,
+        elevation: 4,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.all(Radius.circular(16)),
         ),
@@ -79,8 +85,8 @@ class AppTheme {
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          foregroundColor: primaryColor,
-          side: const BorderSide(color: primaryColor),
+          foregroundColor: primaryLight,
+          side: const BorderSide(color: primaryLight),
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(24),
@@ -89,7 +95,7 @@ class AppTheme {
       ),
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
-          foregroundColor: primaryColor,
+          foregroundColor: primaryLight,
         ),
       ),
       inputDecorationTheme: InputDecorationTheme(
@@ -101,7 +107,7 @@ class AppTheme {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: primaryColor, width: 2),
+          borderSide: const BorderSide(color: primaryLight, width: 2),
         ),
         errorBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
@@ -113,7 +119,7 @@ class AppTheme {
       ),
       chipTheme: ChipThemeData(
         backgroundColor: darkCard,
-        selectedColor: primaryColor.withValues(alpha: 0.3),
+        selectedColor: primaryLight.withAlpha(100),
         labelStyle: const TextStyle(color: textPrimary),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         shape: RoundedRectangleBorder(
@@ -125,7 +131,7 @@ class AppTheme {
         foregroundColor: textPrimary,
       ),
       dividerTheme: const DividerThemeData(
-        color: darkCard,
+        color: darkSurface,
         thickness: 1,
       ),
       snackBarTheme: SnackBarThemeData(

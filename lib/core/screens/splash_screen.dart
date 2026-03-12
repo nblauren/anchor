@@ -16,11 +16,11 @@ class SplashScreen extends StatelessWidget {
             Icon(
               Icons.anchor,
               size: 80,
-              color: AppTheme.primaryColor,
+              color: AppTheme.primaryLight,
             ),
             SizedBox(height: 24),
             CircularProgressIndicator(
-              color: AppTheme.primaryColor,
+              color: AppTheme.primaryLight,
             ),
           ],
         ),

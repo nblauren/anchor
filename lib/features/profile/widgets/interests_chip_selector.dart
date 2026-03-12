@@ -50,22 +50,22 @@ class InterestsChipSelector extends StatelessWidget {
               label: Text(e.value),
               selected: selected,
               onSelected: disabled ? null : (_) => _toggle(e.key),
-              selectedColor: AppTheme.primaryColor.withAlpha(51),
-              checkmarkColor: AppTheme.primaryColor,
+              selectedColor: AppTheme.primaryLight.withAlpha(51),
+              checkmarkColor: AppTheme.primaryLight,
               backgroundColor: AppTheme.darkCard,
               disabledColor: AppTheme.darkCard.withAlpha(128),
               labelStyle: TextStyle(
                 color: disabled
                     ? AppTheme.textHint
                     : selected
-                        ? AppTheme.primaryColor
+                        ? AppTheme.primaryLight
                         : AppTheme.textSecondary,
                 fontWeight:
                     selected ? FontWeight.w600 : FontWeight.normal,
               ),
               side: BorderSide(
                 color: selected
-                    ? AppTheme.primaryColor
+                    ? AppTheme.primaryLight
                     : Colors.white12,
               ),
               shape: RoundedRectangleBorder(

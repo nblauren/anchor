@@ -178,7 +178,7 @@ class DiscoveryState extends Equatable {
     this.isScanning = false,
     this.droppedAnchorPeerIds = const {},
     this.incomingAnchorDropName,
-    this.filterPositionId,
+    this.filterPositionIds = const {},
     this.filterInterestIds = const {},
   });
 
@@ -194,13 +194,13 @@ class DiscoveryState extends Equatable {
 
   // ── Local-only discovery filters (no BLE impact) ─────────────────────────
 
-  /// When non-null, only show peers with this exact position ID (or no position set).
-  final int? filterPositionId;
+  /// When non-empty, only show peers whose position matches one of these IDs (or no position set).
+  final Set<int> filterPositionIds;
   /// When non-empty, only show peers that share at least one of these interest IDs.
   final Set<int> filterInterestIds;
 
   bool get hasActiveFilters =>
-      filterPositionId != null || filterInterestIds.isNotEmpty;
+      filterPositionIds.isNotEmpty || filterInterestIds.isNotEmpty;
 
   /// Visible peers (excluding blocked), sorted by last seen.
   /// Deduplicates by peerId in case a MAC rotation briefly produces two entries.
@@ -215,8 +215,8 @@ class DiscoveryState extends Equatable {
   }
 
   bool _passesFilters(DiscoveredPeer p) {
-    if (filterPositionId != null && p.position != null &&
-        p.position != filterPositionId) {
+    if (filterPositionIds.isNotEmpty && p.position != null &&
+        !filterPositionIds.contains(p.position)) {
       return false;
     }
     if (filterInterestIds.isNotEmpty && p.interestIds.isNotEmpty) {
@@ -251,7 +251,7 @@ class DiscoveryState extends Equatable {
     bool? isScanning,
     Set<String>? droppedAnchorPeerIds,
     Object? incomingAnchorDropName = _sentinel,
-    Object? filterPositionId = _sentinel,
+    Set<int>? filterPositionIds,
     Set<int>? filterInterestIds,
   }) {
     return DiscoveryState(
@@ -264,9 +264,7 @@ class DiscoveryState extends Equatable {
       incomingAnchorDropName: incomingAnchorDropName == _sentinel
           ? this.incomingAnchorDropName
           : incomingAnchorDropName as String?,
-      filterPositionId: filterPositionId == _sentinel
-          ? this.filterPositionId
-          : filterPositionId as int?,
+      filterPositionIds: filterPositionIds ?? this.filterPositionIds,
       filterInterestIds: filterInterestIds ?? this.filterInterestIds,
     );
   }
@@ -280,7 +278,7 @@ class DiscoveryState extends Equatable {
         isScanning,
         droppedAnchorPeerIds,
         incomingAnchorDropName,
-        filterPositionId,
+        filterPositionIds,
         filterInterestIds,
       ];
 }

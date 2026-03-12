@@ -194,7 +194,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
               _formatTime(conv.conversation.updatedAt),
               style: TextStyle(
                 fontSize: 12,
-                color: hasUnread ? AppTheme.primaryColor : AppTheme.textHint,
+                color: hasUnread ? AppTheme.primaryLight : AppTheme.textHint,
               ),
             ),
             if (hasUnread) ...[

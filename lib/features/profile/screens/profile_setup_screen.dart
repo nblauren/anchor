@@ -9,10 +9,13 @@ import '../bloc/profile_state.dart';
 import '../widgets/interests_chip_selector.dart';
 import '../widgets/photo_grid_widget.dart';
 import '../widgets/photo_source_sheet.dart';
-import '../widgets/position_dropdown.dart';
+import '../widgets/position_chip_selector.dart';
 import '../widgets/profile_preview_widget.dart';
 
-/// Initial profile setup screen for new users (or editing existing profile)
+/// Initial profile setup screen for new users (or editing existing profile).
+///
+/// Create flow: 7-step PageView (5 info steps + Photos + Preview).
+/// Edit flow: same as before (single info page + photos + preview).
 class ProfileSetupScreen extends StatefulWidget {
   const ProfileSetupScreen({
     super.key,
@@ -28,7 +31,8 @@ class ProfileSetupScreen extends StatefulWidget {
 }
 
 class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
-  final _formKey = GlobalKey<FormState>();
+  final _nameFormKey = GlobalKey<FormState>();
+  final _ageFormKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _ageController = TextEditingController();
   final _bioController = TextEditingController();
@@ -38,22 +42,28 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   bool _profileCreated = false;
   bool _initialized = false;
 
-  // Optional "More About You" fields
   int? _selectedPosition;
   List<int> _selectedInterestIds = [];
-  bool _moreAboutYouExpanded = false;
+
+  /// Total pages: 5 info steps + Photos + Preview = 7 for create,
+  /// or 3 (single info + photos + preview) for edit.
+  int get _totalPages => widget.isEditing ? 3 : 7;
+
+  /// Index of the photos page.
+  int get _photosPageIndex => widget.isEditing ? 1 : 5;
+
+  /// The last info step index (where we save the profile).
+  int get _lastInfoStepIndex => widget.isEditing ? 0 : 4;
 
   @override
   void initState() {
     super.initState();
-    // If editing, start with profile created flag true
     _profileCreated = widget.isEditing;
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // Pre-fill form fields if editing
     if (!_initialized && widget.isEditing) {
       final state = context.read<ProfileBloc>().state;
       _nameController.text = state.name ?? '';
@@ -61,9 +71,6 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
       _bioController.text = state.bio ?? '';
       _selectedPosition = state.position;
       _selectedInterestIds = List<int>.from(state.interestIds);
-      if (_selectedPosition != null || _selectedInterestIds.isNotEmpty) {
-        _moreAboutYouExpanded = true;
-      }
       _initialized = true;
     }
   }
@@ -77,45 +84,87 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
     super.dispose();
   }
 
-  void _nextPage() {
-    if (_currentPage == 0) {
-      // Validate profile info before moving to photos
-      if (!_formKey.currentState!.validate()) return;
+  void _goToPage(int page) {
+    // Dismiss keyboard when leaving text-input steps (name/age/bio).
+    if (!widget.isEditing && _currentPage <= 2 && page > 2) {
+      FocusScope.of(context).unfocus();
+    }
+    _pageController.animateToPage(
+      page,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
+    );
+  }
 
-      final bloc = context.read<ProfileBloc>();
-      if (!_profileCreated) {
-        // Create profile first
-        bloc.add(CreateProfile(
-          name: _nameController.text.trim(),
-          age: _ageController.text.isNotEmpty ? int.tryParse(_ageController.text) : null,
-          bio: _bioController.text.trim().isNotEmpty ? _bioController.text.trim() : null,
-          position: _selectedPosition,
-          interests: _selectedInterestIds,
-        ));
-      } else {
-        // Update existing profile
-        bloc.add(UpdateProfile(
-          name: _nameController.text.trim(),
-          age: _ageController.text.isNotEmpty ? int.tryParse(_ageController.text) : null,
-          bio: _bioController.text.trim().isNotEmpty ? _bioController.text.trim() : null,
-          position: _selectedPosition,
-          clearPosition: _selectedPosition == null,
-          interests: _selectedInterestIds,
-        ));
+  void _nextPage() {
+    // For edit mode, page 0 is the combined info page — validate and save.
+    if (widget.isEditing && _currentPage == 0) {
+      if (!_nameFormKey.currentState!.validate()) return;
+      _saveProfile();
+      return;
+    }
+
+    // For create mode, handle each step.
+    if (!widget.isEditing) {
+      if (_currentPage == 0) {
+        // Step 1: Name — validate
+        if (!_nameFormKey.currentState!.validate()) return;
+      } else if (_currentPage == 1) {
+        // Step 2: Age — validate if filled
+        if (!_ageFormKey.currentState!.validate()) return;
       }
+
+      // If this is the last info step, save profile.
+      if (_currentPage == _lastInfoStepIndex) {
+        _saveProfile();
+        return;
+      }
+    }
+
+    // Otherwise just advance.
+    _goToPage(_currentPage + 1);
+  }
+
+  void _skipStep() {
+    if (_currentPage == _lastInfoStepIndex) {
+      _saveProfile();
+      return;
+    }
+    _goToPage(_currentPage + 1);
+  }
+
+  void _saveProfile() {
+    final bloc = context.read<ProfileBloc>();
+    if (!_profileCreated) {
+      bloc.add(CreateProfile(
+        name: _nameController.text.trim(),
+        age: _ageController.text.isNotEmpty
+            ? int.tryParse(_ageController.text)
+            : null,
+        bio: _bioController.text.trim().isNotEmpty
+            ? _bioController.text.trim()
+            : null,
+        position: _selectedPosition,
+        interests: _selectedInterestIds,
+      ));
     } else {
-      _pageController.nextPage(
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeInOut,
-      );
+      bloc.add(UpdateProfile(
+        name: _nameController.text.trim(),
+        age: _ageController.text.isNotEmpty
+            ? int.tryParse(_ageController.text)
+            : null,
+        bio: _bioController.text.trim().isNotEmpty
+            ? _bioController.text.trim()
+            : null,
+        position: _selectedPosition,
+        clearPosition: _selectedPosition == null,
+        interests: _selectedInterestIds,
+      ));
     }
   }
 
   void _previousPage() {
-    _pageController.previousPage(
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeInOut,
-    );
+    _goToPage(_currentPage - 1);
   }
 
   void _finishSetup() {
@@ -132,25 +181,38 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   void _showPhotoSourceSheet() {
     PhotoSourceSheet.show(
       context,
-      onCamera: () => context.read<ProfileBloc>().add(const PickPhotoFromCamera()),
-      onGallery: () => context.read<ProfileBloc>().add(const PickPhotoFromGallery()),
+      onCamera: () =>
+          context.read<ProfileBloc>().add(const PickPhotoFromCamera()),
+      onGallery: () =>
+          context.read<ProfileBloc>().add(const PickPhotoFromGallery()),
     );
+  }
+
+  String get _appBarTitle {
+    if (widget.isEditing) return 'Edit Profile';
+    if (_currentPage <= _lastInfoStepIndex) return 'Create Profile';
+    if (_currentPage == _photosPageIndex) return 'Add Photos';
+    return 'Preview';
   }
 
   @override
   Widget build(BuildContext context) {
     return BlocConsumer<ProfileBloc, ProfileState>(
       listener: (context, state) {
-        // Handle profile creation success - move to photos page
-        if (state.status == ProfileStatus.saved && !_profileCreated && _currentPage == 0) {
+        // Profile created/saved — advance to photos page.
+        if (state.status == ProfileStatus.saved &&
+            !_profileCreated &&
+            _currentPage <= _lastInfoStepIndex) {
           setState(() => _profileCreated = true);
-          _pageController.nextPage(
-            duration: const Duration(milliseconds: 300),
-            curve: Curves.easeInOut,
-          );
+          _goToPage(_photosPageIndex);
+        } else if (state.status == ProfileStatus.saved &&
+            _profileCreated &&
+            _currentPage <= _lastInfoStepIndex) {
+          // Edit mode save — advance to photos.
+          _goToPage(_photosPageIndex);
         }
 
-        // Show NSFW block alert when a photo is blocked from becoming primary
+        // NSFW block alert
         if (state.nsfwBlockedPhotoId != null) {
           showDialog<void>(
             context: context,
@@ -185,7 +247,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
       builder: (context, state) {
         return Scaffold(
           appBar: AppBar(
-            title: Text(widget.isEditing ? 'Edit Profile' : 'Create Profile'),
+            title: Text(_appBarTitle),
             leading: _currentPage > 0
                 ? IconButton(
                     icon: const Icon(Icons.arrow_back),
@@ -196,24 +258,31 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
           body: SafeArea(
             child: Column(
               children: [
-                // Progress indicator
-                LinearProgressIndicator(
-                  value: (_currentPage + 1) / 3,
-                  backgroundColor: AppTheme.darkCard,
-                  valueColor: const AlwaysStoppedAnimation(AppTheme.primaryColor),
-                ),
+                // Step dots
+                if (widget.isEditing == false) _buildStepDots(),
 
                 // Pages
                 Expanded(
                   child: PageView(
                     controller: _pageController,
                     physics: const NeverScrollableScrollPhysics(),
-                    onPageChanged: (page) => setState(() => _currentPage = page),
-                    children: [
-                      _buildProfileInfoPage(state),
-                      _buildPhotosPage(state),
-                      _buildPreviewPage(state),
-                    ],
+                    onPageChanged: (page) =>
+                        setState(() => _currentPage = page),
+                    children: widget.isEditing
+                        ? [
+                            _buildEditInfoPage(state),
+                            _buildPhotosPage(state),
+                            _buildPreviewPage(state),
+                          ]
+                        : [
+                            _buildNameStep(state),
+                            _buildAgeStep(state),
+                            _buildBioStep(state),
+                            _buildPositionStep(state),
+                            _buildInterestsStep(state),
+                            _buildPhotosPage(state),
+                            _buildPreviewPage(state),
+                          ],
                   ),
                 ),
               ],
@@ -224,32 +293,240 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
     );
   }
 
-  Widget _buildProfileInfoPage(ProfileState state) {
+  Widget _buildStepDots() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: List.generate(_totalPages, (i) {
+          final isActive = i == _currentPage;
+          final isCompleted = i < _currentPage;
+          return AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            margin: const EdgeInsets.symmetric(horizontal: 4),
+            width: isActive ? 24 : 8,
+            height: 8,
+            decoration: BoxDecoration(
+              color: isActive
+                  ? AppTheme.primaryLight
+                  : isCompleted
+                      ? AppTheme.primaryLight.withAlpha(128)
+                      : Colors.white24,
+              borderRadius: BorderRadius.circular(4),
+            ),
+          );
+        }),
+      ),
+    );
+  }
+
+  // ── Create flow: Step pages ──────────────────────────────────────────────
+
+  Widget _buildStepLayout({
+    required String title,
+    required String subtitle,
+    required Widget child,
+    required VoidCallback onContinue,
+    bool showSkip = false,
+    VoidCallback? onSkip,
+    bool isSaving = false,
+    String continueLabel = 'Continue',
+  }) {
+    return Padding(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            subtitle,
+            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                  color: AppTheme.textSecondary,
+                ),
+          ),
+          const SizedBox(height: 32),
+          Expanded(child: child),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: isSaving ? null : onContinue,
+              child: isSaving
+                  ? const SizedBox(
+                      height: 20,
+                      width: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : Text(continueLabel),
+            ),
+          ),
+          if (showSkip) ...[
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: TextButton(
+                onPressed: isSaving ? null : (onSkip ?? _skipStep),
+                child: const Text('Skip'),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNameStep(ProfileState state) {
+    return _buildStepLayout(
+      title: "What's your name?",
+      subtitle: 'This is how others will see you.',
+      onContinue: _nextPage,
+      isSaving: state.status == ProfileStatus.saving,
+      child: Form(
+        key: _nameFormKey,
+        child: TextFormField(
+          controller: _nameController,
+          decoration: const InputDecoration(
+            hintText: 'Enter your name',
+            prefixIcon: Icon(Icons.person_outline),
+          ),
+          textCapitalization: TextCapitalization.words,
+          autofocus: true,
+          validator: (value) {
+            if (value == null || value.trim().isEmpty) {
+              return 'Please enter your name';
+            }
+            if (value.trim().length < 2) {
+              return 'Name must be at least 2 characters';
+            }
+            return null;
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAgeStep(ProfileState state) {
+    return _buildStepLayout(
+      title: 'How old are you?',
+      subtitle: 'Optional — only shown on your profile.',
+      onContinue: _nextPage,
+      showSkip: true,
+      isSaving: state.status == ProfileStatus.saving,
+      child: Form(
+        key: _ageFormKey,
+        child: TextFormField(
+          controller: _ageController,
+          decoration: const InputDecoration(
+            hintText: 'Enter your age',
+            prefixIcon: Icon(Icons.cake_outlined),
+          ),
+          keyboardType: TextInputType.number,
+          autofocus: true,
+          inputFormatters: [
+            FilteringTextInputFormatter.digitsOnly,
+            LengthLimitingTextInputFormatter(3),
+          ],
+          validator: (value) {
+            if (value != null && value.isNotEmpty) {
+              final age = int.tryParse(value);
+              if (age == null || age < 18 || age > 120) {
+                return 'Please enter a valid age (18-120)';
+              }
+            }
+            return null;
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBioStep(ProfileState state) {
+    return _buildStepLayout(
+      title: 'Tell us about yourself',
+      subtitle: 'A short bio to help others get to know you.',
+      onContinue: _nextPage,
+      showSkip: true,
+      isSaving: state.status == ProfileStatus.saving,
+      child: TextFormField(
+        controller: _bioController,
+        decoration: const InputDecoration(
+          hintText: 'Write something about yourself...',
+          prefixIcon: Icon(Icons.edit_outlined),
+          alignLabelWithHint: true,
+        ),
+        maxLines: 5,
+        maxLength: 200,
+        textCapitalization: TextCapitalization.sentences,
+        autofocus: true,
+      ),
+    );
+  }
+
+  Widget _buildPositionStep(ProfileState state) {
+    return _buildStepLayout(
+      title: "What's your position?",
+      subtitle: 'Optional — tap to select, tap again to deselect.',
+      onContinue: _nextPage,
+      showSkip: true,
+      isSaving: state.status == ProfileStatus.saving,
+      child: SingleChildScrollView(
+        child: PositionChipSelector(
+          value: _selectedPosition,
+          onChanged: (id) => setState(() => _selectedPosition = id),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInterestsStep(ProfileState state) {
+    return _buildStepLayout(
+      title: 'What are you into?',
+      subtitle: 'Pick up to 10 interests.',
+      onContinue: _nextPage,
+      showSkip: true,
+      continueLabel: 'Continue',
+      isSaving: state.status == ProfileStatus.saving,
+      child: SingleChildScrollView(
+        child: InterestsChipSelector(
+          selectedIds: _selectedInterestIds,
+          onChanged: (ids) => setState(() => _selectedInterestIds = ids),
+        ),
+      ),
+    );
+  }
+
+  // ── Edit flow: single combined info page (same as old behavior) ─────────
+
+  Widget _buildEditInfoPage(ProfileState state) {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: Form(
-        key: _formKey,
+        key: _nameFormKey,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              widget.isEditing ? 'Edit your profile' : 'Let\'s get started',
+              'Edit your profile',
               style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                     fontWeight: FontWeight.bold,
                   ),
             ),
             const SizedBox(height: 8),
             Text(
-              widget.isEditing
-                  ? 'Update your details below'
-                  : 'Tell us a bit about yourself',
+              'Update your details below',
               style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                     color: AppTheme.textSecondary,
                   ),
             ),
             const SizedBox(height: 32),
-
-            // Name field
             TextFormField(
               controller: _nameController,
               decoration: const InputDecoration(
@@ -269,8 +546,6 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
               },
             ),
             const SizedBox(height: 20),
-
-            // Age field
             TextFormField(
               controller: _ageController,
               decoration: const InputDecoration(
@@ -294,8 +569,6 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
               },
             ),
             const SizedBox(height: 20),
-
-            // Bio field
             TextFormField(
               controller: _bioController,
               decoration: const InputDecoration(
@@ -308,18 +581,38 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
               maxLength: 200,
               textCapitalization: TextCapitalization.sentences,
             ),
-            const SizedBox(height: 24),
-
-            // ── Optional "More About You" collapsible section ──────────────
-            _buildMoreAboutYouSection(),
-
+            const SizedBox(height: 20),
+            Text(
+              'Position',
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    color: AppTheme.textSecondary,
+                    letterSpacing: 0.5,
+                  ),
+            ),
+            const SizedBox(height: 8),
+            PositionChipSelector(
+              value: _selectedPosition,
+              onChanged: (id) => setState(() => _selectedPosition = id),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              'Interests',
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    color: AppTheme.textSecondary,
+                    letterSpacing: 0.5,
+                  ),
+            ),
+            const SizedBox(height: 8),
+            InterestsChipSelector(
+              selectedIds: _selectedInterestIds,
+              onChanged: (ids) => setState(() => _selectedInterestIds = ids),
+            ),
             const SizedBox(height: 32),
-
-            // Next button
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
-                onPressed: state.status == ProfileStatus.saving ? null : _nextPage,
+                onPressed:
+                    state.status == ProfileStatus.saving ? null : _nextPage,
                 child: state.status == ProfileStatus.saving
                     ? const SizedBox(
                         height: 20,
@@ -338,95 +631,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
     );
   }
 
-  Widget _buildMoreAboutYouSection() {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppTheme.darkCard,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white12),
-      ),
-      child: Column(
-        children: [
-          InkWell(
-            onTap: () => setState(() => _moreAboutYouExpanded = !_moreAboutYouExpanded),
-            borderRadius: BorderRadius.circular(12),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-              child: Row(
-                children: [
-                  const Icon(Icons.tune_rounded, size: 20, color: AppTheme.textSecondary),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      'More About You',
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                            color: AppTheme.textPrimary,
-                          ),
-                    ),
-                  ),
-                  Text(
-                    'Optional',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: AppTheme.textHint,
-                        ),
-                  ),
-                  const SizedBox(width: 8),
-                  AnimatedRotation(
-                    turns: _moreAboutYouExpanded ? 0.5 : 0,
-                    duration: const Duration(milliseconds: 200),
-                    child: const Icon(Icons.keyboard_arrow_down,
-                        color: AppTheme.textSecondary),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          AnimatedCrossFade(
-            firstChild: const SizedBox.shrink(),
-            secondChild: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Divider(color: Colors.white12, height: 1),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Position',
-                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                          color: AppTheme.textSecondary,
-                          letterSpacing: 0.5,
-                        ),
-                  ),
-                  const SizedBox(height: 8),
-                  PositionDropdown(
-                    value: _selectedPosition,
-                    onChanged: (id) => setState(() => _selectedPosition = id),
-                  ),
-                  const SizedBox(height: 20),
-                  Text(
-                    'Interests',
-                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                          color: AppTheme.textSecondary,
-                          letterSpacing: 0.5,
-                        ),
-                  ),
-                  const SizedBox(height: 8),
-                  InterestsChipSelector(
-                    selectedIds: _selectedInterestIds,
-                    onChanged: (ids) => setState(() => _selectedInterestIds = ids),
-                  ),
-                ],
-              ),
-            ),
-            crossFadeState: _moreAboutYouExpanded
-                ? CrossFadeState.showSecond
-                : CrossFadeState.showFirst,
-            duration: const Duration(milliseconds: 250),
-          ),
-        ],
-      ),
-    );
-  }
+  // ── Shared pages: Photos & Preview ──────────────────────────────────────
 
   Widget _buildPhotosPage(ProfileState state) {
     return SingleChildScrollView(
@@ -448,8 +653,6 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                 ),
           ),
           const SizedBox(height: 24),
-
-          // Photo grid
           PhotoGridWidget(
             photos: state.sortedPhotos,
             onAddPhoto: _showPhotoSourceSheet,
@@ -462,10 +665,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
             isLoading: state.isProcessingPhoto,
             maxPhotos: ProfileState.maxPhotos,
           ),
-
           const SizedBox(height: 32),
-
-          // Navigation buttons
           Row(
             children: [
               Expanded(
@@ -484,7 +684,6 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
               ),
             ],
           ),
-
           if (state.photos.isEmpty) ...[
             const SizedBox(height: 16),
             Text(
@@ -520,18 +719,13 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                 ),
           ),
           const SizedBox(height: 24),
-
-          // Profile preview
           ProfilePreviewWidget(
             name: state.name,
             age: state.age,
             bio: state.bio,
             photos: state.sortedPhotos,
           ),
-
           const SizedBox(height: 32),
-
-          // Navigation buttons
           Row(
             children: [
               Expanded(
@@ -545,7 +739,8 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                 flex: 2,
                 child: ElevatedButton(
                   onPressed: _finishSetup,
-                  child: Text(widget.isEditing ? 'Save Changes' : 'Start Discovering'),
+                  child: Text(
+                      widget.isEditing ? 'Save Changes' : 'Start Discovering'),
                 ),
               ),
             ],

@@ -43,7 +43,7 @@ class PositionDropdown extends StatelessWidget {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: AppTheme.primaryColor),
+          borderSide: const BorderSide(color: AppTheme.primaryLight),
         ),
       ),
       dropdownColor: AppTheme.darkCard,

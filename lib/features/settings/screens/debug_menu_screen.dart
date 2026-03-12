@@ -325,7 +325,7 @@ class _DebugMenuScreenState extends State<DebugMenuScreen> {
       child: ListTile(
         leading: Icon(
           icon,
-          color: isDestructive ? AppTheme.error : AppTheme.primaryColor,
+          color: isDestructive ? AppTheme.error : AppTheme.primaryLight,
         ),
         title: Text(
           title,

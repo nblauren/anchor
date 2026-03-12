@@ -575,7 +575,7 @@ class _ChatScreenState extends State<ChatScreen> {
           IconButton(
             onPressed: _sendMessage,
             icon: const Icon(Icons.send),
-            color: AppTheme.primaryColor,
+            color: AppTheme.primaryLight,
           ),
         ],
       ),

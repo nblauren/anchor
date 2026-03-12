@@ -63,11 +63,11 @@ class PhotoSourceSheet extends StatelessWidget {
               leading: Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: AppTheme.primaryColor.withValues(alpha: 0.1),
+                  color: AppTheme.primaryLight.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child:
-                    const Icon(Icons.camera_alt, color: AppTheme.primaryColor),
+                    const Icon(Icons.camera_alt, color: AppTheme.primaryLight),
               ),
               title: const Text('Take Photo'),
               subtitle: const Text('Use your camera'),
@@ -77,11 +77,11 @@ class PhotoSourceSheet extends StatelessWidget {
               leading: Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: AppTheme.primaryColor.withValues(alpha: 0.1),
+                  color: AppTheme.primaryLight.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: const Icon(Icons.photo_library,
-                    color: AppTheme.primaryColor),
+                    color: AppTheme.primaryLight),
               ),
               title: const Text('Choose from Gallery'),
               subtitle: const Text('Pick an existing photo'),
