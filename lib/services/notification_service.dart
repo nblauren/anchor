@@ -2,13 +2,16 @@ import 'package:app_badge_plus/app_badge_plus.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import '../core/utils/logger.dart';
+import 'audio_service.dart';
 
 /// Service for handling local notifications
 class NotificationService {
-  NotificationService();
+  NotificationService({AudioService? audioService})
+      : _audioService = audioService;
 
   final FlutterLocalNotificationsPlugin _notificationsPlugin =
       FlutterLocalNotificationsPlugin();
+  final AudioService? _audioService;
 
   bool _isInitialized = false;
 
@@ -173,6 +176,8 @@ class NotificationService {
       payload: 'message:$fromPeerId',
     );
 
+    _audioService?.playPop();
+
     Logger.info(
         'Notification shown - $fromName: $messagePreview', 'Notifications');
   }
@@ -217,6 +222,8 @@ class NotificationService {
       notificationDetails: details,
       payload: 'anchor_drop:$fromPeerId',
     );
+
+    _audioService?.playPop();
 
     Logger.info('Anchor drop notification shown - $fromName', 'Notifications');
   }

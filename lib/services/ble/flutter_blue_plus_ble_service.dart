@@ -351,16 +351,20 @@ class FlutterBluePlusBleService implements BleServiceInterface {
   void _onPeripheralStateChanged(BluetoothLowEnergyState state) {
     Logger.info('BleService: Peripheral state changed: $state', 'BLE');
 
-    if (state == BluetoothLowEnergyState.poweredOn &&
-        _startCalled &&
-        !_gattServerReady) {
-      // start() was called but the GATT server setup failed because the
-      // peripheral wasn't ready yet. Retry now that it's powered on.
-      _setupGattServer().then((_) {
-        if (_pendingPayload != null && !_isBroadcasting) {
-          _startAdvertisingAndGatt(_pendingPayload!);
-        }
-      });
+    if (state == BluetoothLowEnergyState.poweredOn && _startCalled) {
+      if (!_gattServerReady) {
+        // start() was called but the GATT server setup failed because the
+        // peripheral wasn't ready yet. Retry now that it's powered on.
+        _setupGattServer().then((_) {
+          if (_pendingPayload != null && !_isBroadcasting) {
+            _startAdvertisingAndGatt(_pendingPayload!);
+          }
+        });
+      } else if (_pendingPayload != null && !_isBroadcasting) {
+        // GATT server is ready but advertising hasn't started yet (e.g. the
+        // peripheral was briefly unknown when broadcastProfile was called).
+        _startAdvertisingAndGatt(_pendingPayload!);
+      }
     }
   }
 
@@ -368,6 +372,18 @@ class FlutterBluePlusBleService implements BleServiceInterface {
 
   Future<void> _setupGattServer({bool force = false}) async {
     if (_settingUpGatt && !force) return; // skip if already in progress
+
+    // Don't attempt GATT setup when the peripheral isn't ready — the platform
+    // calls may silently fail. _onPeripheralStateChanged will retry when it
+    // transitions to poweredOn.
+    if (_peripheral.state != BluetoothLowEnergyState.poweredOn) {
+      Logger.warning(
+        'BleService: Skipping GATT setup — peripheral state: ${_peripheral.state}',
+        'BLE',
+      );
+      return;
+    }
+
     _settingUpGatt = true;
     _gattServerReady = false;
     Logger.info('BleService: Setting up GATT server...', 'BLE');
@@ -1021,12 +1037,14 @@ class FlutterBluePlusBleService implements BleServiceInterface {
   /// binary chunk stream from this central.
   void _handlePhotoStart(Map<String, dynamic> json, String fromPeerId) {
     final messageId = json['message_id'] as String? ?? '';
+    final photoId = json['photo_id'] as String?;
     final totalChunks = json['total_chunks'] as int? ?? 0;
     final totalSize = json['total_size'] as int? ?? 0;
 
     // Key by fromPeerId — one active transfer per peer
     _incomingPhotoTransfers[fromPeerId] = _IncomingPhotoTransfer(
       messageId: messageId,
+      photoId: photoId,
       totalChunks: totalChunks,
       totalSize: totalSize,
       receivedData: BytesBuilder(copy: false),
@@ -1120,6 +1138,7 @@ class FlutterBluePlusBleService implements BleServiceInterface {
       _photoReceivedController.add(ReceivedPhoto(
         fromPeerId: fromPeerId,
         messageId: transfer.messageId,
+        photoId: transfer.photoId,
         photoBytes: photoBytes,
         timestamp: DateTime.now(),
       ));
@@ -2321,7 +2340,7 @@ class FlutterBluePlusBleService implements BleServiceInterface {
 
   @override
   Future<bool> sendPhoto(
-      String peerId, Uint8List photoData, String messageId) async {
+      String peerId, Uint8List photoData, String messageId, {String? photoId}) async {
     _ensureInitialized();
 
     if (photoData.length > config.maxPhotoSize) {
@@ -2397,6 +2416,7 @@ class FlutterBluePlusBleService implements BleServiceInterface {
         'type': 'photo_start',
         'sender_id': _pendingPayload?.userId ?? '',
         'message_id': messageId,
+        if (photoId != null) 'photo_id': photoId,
         'total_chunks': totalChunks,
         'total_size': photoData.length,
       }));
@@ -2806,9 +2826,11 @@ class _IncomingPhotoTransfer {
     required this.totalSize,
     required this.receivedData,
     required this.receivedCount,
+    this.photoId,
   });
 
   final String messageId;
+  final String? photoId;
   final int totalChunks;
   final int totalSize;
   final BytesBuilder receivedData;

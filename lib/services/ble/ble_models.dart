@@ -322,12 +322,16 @@ class ReceivedPhoto extends Equatable {
     required this.messageId,
     required this.photoBytes,
     required this.timestamp,
+    this.photoId,
   });
 
   final String fromPeerId;
   final String messageId;
   final Uint8List photoBytes;
   final DateTime timestamp;
+  /// The photoId from the consent-based preview flow, used to match the
+  /// incoming full photo to the preview message on the receiver side.
+  final String? photoId;
 
   /// Photo size in bytes
   int get sizeInBytes => photoBytes.length;
@@ -342,7 +346,7 @@ class ReceivedPhoto extends Equatable {
   }
 
   @override
-  List<Object?> get props => [fromPeerId, messageId, photoBytes, timestamp];
+  List<Object?> get props => [fromPeerId, messageId, photoBytes, timestamp, photoId];
 }
 
 /// BLE error types

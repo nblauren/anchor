@@ -37,6 +37,9 @@ dependencies:
   image_compression_flutter: ^1.0.4
   nsfw_detector_flutter: ^1.0.5
 
+  # Audio
+  audioplayers: ^6.1.0
+
   # UI
   cupertino_icons: ^1.0.6
   path: ^1.9.1
@@ -53,6 +56,8 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/audio/
 
 flutter_launcher_icons:
   android: "launcher_icon"
