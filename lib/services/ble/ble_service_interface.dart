@@ -92,7 +92,7 @@ abstract class BleServiceInterface {
 
   /// Send a photo to a specific peer
   /// Returns true if transfer started successfully
-  Future<bool> sendPhoto(String peerId, Uint8List photoData, String messageId);
+  Future<bool> sendPhoto(String peerId, Uint8List photoData, String messageId, {String? photoId});
 
   /// Send a photo preview (thumbnail + metadata) to a peer.
   ///

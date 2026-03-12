@@ -450,6 +450,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         request.fromPeerId,
         photoBytes,
         pending.messageId,
+        photoId: request.photoId,
       );
 
       if (!success) {
@@ -608,12 +609,14 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       final photoPath = await _imageService.saveReceivedPhoto(photo.photoBytes);
 
       // Look for a photoPreview message whose metadata contains this photoId.
+      // photo.photoId is the consent-flow UUID that links preview → full photo.
+      final matchId = photo.photoId ?? photo.messageId;
       final previewMsg = state.messages.where((m) {
         if (m.contentType != MessageContentType.photoPreview) return false;
         try {
           final meta =
               jsonDecode(m.textContent ?? '{}') as Map<String, dynamic>;
-          return meta['photo_id'] == photo.messageId;
+          return meta['photo_id'] == matchId;
         } catch (_) {
           return false;
         }

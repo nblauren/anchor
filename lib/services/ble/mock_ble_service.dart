@@ -368,7 +368,7 @@ class MockBleService implements BleServiceInterface {
   // ==================== Photo Transfer ====================
 
   @override
-  Future<bool> sendPhoto(String peerId, Uint8List photoData, String messageId) async {
+  Future<bool> sendPhoto(String peerId, Uint8List photoData, String messageId, {String? photoId}) async {
     Logger.info(
       'MockBleService: Starting photo transfer to ${peerId.substring(0, 8)} (${photoData.length} bytes)',
       'BLE',

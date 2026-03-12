@@ -64,4 +64,15 @@ class AnchorDropRepository {
           ..limit(limit))
         .get();
   }
+
+  /// Returns received anchor drops, newest first, deduplicated by peerId
+  /// (keeps the most recent drop per peer).
+  Future<List<AnchorDropEntry>> getReceivedDrops({int limit = 50}) async {
+    return (_db.select(_db.anchorDrops)
+          ..where(
+              (t) => t.direction.equals(AnchorDropDirection.received.name))
+          ..orderBy([(t) => OrderingTerm.desc(t.droppedAt)])
+          ..limit(limit))
+        .get();
+  }
 }

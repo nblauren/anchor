@@ -7,6 +7,7 @@ import 'features/profile/bloc/profile_bloc.dart';
 import 'services/ble/ble.dart';
 import 'services/database_service.dart';
 import 'services/image_service.dart';
+import 'services/audio_service.dart';
 import 'services/notification_service.dart';
 import 'services/nsfw_detection_service.dart';
 
@@ -31,7 +32,10 @@ Future<void> initializeDependencies({
   // Services (singletons)
   getIt.registerLazySingleton<DatabaseService>(() => DatabaseService());
   getIt.registerLazySingleton<ImageService>(() => ImageService());
-  getIt.registerLazySingleton<NotificationService>(() => NotificationService());
+  getIt.registerLazySingleton<AudioService>(() => AudioService());
+  getIt.registerLazySingleton<NotificationService>(
+    () => NotificationService(audioService: getIt<AudioService>()),
+  );
 
   // BLE service - select based on config
   getIt.registerLazySingleton<BleServiceInterface>(() {

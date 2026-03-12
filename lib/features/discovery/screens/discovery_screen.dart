@@ -4,6 +4,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/constants/profile_constants.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../injection.dart';
+import '../../../services/database_service.dart';
 import '../../chat/bloc/chat_bloc.dart';
 import '../../chat/bloc/chat_event.dart';
 import '../../chat/bloc/chat_state.dart';
@@ -12,6 +14,7 @@ import '../bloc/discovery_event.dart';
 import '../bloc/discovery_state.dart';
 import '../widgets/peer_grid_tile.dart';
 import '../widgets/radar_view.dart';
+import 'anchor_drops_screen.dart';
 import 'peer_detail_screen.dart';
 
 enum _ViewMode { grid, radar }
@@ -182,6 +185,29 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                     ],
                   ),
                 ),
+              // Anchor drops page
+              IconButton(
+                icon: const Icon(Icons.anchor_rounded),
+                tooltip: 'Anchor Drops',
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => MultiBlocProvider(
+                        providers: [
+                          BlocProvider.value(
+                              value: context.read<DiscoveryBloc>()),
+                          BlocProvider.value(
+                              value: context.read<ChatBloc>()),
+                        ],
+                        child: AnchorDropsScreen(
+                          anchorDropRepository:
+                              getIt<DatabaseService>().anchorDropRepository,
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
               // View mode toggle: Grid / Radar
               _ViewModeToggle(
                 current: _viewMode,
