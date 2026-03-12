@@ -34,6 +34,12 @@
 		<string>Anchor uses Bluetooth to discover and connect with nearby users offline for messaging and photo sharing, even when the app is in the background or not in use.</string>
 		<key>NSBluetoothPeripheralUsageDescription</key>
 		<string>Anchor uses Bluetooth Low Energy peripheral mode to advertise your presence so others can discover you nearby, even in the background.</string>
+		<key>NSLocalNetworkUsageDescription</key>
+		<string>Anchor uses your local network to transfer photos at high speed with nearby users via Wi-Fi Direct.</string>
+		<key>NSBonjourServices</key>
+		<array>
+			<string>_anchor-xfer._tcp</string>
+		</array>
 		<key>UIApplicationSceneManifest</key>
 		<dict>
 			<key>UIApplicationSupportsMultipleScenes</key>

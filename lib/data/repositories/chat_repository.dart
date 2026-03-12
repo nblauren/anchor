@@ -267,7 +267,7 @@ class ChatRepository {
     required String conversationId,
     required String senderId,
     required String textContent,
-    required String thumbnailPath,
+    String? thumbnailPath,
   }) async {
     final id = _uuid.v4();
     final now = DateTime.now();
@@ -278,7 +278,7 @@ class ChatRepository {
       senderId: senderId,
       contentType: MessageContentType.photoPreview,
       textContent: Value(textContent),
-      photoPath: Value(thumbnailPath),
+      photoPath: thumbnailPath != null ? Value(thumbnailPath) : const Value.absent(),
       status: MessageStatus.delivered,
       createdAt: now,
     );

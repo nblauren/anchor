@@ -12,7 +12,6 @@ import '../bloc/chat_event.dart';
 import '../bloc/chat_state.dart';
 import '../widgets/message_bubble_widget.dart';
 
-
 /// Screen for individual chat conversation
 class ChatScreen extends StatefulWidget {
   const ChatScreen({
@@ -29,8 +28,10 @@ class ChatScreen extends StatefulWidget {
   final String peerName;
   final Uint8List? peerThumbnail;
   final VoidCallback? onViewProfile;
+
   /// Whether this peer is only reachable via mesh relay (not direct BLE).
   final bool isRelayedPeer;
+
   /// Number of relay hops to reach this peer (0 = direct).
   final int hopCount;
 
@@ -41,6 +42,7 @@ class ChatScreen extends StatefulWidget {
 class _ChatScreenState extends State<ChatScreen> {
   final _messageController = TextEditingController();
   final _scrollController = ScrollController();
+  final _focusNode = FocusNode();
   final _imagePicker = ImagePicker();
   late final ChatBloc _chatBloc;
   bool _anchorDropped = false;
@@ -51,9 +53,9 @@ class _ChatScreenState extends State<ChatScreen> {
     _chatBloc = context.read<ChatBloc>();
     // Open conversation for this peer (marks messages as read automatically)
     _chatBloc.add(OpenConversation(
-          peerId: widget.peerId,
-          peerName: widget.peerName,
-        ));
+      peerId: widget.peerId,
+      peerName: widget.peerName,
+    ));
 
     _scrollController.addListener(() {
       if (_scrollController.position.pixels >=
@@ -71,6 +73,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _chatBloc.add(const CloseConversation());
     _messageController.dispose();
     _scrollController.dispose();
+    _focusNode.dispose();
     super.dispose();
   }
 
@@ -80,7 +83,8 @@ class _ChatScreenState extends State<ChatScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Block User'),
-        content: Text('Block $peerName? They won\'t be able to send you messages.'),
+        content:
+            Text('Block $peerName? They won\'t be able to send you messages.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
@@ -260,7 +264,8 @@ class _ChatScreenState extends State<ChatScreen> {
               onTap: widget.onViewProfile,
               child: Row(
                 children: [
-                  _buildAvatar(conversation?.peerName ?? '?', widget.peerThumbnail),
+                  _buildAvatar(
+                      conversation?.peerName ?? '?', widget.peerThumbnail),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
@@ -351,7 +356,8 @@ class _ChatScreenState extends State<ChatScreen> {
                         children: [
                           Icon(Icons.block, size: 20, color: AppTheme.error),
                           SizedBox(width: 12),
-                          Text('Block', style: TextStyle(color: AppTheme.error)),
+                          Text('Block',
+                              style: TextStyle(color: AppTheme.error)),
                         ],
                       ),
                     ),
@@ -361,67 +367,71 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
           body: Column(
             children: [
-              // Messages list
+              // Messages list — tap to dismiss keyboard
               Expanded(
-                child: state.messages.isEmpty
-                    ? _buildEmptyState()
-                    : ListView.builder(
-                        controller: _scrollController,
-                        reverse: true,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 8,
-                        ),
-                        itemCount: state.messages.length,
-                        itemBuilder: (context, index) {
-                          final message = state.messages[index];
-                          final isSentByMe = message.senderId == ownUserId;
-                          final showDate = index == state.messages.length - 1 ||
-                              !_isSameDay(
-                                message.createdAt,
-                                state.messages[index + 1].createdAt,
-                              );
+                child: GestureDetector(
+                  onTap: () => _focusNode.unfocus(),
+                  child: state.messages.isEmpty
+                      ? _buildEmptyState()
+                      : ListView.builder(
+                          controller: _scrollController,
+                          reverse: true,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 8,
+                          ),
+                          itemCount: state.messages.length,
+                          itemBuilder: (context, index) {
+                            final message = state.messages[index];
+                            final isSentByMe = message.senderId == ownUserId;
+                            final showDate =
+                                index == state.messages.length - 1 ||
+                                    !_isSameDay(
+                                      message.createdAt,
+                                      state.messages[index + 1].createdAt,
+                                    );
 
-                          return Column(
-                            children: [
-                              if (showDate)
-                                Padding(
-                                  padding:
-                                      const EdgeInsets.symmetric(vertical: 16),
-                                  child: Text(
-                                    _formatDate(message.createdAt),
-                                    style: const TextStyle(
-                                      color: AppTheme.textSecondary,
-                                      fontSize: 12,
+                            return Column(
+                              children: [
+                                if (showDate)
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                        vertical: 16),
+                                    child: Text(
+                                      _formatDate(message.createdAt),
+                                      style: const TextStyle(
+                                        color: AppTheme.textSecondary,
+                                        fontSize: 12,
+                                      ),
                                     ),
                                   ),
+                                MessageBubbleWidget(
+                                  message: message,
+                                  isSentByMe: isSentByMe,
+                                  onRetry: () => _retryMessage(message.id),
+                                  isRelayedPeer: widget.isRelayedPeer,
+                                  transferInfo:
+                                      state.getTransferProgress(message.id),
+                                  onRequestFullPhoto: isSentByMe
+                                      ? null
+                                      : (photoId) => _requestFullPhoto(
+                                            message.id,
+                                            photoId,
+                                            state.currentConversation!.peerId,
+                                          ),
+                                  onCancelTransfer:
+                                      state.getTransferProgress(message.id) !=
+                                              null
+                                          ? () => context.read<ChatBloc>().add(
+                                                CancelPhotoTransfer(message.id),
+                                              )
+                                          : null,
                                 ),
-                              MessageBubbleWidget(
-                                message: message,
-                                isSentByMe: isSentByMe,
-                                onRetry: () => _retryMessage(message.id),
-                                isRelayedPeer: widget.isRelayedPeer,
-                                transferInfo: state
-                                    .getTransferProgress(message.id),
-                                onRequestFullPhoto: isSentByMe
-                                    ? null
-                                    : (photoId) => _requestFullPhoto(
-                                          message.id,
-                                          photoId,
-                                          state.currentConversation!.peerId,
-                                        ),
-                                onCancelTransfer: state
-                                            .getTransferProgress(message.id) !=
-                                        null
-                                    ? () => context.read<ChatBloc>().add(
-                                          CancelPhotoTransfer(message.id),
-                                        )
-                                    : null,
-                              ),
-                            ],
-                          );
-                        },
-                      ),
+                              ],
+                            );
+                          },
+                        ),
+                ),
               ),
 
               // Message input
@@ -510,8 +520,6 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _buildMessageInput(ChatState state) {
-    final isSending = state.status == ChatStatus.sending;
-
     return Container(
       padding: EdgeInsets.only(
         left: 8,
@@ -529,7 +537,7 @@ class _ChatScreenState extends State<ChatScreen> {
         children: [
           // Photo button
           IconButton(
-            onPressed: isSending ? null : _showPhotoOptions,
+            onPressed: _showPhotoOptions,
             icon: const Icon(Icons.photo),
             color: AppTheme.textSecondary,
           ),
@@ -538,6 +546,7 @@ class _ChatScreenState extends State<ChatScreen> {
           Expanded(
             child: TextField(
               controller: _messageController,
+              focusNode: _focusNode,
               decoration: InputDecoration(
                 hintText: 'Type a message...',
                 border: OutlineInputBorder(
@@ -552,26 +561,20 @@ class _ChatScreenState extends State<ChatScreen> {
                 ),
               ),
               textCapitalization: TextCapitalization.sentences,
+              textInputAction: TextInputAction.send,
               maxLines: 4,
               minLines: 1,
-              onTapOutside: (PointerDownEvent event) {
-                FocusManager.instance.primaryFocus?.unfocus();
-              },
-              onSubmitted: (_) => _sendMessage(),
+              // Use onEditingComplete instead of onSubmitted to prevent
+              // the default unfocus behavior that closes the keyboard.
+              onEditingComplete: _sendMessage,
             ),
           ),
           const SizedBox(width: 4),
 
           // Send button
           IconButton(
-            onPressed: isSending ? null : _sendMessage,
-            icon: isSending
-                ? const SizedBox(
-                    width: 24,
-                    height: 24,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.send),
+            onPressed: _sendMessage,
+            icon: const Icon(Icons.send),
             color: AppTheme.primaryColor,
           ),
         ],

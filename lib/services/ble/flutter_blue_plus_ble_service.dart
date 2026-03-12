@@ -58,6 +58,7 @@ class FlutterBluePlusBleService implements BleServiceInterface {
       UUID.fromString('0000fff2-0000-1000-8000-00805f9b34fb');
   static final _messagingCharUuid =
       UUID.fromString('0000fff3-0000-1000-8000-00805f9b34fb');
+
   /// fff4 — serves ALL profile photo thumbnails concatenated, pushed on-demand
   /// only when a central explicitly subscribes (e.g. profile view opened).
   static final _fullPhotosCharUuid =
@@ -142,6 +143,7 @@ class FlutterBluePlusBleService implements BleServiceInterface {
   GATTCharacteristic? _serverMessagingChar;
   GATTCharacteristic? _serverFullPhotosChar;
   bool _gattServerReady = false; // true once addService succeeds
+  bool _peripheralPoweredOn = false; // tracks peripheral state from stream
   bool _settingUpGatt = false; // prevents concurrent _setupGattServer calls
   bool _startCalled = false; // true after start() has been called at least once
 
@@ -350,19 +352,30 @@ class FlutterBluePlusBleService implements BleServiceInterface {
   /// [_onStateChanged] (central) already fired.
   void _onPeripheralStateChanged(BluetoothLowEnergyState state) {
     Logger.info('BleService: Peripheral state changed: $state', 'BLE');
+    _peripheralPoweredOn = state == BluetoothLowEnergyState.poweredOn;
 
-    if (state == BluetoothLowEnergyState.poweredOn && _startCalled) {
+    if (!_peripheralPoweredOn) return;
+
+    if (_startCalled && !_gattServerReady) {
+      // start() was called but the GATT server setup failed because the
+      // peripheral wasn't ready yet. Retry now that it's powered on.
+      _setupGattServer().then((_) {
+        if (_pendingPayload != null && !_isBroadcasting) {
+          _startAdvertisingAndGatt(_pendingPayload!);
+        }
+      });
+    } else if (_pendingPayload != null && !_isBroadcasting) {
+      // Peripheral became ready after broadcastProfile() saved the payload
+      // but returned early because the state was unknown/poweredOff.
+      // Also handles the case where start() hasn't been called yet but
+      // broadcastProfile() was — the GATT server will be set up first.
       if (!_gattServerReady) {
-        // start() was called but the GATT server setup failed because the
-        // peripheral wasn't ready yet. Retry now that it's powered on.
         _setupGattServer().then((_) {
           if (_pendingPayload != null && !_isBroadcasting) {
             _startAdvertisingAndGatt(_pendingPayload!);
           }
         });
-      } else if (_pendingPayload != null && !_isBroadcasting) {
-        // GATT server is ready but advertising hasn't started yet (e.g. the
-        // peripheral was briefly unknown when broadcastProfile was called).
+      } else {
         _startAdvertisingAndGatt(_pendingPayload!);
       }
     }
@@ -376,7 +389,7 @@ class FlutterBluePlusBleService implements BleServiceInterface {
     // Don't attempt GATT setup when the peripheral isn't ready — the platform
     // calls may silently fail. _onPeripheralStateChanged will retry when it
     // transitions to poweredOn.
-    if (_peripheral.state != BluetoothLowEnergyState.poweredOn) {
+    if (!_peripheralPoweredOn) {
       Logger.warning(
         'BleService: Skipping GATT setup — peripheral state: ${_peripheral.state}',
         'BLE',
@@ -475,9 +488,8 @@ class FlutterBluePlusBleService implements BleServiceInterface {
       // Handle thumbnail/full-photos characteristic notify subscriptions.
       // When a central subscribes, push the relevant data in chunks.
       await _charNotifyStateSubscription?.cancel();
-      _charNotifyStateSubscription = _peripheral
-          .characteristicNotifyStateChanged
-          .listen((args) {
+      _charNotifyStateSubscription =
+          _peripheral.characteristicNotifyStateChanged.listen((args) {
         if (args.characteristic.uuid == _thumbnailCharUuid) {
           _onThumbnailNotifyStateChanged(args);
         } else if (args.characteristic.uuid == _fullPhotosCharUuid) {
@@ -663,7 +675,8 @@ class FlutterBluePlusBleService implements BleServiceInterface {
   /// Intentionally does NOT queue messages for offline peers — relay packets
   /// are only forwarded to peers currently connected via GATT.  Queuing relay
   /// messages would cause stale-message floods when peers reconnect.
-  void _maybeRelayMessage(Map<String, dynamic> json, String receivedFromPeerId) {
+  void _maybeRelayMessage(
+      Map<String, dynamic> json, String receivedFromPeerId) {
     if (!_meshRelayEnabled) return;
 
     final ttl = json['ttl'] as int? ?? 0;
@@ -704,8 +717,7 @@ class FlutterBluePlusBleService implements BleServiceInterface {
     // In high-density mode, apply probabilistic relay to reduce flood traffic.
     final isHighDensity =
         _visiblePeers.length >= config.highDensityPeerThreshold;
-    final relayProb =
-        isHighDensity ? config.highDensityRelayProbability : 1.0;
+    final relayProb = isHighDensity ? config.highDensityRelayProbability : 1.0;
     final rng = Random();
 
     // Fallback: flood to all connected peers except sender
@@ -798,16 +810,14 @@ class FlutterBluePlusBleService implements BleServiceInterface {
 
     final now = DateTime.now();
     final lastAnnounced = _lastAnnouncedAt[peer.peerId];
-    if (lastAnnounced != null &&
-        now.difference(lastAnnounced).inMinutes < 5) {
+    if (lastAnnounced != null && now.difference(lastAnnounced).inMinutes < 5) {
       return;
     }
     _lastAnnouncedAt[peer.peerId] = now;
 
     final ownUserId = _pendingPayload?.userId ?? '';
-    final thumbnailB64 = peer.thumbnailBytes != null
-        ? base64Encode(peer.thumbnailBytes!)
-        : null;
+    final thumbnailB64 =
+        peer.thumbnailBytes != null ? base64Encode(peer.thumbnailBytes!) : null;
 
     final msgId = const Uuid().v4();
     final json = <String, dynamic>{
@@ -946,7 +956,8 @@ class FlutterBluePlusBleService implements BleServiceInterface {
     // Directed: prefer a peer who already knows the announced peer
     final announcedPeerId = json['peer_id'] as String? ?? '';
     final announcedUserId = json['peer_user_id'] as String? ?? '';
-    final targetId = announcedUserId.isNotEmpty ? announcedUserId : announcedPeerId;
+    final targetId =
+        announcedUserId.isNotEmpty ? announcedUserId : announcedPeerId;
     if (targetId.isNotEmpty) {
       final best = _findBestRelayPeer(targetId, excludePeerId);
       if (best != null) {
@@ -1242,7 +1253,8 @@ class FlutterBluePlusBleService implements BleServiceInterface {
 
     // fff4 — ALL thumbnails concatenated, served on-demand (profile view only).
     if (payload.thumbnailsList != null && payload.thumbnailsList!.isNotEmpty) {
-      _ownFullPhotoSizes = payload.thumbnailsList!.map((b) => b.length).toList();
+      _ownFullPhotoSizes =
+          payload.thumbnailsList!.map((b) => b.length).toList();
       _fullPhotosData = Uint8List.fromList(
         payload.thumbnailsList!.expand((b) => b).toList(),
       );
@@ -1259,10 +1271,9 @@ class FlutterBluePlusBleService implements BleServiceInterface {
       'BLE',
     );
 
-    final state = _peripheral.state;
-    if (state != BluetoothLowEnergyState.poweredOn) {
+    if (!_peripheralPoweredOn) {
       Logger.warning(
-        'BleService: Peripheral not ready ($state), will retry when ready',
+        'BleService: Peripheral not ready (${_peripheral.state}), will retry when ready',
         'BLE',
       );
       return;
@@ -1501,11 +1512,13 @@ class FlutterBluePlusBleService implements BleServiceInterface {
     final name = decoded?.name ?? 'Anchor User';
     final age = decoded?.age;
 
+    /*
     Logger.info(
       'BleService: Discovered peer "$name" '
           '(hasService: $hasAnchorService, RSSI: $rssi, id: $deviceId)',
       'BLE',
     );
+    */
 
     // Store the peripheral for later connection
     _discoveredPeripherals[deviceId] = peripheral;
@@ -1596,10 +1609,10 @@ class FlutterBluePlusBleService implements BleServiceInterface {
             Logger.info('BleService: Messaging ready for $peerId', 'BLE');
           } else if (char.uuid == _fullPhotosCharUuid) {
             _fullPhotosChars[peerId] = char;
-            Logger.info('BleService: Full-photos char cached for $peerId', 'BLE');
+            Logger.info(
+                'BleService: Full-photos char cached for $peerId', 'BLE');
           }
         }
-
       } catch (e) {
         Logger.warning(
           'BleService: Connect to $peerId failed: $e',
@@ -1616,6 +1629,7 @@ class FlutterBluePlusBleService implements BleServiceInterface {
     final shouldReread = lastRead == null ||
         DateTime.now().difference(lastRead) > const Duration(seconds: 30);
 
+    /*
     Logger.info(
       'BleService: _connectAndReadProfile $peerId '
           'alreadyConnected=$isAlreadyConnected '
@@ -1624,6 +1638,7 @@ class FlutterBluePlusBleService implements BleServiceInterface {
           'shouldReread=$shouldReread',
       'BLE',
     );
+    */
 
     if (!shouldReread) return;
     _lastProfileReadTime[peerId] = DateTime.now();
@@ -1733,7 +1748,8 @@ class FlutterBluePlusBleService implements BleServiceInterface {
             'BLE',
           );
           if (buffer.length >= thumbnailSize) {
-            final allBytes = Uint8List.fromList(buffer.sublist(0, thumbnailSize));
+            final allBytes =
+                Uint8List.fromList(buffer.sublist(0, thumbnailSize));
             _thumbnailBuffers.remove(peerId);
             _thumbnailExpectedSizes.remove(peerId);
             _updatePeerThumbnail(peerId, allBytes);
@@ -1743,7 +1759,9 @@ class FlutterBluePlusBleService implements BleServiceInterface {
         // ── fff4 full-photo metadata ──
         final photoCount = json['photo_count'] as int? ?? 0;
         final rawFullPhotoSizes = json['full_photo_sizes'] as List?;
-        if (photoCount > 1 && rawFullPhotoSizes != null && rawFullPhotoSizes.isNotEmpty) {
+        if (photoCount > 1 &&
+            rawFullPhotoSizes != null &&
+            rawFullPhotoSizes.isNotEmpty) {
           _peerFullPhotoSizes[peerId] = rawFullPhotoSizes.cast<int>();
           Logger.info(
             'BleService: Peer $peerId has $photoCount full photos available via fff4',
@@ -1939,7 +1957,8 @@ class FlutterBluePlusBleService implements BleServiceInterface {
 
     if (expected == null && buffer.length > 32000) {
       Logger.warning(
-          'Receiving thumbnail chunks without knowing size — possible race', 'BLE');
+          'Receiving thumbnail chunks without knowing size — possible race',
+          'BLE');
     }
 
     if (expected != null && buffer.length >= expected) {
@@ -2055,20 +2074,25 @@ class FlutterBluePlusBleService implements BleServiceInterface {
   Future<bool> fetchFullProfilePhotos(String peerId) async {
     final peripheral = _discoveredPeripherals[peerId];
     if (peripheral == null) {
-      Logger.info('BleService: fetchFullProfilePhotos — peer $peerId not visible', 'BLE');
+      Logger.info(
+          'BleService: fetchFullProfilePhotos — peer $peerId not visible',
+          'BLE');
       return false;
     }
 
     final fullPhotosChar = _fullPhotosChars[peerId];
     if (fullPhotosChar == null) {
-      Logger.info('BleService: fetchFullProfilePhotos — no fff4 char for $peerId', 'BLE');
+      Logger.info(
+          'BleService: fetchFullProfilePhotos — no fff4 char for $peerId',
+          'BLE');
       return false;
     }
 
     final photoSizes = _peerFullPhotoSizes[peerId];
     if (photoSizes == null || photoSizes.isEmpty) {
       Logger.info(
-          'BleService: fetchFullProfilePhotos — no full_photo_sizes for $peerId', 'BLE');
+          'BleService: fetchFullProfilePhotos — no full_photo_sizes for $peerId',
+          'BLE');
       return false;
     }
 
@@ -2079,12 +2103,12 @@ class FlutterBluePlusBleService implements BleServiceInterface {
     try {
       // Unsubscribe first so the peripheral sees a fresh state-change → re-pushes.
       try {
-        await _central.setCharacteristicNotifyState(
-          peripheral, fullPhotosChar, state: false);
+        await _central.setCharacteristicNotifyState(peripheral, fullPhotosChar,
+            state: false);
       } catch (_) {}
 
-      await _central.setCharacteristicNotifyState(
-        peripheral, fullPhotosChar, state: true);
+      await _central.setCharacteristicNotifyState(peripheral, fullPhotosChar,
+          state: true);
 
       Logger.info(
         'BleService: Subscribed to fff4 for $peerId '
@@ -2093,8 +2117,8 @@ class FlutterBluePlusBleService implements BleServiceInterface {
       );
       return true;
     } catch (e) {
-      Logger.error(
-          'BleService: fetchFullProfilePhotos failed for $peerId', e, null, 'BLE');
+      Logger.error('BleService: fetchFullProfilePhotos failed for $peerId', e,
+          null, 'BLE');
       _fullPhotoBuffers.remove(peerId);
       _fullPhotoExpectedSizes.remove(peerId);
       return false;
@@ -2269,7 +2293,9 @@ class FlutterBluePlusBleService implements BleServiceInterface {
       }
 
       if (msgChar == null || peripheral == null) {
-        Logger.info('BleService: Cannot drop anchor — peer not reachable: $peerId', 'BLE');
+        Logger.info(
+            'BleService: Cannot drop anchor — peer not reachable: $peerId',
+            'BLE');
         return false;
       }
 
@@ -2308,7 +2334,7 @@ class FlutterBluePlusBleService implements BleServiceInterface {
     _anchorDropReceivedController.add(drop);
     Logger.info(
       'BleService: Anchor drop received from '
-      '${fromPeerId.substring(0, min(8, fromPeerId.length))}',
+          '${fromPeerId.substring(0, min(8, fromPeerId.length))}',
       'BLE',
     );
   }
@@ -2339,8 +2365,8 @@ class FlutterBluePlusBleService implements BleServiceInterface {
   final Set<String> _cancelledTransfers = {};
 
   @override
-  Future<bool> sendPhoto(
-      String peerId, Uint8List photoData, String messageId, {String? photoId}) async {
+  Future<bool> sendPhoto(String peerId, Uint8List photoData, String messageId,
+      {String? photoId}) async {
     _ensureInitialized();
 
     if (photoData.length > config.maxPhotoSize) {
@@ -2547,7 +2573,8 @@ class FlutterBluePlusBleService implements BleServiceInterface {
       }
 
       if (msgChar == null || peripheral == null) {
-        Logger.info('BleService: Peer not reachable for preview: $peerId', 'BLE');
+        Logger.info(
+            'BleService: Peer not reachable for preview: $peerId', 'BLE');
         return false;
       }
 
@@ -2675,12 +2702,31 @@ class FlutterBluePlusBleService implements BleServiceInterface {
 
   /// Handle incoming `photo_preview` JSON — stores metadata for the thumbnail
   /// binary chunks that follow immediately (0x03 marker).
-  void _handlePhotoPreviewStart(
-      Map<String, dynamic> json, String fromPeerId) {
+  void _handlePhotoPreviewStart(Map<String, dynamic> json, String fromPeerId) {
     final messageId = json['message_id'] as String? ?? '';
     final photoId = json['photo_id'] as String? ?? '';
     final originalSize = json['original_size'] as int? ?? 0;
     final totalChunks = json['thumbnail_chunks'] as int? ?? 0;
+
+    Logger.info(
+      'BleService: Photo preview starting from '
+          '${fromPeerId.substring(0, min(8, fromPeerId.length))}: '
+          '$totalChunks thumb chunks, originalSize=$originalSize',
+      'BLE',
+    );
+
+    // No thumbnail — emit preview immediately with empty bytes.
+    if (totalChunks <= 0) {
+      _photoPreviewReceivedController.add(ReceivedPhotoPreview(
+        fromPeerId: fromPeerId,
+        messageId: messageId,
+        photoId: photoId,
+        thumbnailBytes: Uint8List(0),
+        originalSize: originalSize,
+        timestamp: DateTime.now(),
+      ));
+      return;
+    }
 
     _incomingThumbnailTransfers[fromPeerId] = _IncomingThumbnailTransfer(
       messageId: messageId,
@@ -2689,13 +2735,6 @@ class FlutterBluePlusBleService implements BleServiceInterface {
       totalChunks: totalChunks,
       receivedData: BytesBuilder(copy: false),
       receivedCount: 0,
-    );
-
-    Logger.info(
-      'BleService: Photo preview starting from '
-          '${fromPeerId.substring(0, min(8, fromPeerId.length))}: '
-          '$totalChunks thumb chunks, originalSize=$originalSize',
-      'BLE',
     );
   }
 
@@ -2794,7 +2833,7 @@ class FlutterBluePlusBleService implements BleServiceInterface {
     _updateScanTiming();
     Logger.info(
         'BleService: Battery saver ${enabled ? 'enabled' : 'disabled'} '
-        '(scan ${_scanDuration.inSeconds}s / pause ${_scanPause.inSeconds}s)',
+            '(scan ${_scanDuration.inSeconds}s / pause ${_scanPause.inSeconds}s)',
         'BLE');
   }
 
@@ -2807,7 +2846,8 @@ class FlutterBluePlusBleService implements BleServiceInterface {
       _scanPause = _batteryScanPause;
       return;
     }
-    final isHighDensity = _visiblePeers.length >= config.highDensityPeerThreshold;
+    final isHighDensity =
+        _visiblePeers.length >= config.highDensityPeerThreshold;
     if (isHighDensity) {
       _scanDuration = _batteryScanDuration;
       _scanPause = config.highDensityScanPause;

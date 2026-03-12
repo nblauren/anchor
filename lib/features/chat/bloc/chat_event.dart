@@ -2,6 +2,8 @@ import 'package:equatable/equatable.dart';
 
 import '../../../data/local_database/database.dart';
 import '../../../services/ble/ble.dart' as ble;
+import '../../../services/nearby/nearby_models.dart';
+import 'chat_state.dart';
 
 abstract class ChatEvent extends Equatable {
   const ChatEvent();
@@ -201,4 +203,72 @@ class CancelPhotoTransfer extends ChatEvent {
 
   @override
   List<Object?> get props => [messageId];
+}
+
+// ── Wi-Fi Direct / Nearby transfer events ───────────────────────────────────
+
+/// Nearby transfer progress updated (from HighSpeedTransferService stream).
+class NearbyTransferProgressUpdated extends ChatEvent {
+  const NearbyTransferProgressUpdated(this.progress);
+  final NearbyTransferProgress progress;
+
+  @override
+  List<Object?> get props => [progress];
+}
+
+/// A complete payload was received via Nearby Connections.
+class NearbyPayloadCompleted extends ChatEvent {
+  const NearbyPayloadCompleted(this.payload);
+  final NearbyPayloadReceived payload;
+
+  @override
+  List<Object?> get props => [payload];
+}
+
+/// BLE signal: sender says Wi-Fi transfer is ready for [transferId].
+///
+/// For full-photo transfers, [transferId] is the photoId and [isPreview] is
+/// false.  For thumbnail/preview transfers, [transferId] is `preview-$photoId`
+/// and the additional preview metadata fields are populated.
+class WifiTransferReadyReceived extends ChatEvent {
+  const WifiTransferReadyReceived({
+    required this.fromPeerId,
+    required this.transferId,
+    this.senderNearbyId,
+    this.isPreview = false,
+    this.photoId,
+    this.originalSize,
+    this.messageId,
+  });
+
+  final String fromPeerId;
+  final String transferId;
+
+  /// The sender's userId used as the Nearby Connections device name.
+  /// This is different from [fromPeerId] which is the BLE device ID.
+  final String? senderNearbyId;
+  final bool isPreview;
+  final String? photoId;
+  final int? originalSize;
+  final String? messageId;
+
+  @override
+  List<Object?> get props => [
+        fromPeerId,
+        transferId,
+        senderNearbyId,
+        isPreview,
+        photoId,
+        originalSize,
+        messageId,
+      ];
+}
+
+/// Internal event: register a pending outgoing photo from a background send.
+class RegisterPendingOutgoingPhoto extends ChatEvent {
+  const RegisterPendingOutgoingPhoto({required this.photo});
+  final PendingOutgoingPhoto photo;
+
+  @override
+  List<Object?> get props => [photo];
 }

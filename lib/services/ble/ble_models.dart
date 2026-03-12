@@ -207,6 +207,10 @@ enum MessageType {
   photoPreview,
   /// Receiver's consent request — triggers the sender to start the full transfer.
   photoRequest,
+
+  /// Sender signals that a Wi-Fi Direct transfer is ready for [transferId].
+  /// Receiver should start Nearby discovery to connect and receive the payload.
+  wifiTransferReady,
 }
 
 /// Payload for sending a message

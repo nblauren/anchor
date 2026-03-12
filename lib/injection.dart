@@ -8,6 +8,7 @@ import 'services/ble/ble.dart';
 import 'services/database_service.dart';
 import 'services/image_service.dart';
 import 'services/audio_service.dart';
+import 'services/nearby/nearby.dart';
 import 'services/notification_service.dart';
 import 'services/nsfw_detection_service.dart';
 
@@ -60,11 +61,25 @@ Future<void> initializeDependencies({
     Logger.warning('BLE initialization failed: $e', 'DI');
   }
 
+  // High-speed transfer service — lazy init on first use.
+  // Real userId is wired when ChatBloc is created (see below).
+
   // Initialize notification service
   await getIt<NotificationService>().initialize();
 
   // NSFW detection service — on-device TFLite model via nsfw_detector_flutter
   getIt.registerLazySingleton<NsfwDetectionService>(() => NsfwDetectorFlutterService());
+
+  // High-speed transfer (Wi-Fi Direct via Nearby Connections / Multipeer)
+  getIt.registerLazySingleton<HighSpeedTransferService>(() {
+    if (config.useMockService) {
+      Logger.info('Using MockHighSpeedTransferService for testing', 'DI');
+      return MockHighSpeedTransferService();
+    } else {
+      Logger.info('Using NearbyTransferServiceImpl for production', 'DI');
+      return NearbyTransferServiceImpl();
+    }
+  });
 
   // Blocs (factories - new instance each time)
   getIt.registerFactory<ProfileBloc>(
@@ -94,6 +109,7 @@ Future<void> initializeDependencies({
       bleService: getIt<BleServiceInterface>(),
       notificationService: getIt<NotificationService>(),
       ownUserId: ownUserId,
+      highSpeedTransferService: getIt<HighSpeedTransferService>(),
     ),
   );
 
@@ -114,6 +130,7 @@ Future<void> initializeDependencies({
 
 /// Dispose all dependencies
 Future<void> disposeDependencies() async {
+  await getIt<HighSpeedTransferService>().dispose();
   await getIt<DatabaseService>().close();
   await getIt<BleServiceInterface>().dispose();
   await getIt.reset();

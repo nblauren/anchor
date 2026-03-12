@@ -37,6 +37,12 @@ dependencies:
   image_compression_flutter: ^1.0.4
   nsfw_detector_flutter: ^1.0.5
 
+  # High-Speed Transfer (Wi-Fi Direct via Nearby Connections / Multipeer)
+  flutter_nearby_connections_plus:
+    git:
+      url: https://github.com/AppDev42/flutter_nearby_connections_plus.git
+      ref: feature/fix-ios-podspec-module-name-mismatch
+
   # Audio
   audioplayers: ^6.1.0
 

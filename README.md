@@ -19,7 +19,9 @@ Designed with privacy first: no registration, no cloud sync, all data stays on y
 - **Photo Consent Flow** — sender offers a preview; receiver accepts before the full photo is transferred
 - **NSFW Detection** — primary photo is screened before being broadcast over BLE; blocked photos are flagged in-app without transmitting
 - **Profile: Position & Interests (ID-mapped)** — position and interests stored as integer IDs, not free text, keeping broadcast payload small and consistent
-- **Drop Anchor ⚓** — quick interest signal sent to a nearby peer (planned; infrastructure in place)
+- **Drop Anchor ⚓** — quick interest signal sent to a nearby peer with history tracking
+- **Wi-Fi Direct Photo Transfer** — high-speed photo transfer over Wi-Fi Direct (Nearby Connections / Multipeer Connectivity) with automatic BLE fallback; 100x+ faster than BLE chunking
+- **Non-Blocking Message Queue** — send multiple text and photo messages back-to-back without blocking; messages queue and send sequentially in the background (FIFO)
 - **BLE Mesh Relay** — TTL-based message flooding through connected peers for extended reach; no store-and-forward for relayed messages (direct peers only)
 - **Block Users Locally** — full control over who can reach you; blocking is stored on-device only
 - **Privacy-First** — no servers, no accounts, no analytics; delete the app to erase all data
@@ -31,6 +33,7 @@ Designed with privacy first: no registration, no cloud sync, all data stays on y
 - Voice messages
 - Photo albums (multiple photos per message)
 - Event codes for organizers to scope discovery to attendees
+- Store-and-forward for direct messages (queue when peer out of range)
 
 ## Technology Stack
 
@@ -42,6 +45,7 @@ Designed with privacy first: no registration, no cloud sync, all data stays on y
 | State Management | Bloc / Cubit |
 | Dependency Injection | GetIt |
 | Image Handling | `image_picker`, `image_compression_flutter` |
+| Wi-Fi Direct | `flutter_nearby_connections_plus` (Nearby Connections / Multipeer Connectivity) |
 | NSFW Detection | `nsfw_detector_flutter` |
 | Notifications | `flutter_local_notifications` |
 
@@ -114,8 +118,10 @@ flutter run
 
 1. Messages are sent directly over BLE GATT — no relay, no server
 2. Text messages deliver in 2–3 seconds when both devices are in range
-3. If a peer goes out of range, messages are not queued (no store-and-forward for direct messages in v1)
+3. Messages queue in-app and send sequentially — you can type multiple messages without waiting
 4. Photos require explicit receiver consent before transfer begins
+5. Photos transfer over Wi-Fi Direct when available (< 1 second for 5 MB); falls back to BLE chunking automatically
+6. If a peer goes out of range, messages are not queued across sessions (no store-and-forward in v1)
 
 ### Privacy Controls
 
@@ -131,6 +137,7 @@ lib/
 ├── data/              # Drift database schema, repositories
 ├── services/
 │   ├── ble/           # BLE service (central + peripheral via bluetooth_low_energy)
+│   ├── nearby/        # Wi-Fi Direct high-speed transfer (flutter_nearby_connections_plus)
 │   ├── image_service.dart
 │   ├── nsfw_detection_service.dart
 │   └── notification_service.dart
@@ -161,9 +168,9 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed technical documentation.
 
 | Limitation | Detail |
 |---|---|
-| No store-and-forward | If a peer goes out of range before a message is delivered, the message is not queued or retried |
+| No store-and-forward | If a peer goes out of range before a message is delivered, the message is not queued across sessions |
 | Photo relay | Full photos are only transferred direct peer-to-peer; multi-hop relay for photos is not supported |
-| Photo transfer speed | ~30–60 seconds for a 200 KB photo over BLE |
+| Photo transfer speed | < 1 second via Wi-Fi Direct; ~30–60 seconds via BLE fallback for a 200 KB photo |
 
 ### Environment
 
@@ -191,7 +198,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed technical documentation.
 |---|---|
 | Discovery — 2 devices | Both appear in each other's grid within 10 seconds |
 | Text message | Delivers in 2–3 seconds when in range |
-| Photo consent flow | Sender offers preview; receiver accepts; full photo transfers |
+| Photo consent flow | Sender notifies; receiver taps to accept; full photo transfers via Wi-Fi Direct (BLE fallback) |
 | NSFW photo | Blocked before broadcast; flagged in profile editor |
 | Permissions denied | Clear error with Settings deep-link |
 | Multiple peers (5+) | All discover each other; no crashes; connection pool respected |
@@ -209,7 +216,9 @@ See [BLE_IMPLEMENTATION.md](BLE_IMPLEMENTATION.md) for detailed BLE testing guid
 - Thumbnail-first photo broadcast (10–30 KB primary thumbnail)
 - Full photo fetch on-demand with consent flow
 - NSFW detection before broadcasting primary photo
-- Drop Anchor ⚓ signal (infrastructure and BLE events ready)
+- Drop Anchor ⚓ signal with full UI and history tracking
+- Wi-Fi Direct photo transfer with automatic BLE fallback
+- Non-blocking message send queue (FIFO — text and photos queue and send in background)
 - Mesh relay with TTL-based flooding (no store-and-forward for relayed messages)
 - Local user blocking
 - Battery saver mode (adaptive scan intervals)
@@ -219,7 +228,7 @@ See [BLE_IMPLEMENTATION.md](BLE_IMPLEMENTATION.md) for detailed BLE testing guid
 
 ### In Progress / Planned
 
-- Drop Anchor UI completion
+- Store-and-forward for direct messages
 - End-to-end encryption
 - Group chat
 - Voice messages

@@ -8,11 +8,14 @@ This document is specifically for AI assistants (like Claude, GPT, etc.) working
 - Offline-first dating/social discovery app for LGBTQ+ cruises and festivals
 - Uses Bluetooth Low Energy (BLE) for peer-to-peer communication
 - No servers, no internet required, everything local
-- Built with Flutter, Drift (SQLite), Bloc pattern, flutter_blue_plus
+- Built with Flutter, Drift (SQLite), Bloc pattern, bluetooth_low_energy
+- Wi-Fi Direct (flutter_nearby_connections_plus) for high-speed photo transfer with BLE fallback
 
 **Target Environment**: Gay cruises (Atlantis, VACAYA) and festivals where internet is weak/expensive/nonexistent
 
 **Key Challenge**: Reliable communication in metal ships with 50-100+ people in range, intermittent connections, battery constraints
+
+**Photo Transfer**: Wi-Fi Direct (Nearby Connections / Multipeer Connectivity) for high-speed transfer; automatic BLE fallback. Non-blocking FIFO message queue ensures sends never block the UI.
 
 ## Project Architecture at a Glance
 
@@ -50,11 +53,18 @@ lib/
 - `lib/services/ble/ble_status_bloc.dart` - BLE adapter state tracking
 - `lib/services/ble/ble_connection_bloc.dart` - BLE lifecycle management
 
+### Wi-Fi Direct / Nearby Transfer
+- `lib/services/nearby/high_speed_transfer_service.dart` - Abstract interface
+- `lib/services/nearby/nearby_transfer_service_impl.dart` - Production impl (base64 chunks over Nearby text messages)
+- `lib/services/nearby/mock_high_speed_transfer_service.dart` - Test double
+- `lib/services/nearby/nearby_models.dart` - NearbyTransferProgress, NearbyPayloadReceived, TransferTransport
+
 ### Database
-- `lib/data/database.dart` - Drift database schema (tables: user_profile, discovered_peers, conversations, messages, blocked_users, profile_photos)
+- `lib/data/local_database/database.dart` - Drift database schema (tables: user_profile, discovered_peers, conversations, messages, blocked_users, profile_photos, anchor_drops)
 - `lib/data/repositories/profile_repository.dart` - Profile CRUD
 - `lib/data/repositories/peer_repository.dart` - Peer discovery, blocking
 - `lib/data/repositories/chat_repository.dart` - Conversations, messages
+- `lib/data/repositories/anchor_drop_repository.dart` - Anchor drop history
 
 ### Feature Modules
 - `lib/features/profile/` - User profile creation and editing
@@ -64,7 +74,7 @@ lib/
 - `lib/features/settings/` - App settings, blocked users, debug menu
 
 ### Configuration
-- `pubspec.yaml` - Dependencies (flutter_blue_plus, drift, bloc, etc.)
+- `pubspec.yaml` - Dependencies (bluetooth_low_energy, drift, bloc, flutter_nearby_connections_plus, etc.)
 - `android/app/src/main/AndroidManifest.xml` - Android permissions
 - `ios/Runner/Info.plist` - iOS permissions
 - `lib/injection.dart` - Dependency injection setup
@@ -88,30 +98,35 @@ Messaging:           0000fff3-0000-1000-8000-00805f9b34fb (WRITE, NOTIFY)
 6. Device A disconnects after 60s idle (or keeps for active chat)
 
 ### How Messaging Works
-1. User sends message → ChatBloc → `bleService.sendMessage(peerId, message)`
-2. BLE service checks if connected:
-   - Connected: Write to Messaging characteristic immediately
-   - Not connected: Queue message (store-and-forward) ⚠️ **NOT YET IMPLEMENTED**
-3. Recipient subscribes to Messaging characteristic notifications
-4. Recipient receives message → emits to `messageReceived` stream
-5. ChatBloc receives → saves to database → updates UI
+1. User sends message → ChatBloc saves to DB → adds to UI immediately → returns (non-blocking)
+2. Background FIFO queue (`_sendQueue`) processes sends sequentially:
+   - `_sendTextInBackground()` → `bleService.sendMessage(peerId, payload)`
+   - `_sendPhotoInBackground()` → compress + `bleService.sendPhotoPreview()`
+3. BLE service writes to Messaging characteristic (fff3)
+4. Recipient subscribes to fff3 notifications → receives message → ChatBloc saves to DB → updates UI
+5. User can send multiple messages without waiting — each shows a pending indicator until delivered
+
+### How Photo Transfer Works
+1. Sender selects photo → saved to DB immediately → lightweight BLE notification sent (no thumbnail)
+2. Receiver sees "Photo — Tap to download" → taps to send `photo_request` via BLE
+3. Sender receives `photo_request` → fire-and-forget `_sendFullPhoto()`:
+   a. If Wi-Fi Direct available: advertise on Nearby → send `wifiTransferReady` BLE signal → stream base64 chunks
+   b. If Wi-Fi Direct fails/times out: fallback to BLE chunking via fff3
+4. Receiver gets `wifiTransferReady` BLE signal → browse Nearby → connect → receive chunks → save photo
+5. Two ID systems: BLE device IDs ≠ Nearby userIds — `_transferToBleId` map in ChatBloc resolves the mapping
 
 ### Connection Management
 - **Max Connections**: 5 concurrent (iOS limit ~8-10, Android ~20-50)
 - **Connection Timeout**: 30 seconds
 - **Idle Timeout**: 60 seconds (disconnect if no activity)
-- **Peer Timeout**: 5 minutes (emit `peerLost` if no GATT activity)
+- **Peer Timeout**: 2 minutes (emit `peerLost` if no GATT activity)
 - **Eviction**: LRU (Least Recently Used)
 
 ### Known Limitations (Important!)
-1. **Peripheral Mode**: Not fully implemented (flutter_blue_plus limitation)
-   - `broadcastProfile()` is called but doesn't actually advertise
-   - **TODO**: Need platform channels for native advertising
-2. **Photo Transfer**: Marked as TODO, returns `false` immediately
-   - **TODO**: Implement chunking, MTU negotiation, progress tracking
-3. **Message Queue**: Store-and-forward not implemented
-   - **TODO**: Add `pending_messages` table, retry logic, exponential backoff
-4. **iOS Background**: Very limited discovery when app backgrounded (Apple restriction)
+1. **Store-and-forward**: Not implemented across sessions — if peer goes out of range, unsent messages fail
+2. **One concurrent Wi-Fi Direct transfer**: NearbyService reinitializes between transfers; no parallel transfers
+3. **iOS Background**: Very limited discovery when app backgrounded (Apple restriction)
+4. **Wi-Fi Direct platform channel threading**: Native callbacks may arrive on non-platform thread (logged warning, no data loss observed)
 
 ## Common Tasks and How to Do Them
 
@@ -553,78 +568,43 @@ if (adapterState != BluetoothAdapterState.on) {
 
 ## Specific Guidance for Common Requests
 
-### "Add photo transfer"
+### "Add photo transfer" — ✅ IMPLEMENTED
 
-**What needs to be done**:
-1. Implement `sendPhoto()` in `flutter_blue_plus_ble_service.dart`:
-   - Negotiate MTU with peer
-   - Use `PhotoChunker` to split photo into chunks
-   - Send chunks sequentially over Messaging characteristic
-   - Wait for ACK after each chunk
-   - Emit progress updates
-   - Handle errors (retry, resume on reconnect)
-2. Implement receiver side:
-   - Receive chunks
-   - Store in temporary buffer
-   - Reassemble when complete
-   - Save to file system
-   - Emit completed message to stream
-3. Update ChatBloc to handle photo progress
-4. Update UI to show progress indicator
-5. Test on physical devices with 100KB-200KB photos
+Photo transfer is fully implemented with Wi-Fi Direct (primary) and BLE chunking (fallback).
 
-**Reference**: See TODO comments in `flutter_blue_plus_ble_service.dart:450` and implementation plan in `FLUTTER_BLUE_PLUS_IMPLEMENTATION.md:177-189`
+**Key files**:
+- `lib/services/nearby/nearby_transfer_service_impl.dart` — Wi-Fi Direct transfer (base64 chunks over Nearby text messages)
+- `lib/features/chat/bloc/chat_bloc.dart` — `_sendFullPhoto()`, `_onWifiTransferReady()`, `_onNearbyPayloadCompleted()`
+- `lib/services/ble/flutter_blue_plus_ble_service.dart` — BLE photo chunking fallback
 
-### "Add message queue"
+**Key patterns**:
+- Fire-and-forget: `_sendFullPhoto()` is not awaited in the bloc handler to avoid blocking the event queue
+- ID mapping: `_transferToBleId` maps Nearby transferId → BLE device ID (these are different!)
+- NearbyService reinitializes between transfers (`_stopNearby()` resets `_initialized`)
+- 3-second delay after `transfer_complete` before disconnecting to let native channel flush
 
-**What needs to be done**:
-1. Add `PendingMessages` table to `lib/data/database.dart`:
-   - Fields: messageId, peerId, payload, createdAt, retryCount
+### "Add store-and-forward message queue"
+
+**What needs to be done** (not yet implemented):
+1. Add `PendingMessages` table to `lib/data/local_database/database.dart`
 2. Create `PendingMessageRepository` in `lib/data/repositories/`
-3. Update `sendMessage()` in BLE service:
-   - If peer offline, save to pending_messages table
-   - Return "queued" status
-4. Listen to `peerDiscovered` stream:
-   - Query pending_messages for that peer
-   - Attempt delivery for each
-   - Delete on success, increment retryCount on failure
-   - Delete after 3 retries or 24 hours
-5. Add retry logic with exponential backoff
-6. Update ChatBloc to handle "queued" status
-7. Update UI to show "Queued" badge
+3. Queue messages when peer offline; deliver when peer rediscovered
+4. Retry with exponential backoff; expire after 24 hours
 
-**Reference**: See implementation plan in `FLUTTER_BLUE_PLUS_IMPLEMENTATION.md:191-212`
-
-### "Implement peripheral mode"
-
-**What needs to be done**:
-1. Create platform channels:
-   - iOS: `ios/Runner/BlePeripheralManager.swift`
-   - Android: `android/app/src/main/kotlin/.../BlePeripheralService.kt`
-2. Implement native advertising:
-   - iOS: Use `CBPeripheralManager` to advertise service UUID
-   - Android: Use `BluetoothLeAdvertiser` to advertise
-3. Create Dart method channel interface
-4. Update `broadcastProfile()` in `flutter_blue_plus_ble_service.dart` to call native code
-5. Handle GATT server setup (characteristics, read/write handlers)
-6. Test on physical devices
-
-**Reference**: Platform-specific guides in `FLUTTER_BLUE_PLUS_IMPLEMENTATION.md:214-220`
+**Note**: In-session message queuing IS implemented — the FIFO `_sendQueue` in ChatBloc ensures messages send sequentially in the background. What's NOT implemented is cross-session persistence (messages lost if peer goes out of range).
 
 ### "Improve battery life"
 
-**What to focus on**:
-1. **Adjust scan timing**: Increase pause duration (currently 3s scan, 5s pause)
-2. **Connection pooling**: Reduce max connections from 5 to 3
-3. **Idle timeout**: Reduce from 60s to 30s
-4. **Scan filtering**: Only scan when Discovery screen open
-5. **Background behavior**: Stop scanning when app backgrounded (Android)
-6. **Adaptive scanning**: Add battery saver mode (scan 2s, pause 15s)
+**Already implemented**:
+- Adaptive scanning (normal / battery saver / high-density modes)
+- Battery saver mode toggle in Settings
+- Connection pooling (max 5 concurrent, LRU eviction)
+- Wi-Fi Direct only activates during active photo transfers (not always-on)
 
-**Files to modify**:
-- `lib/services/ble/ble_config.dart` - Update default timings
-- `lib/services/ble/flutter_blue_plus_ble_service.dart` - Implement adaptive scanning
-- `lib/features/settings/screens/settings_screen.dart` - Add battery saver toggle
+**Further optimization ideas**:
+- Reduce max connections from 5 to 3
+- Only scan when Discovery screen is open
+- Stop scanning when app backgrounded (Android)
 
 ## Key Documentation References
 

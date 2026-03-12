@@ -90,15 +90,21 @@ lib/
 │   ├── image_service.dart           # Photo pick, compress, store, thumbnail gen
 │   ├── nsfw_detection_service.dart  # On-device NSFW classifier
 │   ├── notification_service.dart    # Local push notifications
-│   └── ble/
-│       ├── ble_service_interface.dart         # Abstract BLE contract
-│       ├── flutter_blue_plus_ble_service.dart # Production impl (bluetooth_low_energy)
-│       ├── mock_ble_service.dart              # Test double
-│       ├── ble_models.dart                    # BLE-layer data types
-│       ├── ble_config.dart                    # Runtime configuration
-│       ├── ble_status_bloc.dart               # BLE adapter state tracking
-│       ├── ble_connection_bloc.dart           # BLE service lifecycle management
-│       └── photo_chunker.dart                 # Photo chunk/reassemble helpers
+│   ├── ble/
+│   │   ├── ble_service_interface.dart         # Abstract BLE contract
+│   │   ├── flutter_blue_plus_ble_service.dart # Production impl (bluetooth_low_energy)
+│   │   ├── mock_ble_service.dart              # Test double
+│   │   ├── ble_models.dart                    # BLE-layer data types
+│   │   ├── ble_config.dart                    # Runtime configuration
+│   │   ├── ble_status_bloc.dart               # BLE adapter state tracking
+│   │   ├── ble_connection_bloc.dart           # BLE service lifecycle management
+│   │   └── photo_chunker.dart                 # Photo chunk/reassemble helpers
+│   └── nearby/
+│       ├── high_speed_transfer_service.dart    # Abstract Wi-Fi Direct interface
+│       ├── nearby_transfer_service_impl.dart   # Production impl (flutter_nearby_connections_plus)
+│       ├── mock_high_speed_transfer_service.dart # Test double
+│       ├── nearby_models.dart                  # NearbyTransferProgress, NearbyPayloadReceived
+│       └── nearby.dart                         # Barrel export
 │
 └── features/
     ├── profile/                     # Own profile management
@@ -183,31 +189,46 @@ Sender (Central)                           Receiver (Peripheral / GATT server)
       |                         ChatBloc saves to DB, updates UI
 ```
 
-Message types (`MessageType` enum): `text`, `photo`, `typing`, `read`, `photoPreview`, `photoRequest`
+Message types (`MessageType` enum): `text`, `photo`, `typing`, `read`, `photoPreview`, `photoRequest`, `wifiTransferReady`
 
 **No store-and-forward for direct messages (v1)**: If the recipient is out of range when a message is sent, the message is not queued. This is a known v1 limitation. See the planned future enhancements section.
 
 ### Photo Transfer Protocol
 
-Photo sharing uses a three-step consent flow:
+Photo sharing uses a consent-first flow with Wi-Fi Direct high-speed transfer:
 
 ```
-Step 1 — Preview offer (Sender → Receiver via fff3)
-  { type: "photoPreview", messageId, thumbnailBytes (≤30 KB), caption? }
+Step 1 — Preview notification (Sender → Receiver via BLE fff3)
+  { type: "photoPreview", messageId, photoId, originalSize }
+  Note: No thumbnail data is sent — the receiver sees "Photo — Tap to download"
 
-Step 2 — Consent request (Receiver → Sender via fff3)
-  { type: "photoRequest", messageId, accepted: true/false }
+Step 2 — Consent request (Receiver → Sender via BLE fff3)
+  { type: "photoRequest", photoId, accepted: true }
 
-Step 3 — Full photo transfer (Sender → Receiver, direct only)
-  Chunks sent sequentially over fff3/fff4; progress reported via stream.
-  MTU-sized chunks (≈185 B iOS, ≈512 B Android).
+Step 3 — Full photo transfer (Wi-Fi Direct preferred, BLE fallback)
+  a. Sender starts Nearby Connections advertising
+  b. Sender sends wifiTransferReady BLE signal with sender's Nearby ID
+  c. Receiver starts browsing → discovers → invites → connects
+  d. Sender streams base64-encoded chunks over Wi-Fi Direct text channel
+  e. If Wi-Fi Direct times out (15 s), sender falls back to BLE chunking via fff3
+
+Step 4 — Transfer complete
+  Receiver saves photo, upgrades preview bubble to full photo in UI
 ```
+
+**Wi-Fi Direct Transfer (`HighSpeedTransferService`):**
+- Uses `flutter_nearby_connections_plus` (Google Nearby Connections API / Multipeer Connectivity)
+- Sender = ADVERTISER, Receiver = BROWSER (coordinated via BLE signal)
+- Binary data base64-encoded and split into 24 KB chunks (~32 KB base64)
+- 5 MB photo transfers in < 1 second over Wi-Fi Direct vs. ~3 min over BLE
+- One concurrent transfer at a time; NearbyService reinitializes between transfers
 
 **Constraints:**
 - Full photo transfer is **direct peer-to-peer only** — multi-hop relay for photos is not supported
 - Compressed target size: ≤200 KB JPEG
-- Progress updates emitted via `photoProgressStream`
+- Progress updates emitted via `photoProgressStream` (BLE) or `transferProgressStream` (Wi-Fi Direct)
 - Transfer can be cancelled by either party
+- Two separate ID systems: BLE device IDs vs app userIds — mapped via `_transferToBleId` in ChatBloc
 
 ### Mesh Relay Protocol
 
@@ -313,7 +334,9 @@ NsfwDetectionService.classify(thumbnailBytes)
 - Manages conversations and messages
 - Listens to `messageReceived` stream from BLE service
 - Handles photo consent flow: `PhotoPreviewReceived` → `RequestFullPhoto` → `PhotoTransferProgressUpdated`
-- Key events: `SendTextMessage`, `SendPhotoMessage`, `BleMessageReceived`, `PhotoPreviewReceived`, `RequestFullPhoto`, `PhotoRequestReceived`, `CancelPhotoTransfer`
+- **Non-blocking send queue**: `SendTextMessage` and `SendPhotoMessage` save to DB and update UI immediately, then send via BLE in the background using a FIFO queue (`_sendQueue`). Input is never blocked.
+- Wi-Fi Direct integration: `WifiTransferReadyReceived` triggers Nearby browsing; `NearbyPayloadCompleted` handles received photos; `_transferToBleId` map resolves Nearby userIds to BLE device IDs
+- Key events: `SendTextMessage`, `SendPhotoMessage`, `BleMessageReceived`, `PhotoPreviewReceived`, `RequestFullPhoto`, `PhotoRequestReceived`, `CancelPhotoTransfer`, `WifiTransferReadyReceived`, `NearbyPayloadCompleted`, `RegisterPendingOutgoingPhoto`
 
 **`BleStatusBloc`** (`lib/services/ble/ble_status_bloc.dart`)
 - Tracks Bluetooth adapter state (enabled / disabled / unavailable)
@@ -374,12 +397,13 @@ All writes go through repositories; Blocs never access the database directly.
 ### Chat (`lib/features/chat/`)
 
 - Conversation list with unread counts and last-message preview
-- Real-time 1:1 text messaging
+- Real-time 1:1 text messaging with non-blocking FIFO send queue
 - Photo consent flow:
-  1. Sender selects photo → thumbnail preview sent
-  2. Receiver sees preview, taps Accept
-  3. Full photo transfer begins with progress indicator
-- Message status: sending → sent → delivered
+  1. Sender selects photo → lightweight BLE notification sent (no thumbnail)
+  2. Receiver sees "Photo — Tap to download", taps to accept
+  3. Full photo transfers via Wi-Fi Direct (< 1 s) with automatic BLE fallback
+- Message status: pending → sent → delivered
+- Keyboard stays open after sending for rapid follow-up messages
 - Out-of-range indicator when peer not currently visible
 
 ### Onboarding (`lib/features/onboarding/`)
@@ -583,11 +607,12 @@ void setupDependencies(BleConfig config) {
 | Feature | Notes |
 |---|---|
 | End-to-end encryption | RSA key pair per device; keys exchanged during BLE discovery |
-| Store-and-forward (direct) | Queue direct messages for delivery when peer returns to range |
+| Store-and-forward (direct) | Queue direct messages for delivery when peer returns to range (across sessions) |
 | Group chat | Broadcast messages to multiple peers; group formation via QR/event code |
-| Voice messages | Record, compress, chunk, transfer over BLE |
+| Voice messages | Record, compress, chunk, transfer over BLE or Wi-Fi Direct |
 | Photo albums | Multiple photos per message; gallery view |
 | Event codes | Organiser-generated code to scope discovery to event attendees |
+| Concurrent Wi-Fi Direct transfers | Support multiple simultaneous photo transfers |
 
 ---
 

@@ -9,8 +9,32 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
-- Drop Anchor ⚓ UI completion (BLE signalling layer already in place)
-- Store-and-forward for direct messages (queue when peer out of range)
+- Store-and-forward for direct messages (queue when peer out of range across sessions)
+
+---
+
+## [1.1.0] — 2026-03-12
+
+### Added
+- **Wi-Fi Direct photo transfer**: High-speed photo transfer using `flutter_nearby_connections_plus` (Google Nearby Connections API / Multipeer Connectivity). Photos transfer in < 1 second over Wi-Fi Direct vs. ~3 min over BLE. Automatic fallback to BLE chunking if Wi-Fi Direct is unavailable or times out.
+- **Non-blocking message send queue**: Text and photo messages are saved to DB and shown in UI immediately. Actual BLE/Wi-Fi sends happen in the background via a FIFO queue. Users can type multiple messages without waiting for delivery.
+- **`RegisterPendingOutgoingPhoto` event**: Background photo send helper registers pending photos through the Bloc event pipeline.
+- **`_transferToBleId` mapping**: Resolves Nearby Connections userIds to BLE device IDs in `ChatBloc`, preventing incorrect user creation when receiving photos via Wi-Fi Direct.
+- **Drop Anchor ⚓ complete UI**: Full anchor drop UI with history screen, audio feedback, and send/receive notifications.
+
+### Changed
+- **Photo consent flow simplified**: Sender no longer sends thumbnail data over BLE — just a lightweight notification. Receiver sees "Photo — Tap to download" and requests the full photo.
+- **Send button never blocks**: Removed `ChatStatus.sending` guard from chat input. Send and photo buttons are always active.
+- **Keyboard stays open**: After sending a text message, keyboard remains open for rapid follow-up. Uses `onEditingComplete` instead of `onSubmitted` to prevent default unfocus. Tapping the message list dismisses the keyboard.
+- **NearbyService reinitializes between transfers**: `_stopNearby()` resets `_initialized` flag so each transfer gets a fresh native init, fixing second-transfer failures.
+- **Peripheral state tracking**: Added `_peripheralPoweredOn` flag tracked from stream events instead of relying on potentially stale `_peripheral.state` getter, fixing "Peripheral not ready (unknown)" errors.
+
+### Fixed
+- **Wi-Fi Direct ID mismatch**: `_onNearbyPayloadCompleted` now uses BLE device ID (via `_transferToBleId` map) instead of sender's Nearby userId for conversation lookup, preventing ghost user creation.
+- **Second Wi-Fi Direct transfer failing**: NearbyService native layer now fully reinitializes between transfer sessions.
+- **Sender tearing down too fast**: Added 3-second delay after `transfer_complete` before `_stopNearby()` to let native message channel flush. Added 50ms delay between chunks to prevent channel saturation.
+- **BLE peripheral not advertising**: Fixed race condition where `_onPeripheralStateChanged` required `_startCalled` to retry pending payloads — now retries whenever `_pendingPayload` exists.
+- **Bloc event queue blocking**: Photo transfer and BLE send no longer block the ChatBloc event queue. All sends use fire-and-forget pattern with status updates dispatched as events.
 
 ---
 
@@ -64,6 +88,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-[Unreleased]: https://github.com/yourusername/anchor/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/yourusername/anchor/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/yourusername/anchor/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/yourusername/anchor/compare/v0.9.0...v1.0.0
 [0.9.0]: https://github.com/yourusername/anchor/releases/tag/v0.9.0

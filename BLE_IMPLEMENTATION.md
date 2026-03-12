@@ -145,10 +145,19 @@ Messages are JSON-encoded and written to fff3. The receiver's GATT server notifi
    └─> ChatBloc emits PhotoPreviewUpgraded; UI shows full photo
 ```
 
+**Wi-Fi Direct High-Speed Transfer (preferred)**:
+- Uses `flutter_nearby_connections_plus` (Google Nearby Connections / Multipeer Connectivity)
+- Sender = ADVERTISER, Receiver = BROWSER — coordinated via `wifiTransferReady` BLE signal
+- Binary data base64-encoded, split into 24 KB chunks over Nearby text messages
+- 5 MB photo transfers in < 1 second vs. ~3 min over BLE
+- Automatic fallback to BLE chunking if Wi-Fi Direct times out (15 s)
+- `_transferToBleId` map in ChatBloc resolves Nearby userIds → BLE device IDs
+
 **Constraints**:
 - Full photo transfer is **direct peer-to-peer only** — never relayed through intermediate nodes
 - Compressed target: ≤200 KB JPEG
 - Photo can be cancelled mid-transfer by either party
+- One concurrent Wi-Fi Direct transfer at a time (NearbyService reinitializes between transfers)
 
 ---
 
@@ -270,7 +279,11 @@ Messages are JSON-encoded and written to fff3. The receiver's GATT server notifi
 | Photo chunker | `lib/services/ble/photo_chunker.dart` |
 | Adapter state bloc | `lib/services/ble/ble_status_bloc.dart` |
 | Service lifecycle bloc | `lib/services/ble/ble_connection_bloc.dart` |
-| Mock service (tests) | `lib/services/ble/mock_ble_service.dart` |
+| Mock BLE service | `lib/services/ble/mock_ble_service.dart` |
+| Wi-Fi Direct interface | `lib/services/nearby/high_speed_transfer_service.dart` |
+| Wi-Fi Direct impl | `lib/services/nearby/nearby_transfer_service_impl.dart` |
+| Wi-Fi Direct models | `lib/services/nearby/nearby_models.dart` |
+| Mock Wi-Fi Direct | `lib/services/nearby/mock_high_speed_transfer_service.dart` |
 | Dependency wiring | `lib/injection.dart` |
 
 ---

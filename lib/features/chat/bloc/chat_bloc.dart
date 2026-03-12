@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:anchor/services/notification_service.dart';
 import 'package:uuid/uuid.dart';
@@ -12,6 +13,7 @@ import '../../../data/repositories/chat_repository.dart';
 import '../../../data/repositories/peer_repository.dart';
 import '../../../services/ble/ble.dart' as ble;
 import '../../../services/image_service.dart';
+import '../../../services/nearby/nearby.dart';
 import 'chat_event.dart';
 import 'chat_state.dart';
 
@@ -23,12 +25,14 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     required ble.BleServiceInterface bleService,
     required NotificationService notificationService,
     required String ownUserId,
+    HighSpeedTransferService? highSpeedTransferService,
   })  : _chatRepository = chatRepository,
         _peerRepository = peerRepository,
         _imageService = imageService,
         _bleService = bleService,
         _notificationService = notificationService,
         _ownUserId = ownUserId,
+        _highSpeedService = highSpeedTransferService,
         super(const ChatState()) {
     on<LoadConversations>(_onLoadConversations);
     on<OpenConversation>(_onOpenConversation);
@@ -52,6 +56,12 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     on<PhotoRequestReceived>(_onPhotoRequestReceived);
     on<CancelPhotoTransfer>(_onCancelPhotoTransfer);
     on<PhotoPreviewUpgraded>(_onPhotoPreviewUpgraded);
+    // Background send queue
+    on<RegisterPendingOutgoingPhoto>(_onRegisterPendingOutgoingPhoto);
+    // Wi-Fi Direct / Nearby events
+    on<NearbyTransferProgressUpdated>(_onNearbyTransferProgress);
+    on<NearbyPayloadCompleted>(_onNearbyPayloadCompleted);
+    on<WifiTransferReadyReceived>(_onWifiTransferReady);
 
     // Subscribe to BLE message stream
     _messageSubscription = _bleService.messageReceivedStream.listen(
@@ -75,6 +85,26 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     _photoRequestSubscription = _bleService.photoRequestReceivedStream.listen(
       (request) => add(PhotoRequestReceived(request)),
     );
+
+    // Initialize Nearby / Wi-Fi Direct with the real userId and subscribe.
+    final highSpeed = _highSpeedService;
+    if (highSpeed != null) {
+      // Fire-and-forget: lazy init will retry on first transfer if this fails.
+      highSpeed.initialize(ownUserId: ownUserId).then((_) {
+        Logger.info('HighSpeedTransferService initialized with userId', 'Chat');
+      }).catchError((e) {
+        Logger.warning('HighSpeedTransferService init deferred: $e', 'Chat');
+      });
+
+      _nearbyProgressSubscription =
+          highSpeed.transferProgressStream.listen(
+        (progress) => add(NearbyTransferProgressUpdated(progress)),
+      );
+      _nearbyPayloadSubscription =
+          highSpeed.payloadReceivedStream.listen(
+        (payload) => add(NearbyPayloadCompleted(payload)),
+      );
+    }
   }
 
   final ChatRepository _chatRepository;
@@ -83,6 +113,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   final ble.BleServiceInterface _bleService;
   final NotificationService _notificationService;
   final String _ownUserId;
+  final HighSpeedTransferService? _highSpeedService;
 
   // BLE subscriptions
   StreamSubscription<ble.ReceivedMessage>? _messageSubscription;
@@ -90,6 +121,23 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   StreamSubscription<ble.ReceivedPhoto>? _photoReceivedSubscription;
   StreamSubscription<ble.ReceivedPhotoPreview>? _photoPreviewSubscription;
   StreamSubscription<ble.ReceivedPhotoRequest>? _photoRequestSubscription;
+
+  // Nearby / Wi-Fi Direct subscriptions
+  StreamSubscription<NearbyTransferProgress>? _nearbyProgressSubscription;
+  StreamSubscription<NearbyPayloadReceived>? _nearbyPayloadSubscription;
+
+  // Metadata from BLE signal for pending Wi-Fi Direct preview transfers.
+  // Keyed by photoId (without 'preview-' prefix).
+  final Map<String, Map<String, dynamic>> _pendingPreviewMeta = {};
+
+  // Maps Nearby transferId → BLE device ID so _onNearbyPayloadCompleted can
+  // look up the correct conversation.  Populated in _onWifiTransferReady where
+  // we still have the BLE device ID (event.fromPeerId).
+  final Map<String, String> _transferToBleId = {};
+
+  // FIFO send queue — guarantees messages are sent in the order they were typed.
+  final List<Future<void> Function()> _sendQueue = [];
+  bool _isProcessingQueue = false;
 
   // Mock echo timer (for testing when using MockBleService)
   Timer? _echoTimer;
@@ -195,9 +243,9 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     if (event.text.trim().isEmpty) return;
     if (state.isBlocked) return;
 
-    emit(state.copyWith(status: ChatStatus.sending));
-
     try {
+      final peerId = state.currentConversation!.peerId;
+
       // Save message to database as pending
       final message = await _chatRepository.sendTextMessage(
         conversationId: state.currentConversation!.id,
@@ -205,38 +253,14 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         text: event.text.trim(),
       );
 
-      // Add to messages list
+      // Add to messages list immediately — don't block input
       emit(state.copyWith(
         status: ChatStatus.loaded,
         messages: [message, ...state.messages],
       ));
 
-      // Send via BLE
-      final payload = ble.MessagePayload(
-        messageId: message.id,
-        type: ble.MessageType.text,
-        content: event.text.trim(),
-      );
-
-      final success = await _bleService.sendMessage(
-        state.currentConversation!.peerId,
-        payload,
-      );
-
-      if (success) {
-        add(MessageStatusUpdated(
-          messageId: message.id,
-          status: MessageStatus.sent,
-        ));
-      } else {
-        add(MessageStatusUpdated(
-          messageId: message.id,
-          status: MessageStatus.failed,
-        ));
-      }
-
-      // Refresh conversations
-      add(const LoadConversations());
+      // Fire-and-forget: BLE send runs in background
+      _enqueueSend(() => _sendTextInBackground(message, peerId));
     } catch (e) {
       Logger.error('Failed to send message', e, null, 'ChatBloc');
       emit(state.copyWith(
@@ -246,10 +270,35 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     }
   }
 
+  /// Background helper: sends a text message via BLE without blocking the
+  /// event queue.  Status updates are dispatched as events.
+  Future<void> _sendTextInBackground(MessageEntry message, String peerId) async {
+    try {
+      final payload = ble.MessagePayload(
+        messageId: message.id,
+        type: ble.MessageType.text,
+        content: message.textContent ?? '',
+      );
+
+      final success = await _bleService.sendMessage(peerId, payload);
+      add(MessageStatusUpdated(
+        messageId: message.id,
+        status: success ? MessageStatus.sent : MessageStatus.failed,
+      ));
+      add(const LoadConversations());
+    } catch (e) {
+      Logger.error('Background text send failed', e, null, 'ChatBloc');
+      add(MessageStatusUpdated(
+        messageId: message.id,
+        status: MessageStatus.failed,
+      ));
+    }
+  }
+
   /// Consent-first photo send:
-  ///   1. Compress photo and generate preview thumbnail.
+  ///   1. Compress photo for local display.
   ///   2. Store local message as [photo] type (sender sees their own image).
-  ///   3. Send a [photo_preview] BLE message (thumbnail + metadata).
+  ///   3. Send a lightweight [photo_preview] notification via BLE (no thumbnail).
   ///   4. Wait for receiver's [photo_request] — handled by [_onPhotoRequestReceived].
   Future<void> _onSendPhotoMessage(
     SendPhotoMessage event,
@@ -258,68 +307,87 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     if (state.currentConversation == null) return;
     if (state.isBlocked) return;
 
-    emit(state.copyWith(status: ChatStatus.sending));
-
     try {
-      // 1. Compress photo for local display and BLE transfer.
-      final compressedPath =
-          await _imageService.compressForChat(event.photoPath);
+      final peerId = state.currentConversation!.peerId;
+      final conversationId = state.currentConversation!.id;
+
+      // 1. Save local message immediately so the sender sees it in the chat.
+      final message = await _chatRepository.sendPhotoMessage(
+        conversationId: conversationId,
+        senderId: _ownUserId,
+        photoPath: event.photoPath,
+      );
+
+      // Add to messages list immediately — don't block input
+      emit(state.copyWith(
+        status: ChatStatus.loaded,
+        messages: [message, ...state.messages],
+      ));
+
+      // 2. Fire-and-forget: compress + BLE preview send in background
+      _enqueueSend(() => _sendPhotoInBackground(
+            photoPath: event.photoPath,
+            message: message,
+            peerId: peerId,
+          ));
+    } catch (e) {
+      Logger.error('Failed to send photo', e, null, 'ChatBloc');
+      emit(state.copyWith(
+        status: ChatStatus.error,
+        errorMessage: 'Failed to send photo',
+      ));
+    }
+  }
+
+  /// Background helper: compresses the photo and sends a BLE preview
+  /// notification without blocking the event queue.
+  Future<void> _sendPhotoInBackground({
+    required String photoPath,
+    required MessageEntry message,
+    required String peerId,
+  }) async {
+    try {
+      // 1. Compress photo for transfer.
+      final compressedPath = await _imageService.compressForChat(photoPath);
       final absolutePath =
           await resolvePhotoPath(compressedPath) ?? compressedPath;
       final blePhotoBytes =
           await _imageService.compressForBleTransfer(absolutePath);
 
-      // 2. Generate thumbnail (≤15 KB) for the preview bubble.
-      final thumbnailBytes =
-          await _imageService.generatePreviewThumbnail(absolutePath);
-
-      // 3. Generate a stable UUID that links preview ↔ full-transfer.
+      // 2. Generate a stable UUID that links preview ↔ full-transfer.
       const uuidGen = Uuid();
       final photoId = uuidGen.v4();
 
-      // 4. Save local message as 'photo' type so the sender sees their image.
-      final message = await _chatRepository.sendPhotoMessage(
-        conversationId: state.currentConversation!.id,
-        senderId: _ownUserId,
-        photoPath: compressedPath,
-      );
-
-      // Register pending outgoing photo so we can respond to a photo_request.
-      final updatedPending =
-          Map<String, PendingOutgoingPhoto>.from(state.pendingOutgoingPhotos);
-      updatedPending[photoId] = PendingOutgoingPhoto(
-        photoId: photoId,
-        localPhotoPath: absolutePath,
-        messageId: message.id,
-        peerId: state.currentConversation!.peerId,
-      );
-
-      emit(state.copyWith(
-        status: ChatStatus.loaded,
-        messages: [message, ...state.messages],
-        pendingOutgoingPhotos: updatedPending,
+      // 3. Register pending outgoing photo via event so the bloc can respond
+      //    to a future photo_request from the receiver.
+      add(RegisterPendingOutgoingPhoto(
+        photo: PendingOutgoingPhoto(
+          photoId: photoId,
+          localPhotoPath: absolutePath,
+          messageId: message.id,
+          peerId: peerId,
+        ),
       ));
 
-      // 5. Send photo_preview (thumbnail + metadata) over BLE.
-      final success = await _bleService.sendPhotoPreview(
-        peerId: state.currentConversation!.peerId,
+      // 4. Send lightweight BLE notification (no thumbnail).
+      final previewSent = await _bleService.sendPhotoPreview(
+        peerId: peerId,
         messageId: message.id,
         photoId: photoId,
-        thumbnailBytes: thumbnailBytes,
+        thumbnailBytes: Uint8List(0),
         originalSize: blePhotoBytes.length,
       );
 
       add(MessageStatusUpdated(
         messageId: message.id,
-        status: success ? MessageStatus.sent : MessageStatus.failed,
+        status: previewSent ? MessageStatus.sent : MessageStatus.failed,
       ));
-
       add(const LoadConversations());
     } catch (e) {
-      Logger.error('Failed to send photo preview', e, null, 'ChatBloc');
-      emit(state.copyWith(
-        status: ChatStatus.error,
-        errorMessage: 'Failed to send photo',
+      Logger.error('Background photo send failed', e, null, 'ChatBloc');
+      add(MessageStatusUpdated(
+        messageId: message.id,
+        status: MessageStatus.failed,
       ));
     }
   }
@@ -341,9 +409,10 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       final conversation =
           await _chatRepository.getOrCreateConversation(preview.fromPeerId);
 
-      // Save thumbnail bytes to a file so the path is storable in the DB.
-      final thumbnailPath =
-          await _imageService.saveChatThumbnail(preview.thumbnailBytes);
+      // Save thumbnail bytes to a file (skip if no thumbnail data).
+      final String? thumbnailPath = preview.thumbnailBytes.isNotEmpty
+          ? await _imageService.saveChatThumbnail(preview.thumbnailBytes)
+          : null;
 
       // Store JSON metadata in textContent.
       final metadata = jsonEncode({
@@ -421,7 +490,14 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     }
   }
 
-  /// Sender: receiver consented → transmit the full photo.
+  /// Sender: receiver consented → try Wi-Fi Direct first, fall back to BLE.
+  ///
+  /// Wi-Fi Direct protocol:
+  ///   1. Sender starts ADVERTISING on Nearby (visible immediately).
+  ///   2. Sender sends `wifiTransferReady` BLE signal to receiver.
+  ///   3. Receiver gets signal → starts BROWSING → discovers sender → invites.
+  ///   4. Connection made → sender streams data over Nearby text channel.
+  ///   5. On timeout/failure → fall back to BLE chunking.
   Future<void> _onPhotoRequestReceived(
     PhotoRequestReceived event,
     Emitter<ChatState> emit,
@@ -443,30 +519,98 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         'Chat',
       );
 
-      final photoBytes =
-          await _imageService.compressForBleTransfer(pending.localPhotoPath);
-
-      final success = await _bleService.sendPhoto(
-        request.fromPeerId,
-        photoBytes,
-        pending.messageId,
-        photoId: request.photoId,
-      );
-
-      if (!success) {
-        Logger.warning(
-          'ChatBloc: Full photo send failed for ${request.photoId}',
-          'Chat',
-        );
-      }
-
-      // Remove from pending map — transfer is underway (progress via stream).
+      // Remove from pending map immediately — transfer is about to start.
       final updatedPending =
           Map<String, PendingOutgoingPhoto>.from(state.pendingOutgoingPhotos)
             ..remove(request.photoId);
       emit(state.copyWith(pendingOutgoingPhotos: updatedPending));
+
+      // Compress photo (fast, ~50ms) — the only thing we await in this handler.
+      final photoBytes =
+          await _imageService.compressForBleTransfer(pending.localPhotoPath);
+
+      // Fire-and-forget: kick off the transfer in the background so we don't
+      // block the bloc event queue (Wi-Fi Direct timeout + BLE chunking can
+      // take 30-45 s, during which text messages would be stuck in queue).
+      _sendFullPhoto(
+        request: request,
+        pending: pending,
+        photoBytes: photoBytes,
+      );
     } catch (e) {
       Logger.error('Failed to handle photo request', e, null, 'ChatBloc');
+    }
+  }
+
+  /// Background helper: tries Wi-Fi Direct then falls back to BLE.
+  ///
+  /// Runs outside the bloc event handler so it doesn't block the event queue.
+  /// State updates go through `add()` (events) so they're processed safely.
+  Future<void> _sendFullPhoto({
+    required ble.ReceivedPhotoRequest request,
+    required PendingOutgoingPhoto pending,
+    required Uint8List photoBytes,
+  }) async {
+    try {
+      // ── Try Wi-Fi Direct first ──────────────────────────────────────────
+      bool wifiSuccess = false;
+      final hsService = _highSpeedService;
+      if (hsService != null && await hsService.isAvailable) {
+        Logger.info('ChatBloc: Attempting Wi-Fi Direct transfer', 'Chat');
+
+        final sendFuture = hsService.sendPayload(
+          transferId: request.photoId,
+          peerId: request.fromPeerId,
+          data: photoBytes,
+          timeout: const Duration(seconds: 15),
+        );
+
+        // Tiny delay to ensure advertising is started before the BLE signal.
+        await Future.delayed(const Duration(milliseconds: 200));
+
+        // Tell receiver to start browsing for us.
+        await _bleService.sendMessage(
+          request.fromPeerId,
+          ble.MessagePayload(
+            messageId: request.photoId,
+            type: ble.MessageType.wifiTransferReady,
+            content: jsonEncode({
+              'transfer_id': request.photoId,
+              'sender_nearby_id': _ownUserId,
+            }),
+          ),
+        );
+
+        wifiSuccess = await sendFuture;
+
+        if (wifiSuccess) {
+          Logger.info('ChatBloc: Wi-Fi Direct transfer succeeded', 'Chat');
+        } else {
+          Logger.warning(
+            'ChatBloc: Wi-Fi Direct failed, falling back to BLE',
+            'Chat',
+          );
+        }
+      }
+
+      // ── Fall back to BLE ────────────────────────────────────────────────
+      if (!wifiSuccess) {
+        final success = await _bleService.sendPhoto(
+          request.fromPeerId,
+          photoBytes,
+          pending.messageId,
+          photoId: request.photoId,
+        );
+
+        if (!success) {
+          Logger.warning(
+            'ChatBloc: BLE photo send also failed for ${request.photoId}',
+            'Chat',
+          );
+        }
+      }
+    } catch (e) {
+      Logger.error('_sendFullPhoto failed', e, null, 'ChatBloc');
     }
   }
 
@@ -511,6 +655,43 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
 
       // Discard messages from blocked peers
       if (await _peerRepository.isPeerBlocked(bleMsg.fromPeerId)) return;
+
+      // Handle wifiTransferReady signal — route to Nearby handler.
+      // Content is always JSON with transfer_id and sender_nearby_id.
+      // Preview transfers additionally have is_preview: true + metadata.
+      if (bleMsg.type == ble.MessageType.wifiTransferReady) {
+        try {
+          final parsed =
+              jsonDecode(bleMsg.content) as Map<String, dynamic>;
+          final transferId = parsed['transfer_id'] as String? ?? bleMsg.content;
+          final senderNearbyId = parsed['sender_nearby_id'] as String?;
+
+          if (parsed['is_preview'] == true) {
+            add(WifiTransferReadyReceived(
+              fromPeerId: bleMsg.fromPeerId,
+              transferId: transferId,
+              senderNearbyId: senderNearbyId,
+              isPreview: true,
+              photoId: parsed['photo_id'] as String?,
+              originalSize: parsed['original_size'] as int?,
+              messageId: parsed['message_id'] as String?,
+            ));
+          } else {
+            add(WifiTransferReadyReceived(
+              fromPeerId: bleMsg.fromPeerId,
+              transferId: transferId,
+              senderNearbyId: senderNearbyId,
+            ));
+          }
+        } catch (_) {
+          // Legacy plain transferId (shouldn't happen with updated sender).
+          add(WifiTransferReadyReceived(
+            fromPeerId: bleMsg.fromPeerId,
+            transferId: bleMsg.content,
+          ));
+        }
+        return;
+      }
 
       // Get or create conversation with this peer
       final conversation =
@@ -713,8 +894,10 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       orElse: () => throw StateError('Message not found'),
     );
 
+    final peerId = state.currentConversation!.peerId;
+
     try {
-      // Mark as pending in DB and state
+      // Mark as pending in DB and state — don't block input
       await _chatRepository.updateMessageStatus(
           event.messageId, MessageStatus.pending);
 
@@ -734,58 +917,60 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         return msg;
       }).toList();
 
-      emit(state.copyWith(status: ChatStatus.sending, messages: updatedMessages));
+      emit(state.copyWith(status: ChatStatus.loaded, messages: updatedMessages));
 
-      bool success;
-
+      // Fire-and-forget: retry in background
       if (message.contentType == MessageContentType.text) {
-        final payload = ble.MessagePayload(
-          messageId: message.id,
-          type: ble.MessageType.text,
-          content: message.textContent ?? '',
-        );
-        success = await _bleService.sendMessage(
-          state.currentConversation!.peerId,
-          payload,
-        );
+        _enqueueSend(() => _sendTextInBackground(message, peerId));
       } else if (message.contentType == MessageContentType.photo) {
-        // Photo retry via consent flow — re-generate thumbnail and re-send preview.
-        final absolutePath =
-            await resolvePhotoPath(message.photoPath) ?? message.photoPath!;
-        final thumbnailBytes =
-            await _imageService.generatePreviewThumbnail(absolutePath);
-        final bleBytes = await _imageService.compressForBleTransfer(absolutePath);
-        const uuidGen = Uuid();
-        final photoId = uuidGen.v4();
-        final updatedPending =
-            Map<String, PendingOutgoingPhoto>.from(state.pendingOutgoingPhotos);
-        updatedPending[photoId] = PendingOutgoingPhoto(
+        _enqueueSend(() => _retryPhotoInBackground(message, peerId));
+      }
+    } catch (e) {
+      Logger.error('Failed to retry message', e, null, 'ChatBloc');
+      add(MessageStatusUpdated(
+        messageId: event.messageId,
+        status: MessageStatus.failed,
+      ));
+    }
+  }
+
+  /// Background helper for retrying a failed photo message.
+  Future<void> _retryPhotoInBackground(
+      MessageEntry message, String peerId) async {
+    try {
+      final absolutePath =
+          await resolvePhotoPath(message.photoPath) ?? message.photoPath!;
+      final bleBytes =
+          await _imageService.compressForBleTransfer(absolutePath);
+      const uuidGen = Uuid();
+      final photoId = uuidGen.v4();
+
+      add(RegisterPendingOutgoingPhoto(
+        photo: PendingOutgoingPhoto(
           photoId: photoId,
           localPhotoPath: absolutePath,
           messageId: message.id,
-          peerId: state.currentConversation!.peerId,
-        );
-        emit(state.copyWith(pendingOutgoingPhotos: updatedPending));
-        success = await _bleService.sendPhotoPreview(
-          peerId: state.currentConversation!.peerId,
-          messageId: message.id,
-          photoId: photoId,
-          thumbnailBytes: thumbnailBytes,
-          originalSize: bleBytes.length,
-        );
-      } else {
-        // photoPreview retry — nothing to re-send (receiver must tap again).
-        success = false;
-      }
+          peerId: peerId,
+        ),
+      ));
+
+      final success = await _bleService.sendPhotoPreview(
+        peerId: peerId,
+        messageId: message.id,
+        photoId: photoId,
+        thumbnailBytes: Uint8List(0),
+        originalSize: bleBytes.length,
+      );
 
       add(MessageStatusUpdated(
         messageId: message.id,
         status: success ? MessageStatus.sent : MessageStatus.failed,
       ));
+      add(const LoadConversations());
     } catch (e) {
-      Logger.error('Failed to retry message', e, null, 'ChatBloc');
+      Logger.error('Background photo retry failed', e, null, 'ChatBloc');
       add(MessageStatusUpdated(
-        messageId: event.messageId,
+        messageId: message.id,
         status: MessageStatus.failed,
       ));
     }
@@ -876,6 +1061,293 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // Wi-Fi Direct / Nearby handlers
+  // ---------------------------------------------------------------------------
+
+  /// Handle progress updates from Nearby Connections transfers.
+  void _onNearbyTransferProgress(
+    NearbyTransferProgressUpdated event,
+    Emitter<ChatState> emit,
+  ) {
+    final progress = event.progress;
+
+    // Map transferId back to messageId via pending outgoing photos.
+    String? messageId;
+    for (final pending in state.pendingOutgoingPhotos.values) {
+      if (pending.photoId == progress.transferId) {
+        messageId = pending.messageId;
+        break;
+      }
+    }
+
+    // Also check existing transfer map (receiver side).
+    messageId ??= state.photoTransfers.keys.where((key) {
+      final info = state.photoTransfers[key];
+      return info != null && info.transport == TransferTransport.wifi;
+    }).firstOrNull;
+
+    if (messageId == null) return;
+
+    final updatedTransfers =
+        Map<String, PhotoTransferInfo>.from(state.photoTransfers);
+
+    if (progress.isComplete || progress.isFailed) {
+      updatedTransfers.remove(messageId);
+      if (progress.isComplete) {
+        add(MessageStatusUpdated(
+          messageId: messageId,
+          status: MessageStatus.sent,
+        ));
+      }
+    } else {
+      updatedTransfers[messageId] = PhotoTransferInfo(
+        messageId: messageId,
+        progress: progress.progress,
+        isSending: true,
+        transport: TransferTransport.wifi,
+      );
+    }
+
+    emit(state.copyWith(photoTransfers: updatedTransfers));
+  }
+
+  /// A complete payload was received via Nearby Connections.
+  ///
+  /// Two cases:
+  ///   - **Preview/thumbnail**: transferId starts with `preview-`.  Handled
+  ///     like a BLE photo-preview (save thumbnail, create preview message).
+  ///   - **Full photo**: transferId matches a photoId.  Upgrade an existing
+  ///     preview bubble or create a new photo message.
+  Future<void> _onNearbyPayloadCompleted(
+    NearbyPayloadCompleted event,
+    Emitter<ChatState> emit,
+  ) async {
+    try {
+      final payload = event.payload;
+
+      // Resolve the BLE device ID from the mapping populated in
+      // _onWifiTransferReady.  payload.fromPeerId is the sender's Nearby
+      // userId which differs from the BLE device ID used for conversations.
+      final bleDeviceId =
+          _transferToBleId.remove(payload.transferId) ?? payload.fromPeerId;
+
+      if (await _peerRepository.isPeerBlocked(bleDeviceId)) return;
+
+      // ── Preview / thumbnail transfer ──────────────────────────────────
+      if (payload.transferId.startsWith('preview-')) {
+        final photoId = payload.transferId.substring('preview-'.length);
+        Logger.info(
+          'ChatBloc: Received thumbnail via Wi-Fi Direct for $photoId',
+          'Chat',
+        );
+
+        final conversation =
+            await _chatRepository.getOrCreateConversation(bleDeviceId);
+
+        // Save thumbnail bytes to disk.
+        final thumbnailPath =
+            await _imageService.saveChatThumbnail(payload.data);
+
+        // Look up original_size from the pending preview metadata stored
+        // by _onWifiTransferReady.  Fall back to payload data length.
+        final originalSize =
+            _pendingPreviewMeta[photoId]?['original_size'] as int? ??
+                payload.data.length;
+        _pendingPreviewMeta.remove(photoId);
+
+        final metadata = jsonEncode({
+          'photo_id': photoId,
+          'original_size': originalSize,
+        });
+
+        final message = await _chatRepository.receivePhotoPreview(
+          conversationId: conversation.id,
+          senderId: bleDeviceId,
+          textContent: metadata,
+          thumbnailPath: thumbnailPath,
+        );
+
+        await _notificationService.showMessageNotification(
+          fromPeerId: bleDeviceId,
+          fromName: state.currentConversation?.peerName ?? 'Someone',
+          messagePreview: 'Photo – Tap to download',
+        );
+
+        if (state.currentConversation?.peerId == bleDeviceId) {
+          emit(state.copyWith(messages: [message, ...state.messages]));
+          add(const MarkMessagesRead());
+        }
+
+        add(const LoadConversations());
+        return;
+      }
+
+      // ── Full photo transfer ───────────────────────────────────────────
+      final conversation =
+          await _chatRepository.getOrCreateConversation(bleDeviceId);
+
+      // Save photo bytes to disk.
+      final photoPath = await _imageService.saveReceivedPhoto(payload.data);
+
+      // Try to match to an existing photoPreview bubble.
+      final previewMsg = state.messages.where((m) {
+        if (m.contentType != MessageContentType.photoPreview) return false;
+        try {
+          final meta =
+              jsonDecode(m.textContent ?? '{}') as Map<String, dynamic>;
+          return meta['photo_id'] == payload.transferId;
+        } catch (_) {
+          return false;
+        }
+      }).firstOrNull;
+
+      if (previewMsg != null) {
+        final upgraded = await _chatRepository.upgradePreviewToPhoto(
+          messageId: previewMsg.id,
+          fullPhotoPath: photoPath,
+        );
+        add(PhotoPreviewUpgraded(
+          previewMessageId: previewMsg.id,
+          updatedMessage: upgraded ?? previewMsg,
+        ));
+      } else {
+        final message = await _chatRepository.receiveMessage(
+          conversationId: conversation.id,
+          senderId: bleDeviceId,
+          contentType: MessageContentType.photo,
+          photoPath: photoPath,
+        );
+        add(MessageReceived(message));
+      }
+
+      Logger.info(
+        'ChatBloc: Received photo via Wi-Fi Direct from ${bleDeviceId.substring(0, 8)}',
+        'Chat',
+      );
+    } catch (e) {
+      Logger.error('Failed to handle Nearby payload', e, null, 'ChatBloc');
+    }
+  }
+
+  /// Receiver: BLE signal says sender is advertising on Nearby.
+  /// Start BROWSING to find the sender, discover, invite, and receive data.
+  ///
+  /// Two paths:
+  ///   - **Preview/thumbnail**: [event.isPreview] is true.  Store metadata
+  ///     so [_onNearbyPayloadCompleted] can create the preview message later.
+  ///   - **Full photo**: Match to an existing preview bubble and show a
+  ///     Wi-Fi Direct progress indicator.
+  ///
+  /// IMPORTANT: Fire-and-forget — do NOT await receivePayload because that
+  /// would block the ChatBloc event queue for up to 45 s.
+  Future<void> _onWifiTransferReady(
+    WifiTransferReadyReceived event,
+    Emitter<ChatState> emit,
+  ) async {
+    final hsService = _highSpeedService;
+    if (hsService == null) return;
+
+    Logger.info(
+      'ChatBloc: Wi-Fi transfer ready from ${event.fromPeerId} '
+      'for ${event.transferId} (preview=${event.isPreview})',
+      'Chat',
+    );
+
+    // Remember the BLE device ID for this transferId so that
+    // _onNearbyPayloadCompleted can resolve the correct conversation.
+    _transferToBleId[event.transferId] = event.fromPeerId;
+
+    if (event.isPreview) {
+      // Store metadata so _onNearbyPayloadCompleted can build the preview.
+      if (event.photoId != null) {
+        _pendingPreviewMeta[event.photoId!] = {
+          'original_size': event.originalSize ?? 0,
+          'message_id': event.messageId,
+        };
+      }
+    } else {
+      // Full-photo: find the preview bubble and show Wi-Fi progress.
+      final previewMsg = state.messages.where((m) {
+        if (m.contentType != MessageContentType.photoPreview) return false;
+        try {
+          final meta =
+              jsonDecode(m.textContent ?? '{}') as Map<String, dynamic>;
+          return meta['photo_id'] == event.transferId;
+        } catch (_) {
+          return false;
+        }
+      }).firstOrNull;
+
+      if (previewMsg != null) {
+        final updatedTransfers =
+            Map<String, PhotoTransferInfo>.from(state.photoTransfers);
+        updatedTransfers[previewMsg.id] = PhotoTransferInfo(
+          messageId: previewMsg.id,
+          progress: 0,
+          isSending: false,
+          transport: TransferTransport.wifi,
+        );
+        emit(state.copyWith(photoTransfers: updatedTransfers));
+      }
+    }
+
+    // Fire-and-forget: start browsing for the sender.
+    // Data arrives via payloadReceivedStream → NearbyPayloadCompleted.
+    // Use senderNearbyId (the sender's userId used as Nearby device name)
+    // instead of fromPeerId (BLE device ID) — these are different IDs.
+    hsService.receivePayload(
+      transferId: event.transferId,
+      peerId: event.senderNearbyId ?? event.fromPeerId,
+    ).then((success) {
+      if (!success) {
+        Logger.warning(
+          'ChatBloc: Wi-Fi receive failed for ${event.transferId}',
+          'Chat',
+        );
+      }
+    }).catchError((e) {
+      Logger.error('ChatBloc: Wi-Fi receive error', e, null, 'Chat');
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // FIFO send queue
+  // ---------------------------------------------------------------------------
+
+  void _enqueueSend(Future<void> Function() task) {
+    _sendQueue.add(task);
+    _processQueue();
+  }
+
+  Future<void> _processQueue() async {
+    if (_isProcessingQueue) return;
+    _isProcessingQueue = true;
+    while (_sendQueue.isNotEmpty) {
+      final task = _sendQueue.removeAt(0);
+      try {
+        await task();
+      } catch (e) {
+        Logger.error('Send queue task failed', e, null, 'ChatBloc');
+      }
+    }
+    _isProcessingQueue = false;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Register pending outgoing photo (from background send)
+  // ---------------------------------------------------------------------------
+
+  Future<void> _onRegisterPendingOutgoingPhoto(
+    RegisterPendingOutgoingPhoto event,
+    Emitter<ChatState> emit,
+  ) async {
+    final updatedPending =
+        Map<String, PendingOutgoingPhoto>.from(state.pendingOutgoingPhotos);
+    updatedPending[event.photo.photoId] = event.photo;
+    emit(state.copyWith(pendingOutgoingPhotos: updatedPending));
+  }
+
   @override
   Future<void> close() {
     _echoTimer?.cancel();
@@ -884,6 +1356,8 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     _photoReceivedSubscription?.cancel();
     _photoPreviewSubscription?.cancel();
     _photoRequestSubscription?.cancel();
+    _nearbyProgressSubscription?.cancel();
+    _nearbyPayloadSubscription?.cancel();
     return super.close();
   }
 }

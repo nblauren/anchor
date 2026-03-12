@@ -58,55 +58,33 @@ dependencies:
 
 ## What's NOT Yet Implemented ⚠️
 
-### 1. Peripheral Mode (Broadcasting)
+### 1. Store-and-Forward Message Queue
 
-**Issue**: `broadcastProfile()` is called but doesn't actually advertise the device.
-
-**Why**: flutter_blue_plus doesn't easily support peripheral/advertising mode on all devices. Most apps are "central" (scanner) only.
-
-**Options**:
-- **Option A**: Use platform channels to implement native advertising on iOS/Android
-- **Option B**: Accept that discovery is one-way (scanning only)
-- **Option C**: Use a different package that supports peripheral mode
-
-**Recommended**: For cruise ship environment, implement Option A with native code.
-
-### 2. Photo Transfer
-
-**Status**: Marked as TODO in code, returns `false` immediately.
-
-**Requirements**:
-- Chunk photos into ~500 byte pieces (respect MTU)
-- Send chunks sequentially with ACKs
-- Reassemble on receiver
-- Progress tracking
-- Resume on connection loss
-
-**Estimated Effort**: 4-6 hours
-
-### 3. Message Queue (Store-and-Forward)
-
-**Status**: Not implemented.
+**Status**: Not implemented across sessions. In-session FIFO queue exists in ChatBloc.
 
 **Requirements**:
 - Database table for pending messages
-- Queue messages when peer offline
-- Deliver when peer discovered
+- Queue messages when peer goes out of range
+- Deliver when peer rediscovered in a future session
 - Retry logic with exponential backoff
 - Message expiration after 24 hours
 
-**Estimated Effort**: 3-4 hours
+### 2. Concurrent Wi-Fi Direct Transfers
 
-### 4. Connection Persistence
+**Status**: One transfer at a time. NearbyService reinitializes between transfers.
 
-**Current**: Devices disconnect after 60 seconds of idle time.
+**Requirements**:
+- Track multiple concurrent transfers
+- Multiplex over a single Nearby connection or manage multiple connections
 
-**Better Approach**:
-- Keep connections to active chat partners
-- LRU eviction when pool full
-- Priority: active chats > recently viewed > discovery
+### 3. End-to-End Encryption
 
-**Estimated Effort**: 2-3 hours
+**Status**: Not implemented. BLE GATT messages are unencrypted.
+
+**Requirements**:
+- RSA/ECDH key pair per device
+- Key exchange during BLE discovery
+- Encrypt all message content before transmission
 
 ## Testing Requirements
 
@@ -158,11 +136,11 @@ dependencies:
 
 ### Known Issues
 
-1. **Photos Don't Transfer**: Photo transfer not implemented yet
-2. **No Offline Messages**: Messages sent while peer offline are lost
-3. **One-Way Discovery**: Devices may not see each other if neither can advertise
-4. **iOS Background**: Discovery stops when app backgrounded (iOS limitation)
-5. **Connection Limits**: Only 5 concurrent connections (by design, configurable)
+1. **No cross-session store-and-forward**: Messages sent while peer offline are lost
+2. **One concurrent Wi-Fi Direct transfer**: Second transfer requires NearbyService reinit
+3. **iOS Background**: Discovery stops when app backgrounded (iOS limitation)
+4. **Connection Limits**: Only 5 concurrent connections (by design, configurable)
+5. **Wi-Fi Direct threading warning**: Native callbacks may arrive on non-platform thread (no data loss observed)
 
 ## Performance Expectations
 
@@ -175,20 +153,7 @@ dependencies:
 
 ## Next Implementation Steps
 
-### Priority 1: Photo Transfer
-```dart
-// In flutter_blue_plus_ble_service.dart
-Future<bool> sendPhoto(String peerId, Uint8List photoData, String messageId) async {
-  // 1. Negotiate MTU
-  // 2. Chunk photo using _photoChunker
-  // 3. Send chunks sequentially
-  // 4. Wait for ACK per chunk
-  // 5. Emit progress updates
-  // 6. Handle errors and retries
-}
-```
-
-### Priority 2: Message Queue
+### Priority 1: Store-and-Forward Message Queue
 ```dart
 // Add to Drift schema
 class PendingMessages extends Table {
@@ -204,19 +169,19 @@ class PendingMessages extends Table {
 
 // In BLE service
 void _onPeerDiscovered(DiscoveredPeer peer) {
-  // ... existing code ...
-
-  // Check for pending messages
+  // Check for pending messages queued from previous sessions
   _deliverPendingMessages(peer.peerId);
 }
 ```
 
-### Priority 3: Peripheral Mode
-```dart
-// Platform channel for native advertising
-// ios/Runner/BlePeripheralManager.swift
-// android/app/src/main/kotlin/.../BlePeripheralService.kt
-```
+### Priority 2: End-to-End Encryption
+- RSA/ECDH key pair per device
+- Key exchange during BLE discovery
+- Encrypt message content before BLE/Wi-Fi Direct transmission
+
+### Priority 3: Concurrent Wi-Fi Direct Transfers
+- Track multiple simultaneous transfers in NearbyService
+- Multiplex or manage multiple Nearby connections
 
 ## Code Locations
 
@@ -262,14 +227,14 @@ The implementation will be fully complete when:
 
 - ✅ Two devices discover each other reliably
 - ✅ Text messages deliver in 2-3 seconds
-- ⚠️ Photos (200KB) transfer in under 60 seconds
+- ✅ Photos transfer via Wi-Fi Direct (< 1 s) with BLE fallback (~60 s)
 - ✅ App handles 10+ nearby peers
-- ⚠️ Battery drain acceptable (<10% per hour)
-- ⚠️ Messages queue when peers offline
-- ⚠️ Queued messages deliver when peers return
+- ⚠️ Battery drain acceptable (<10% per hour) — needs profiling
+- ⚠️ Messages queue across sessions when peers offline
 - ✅ No crashes from BLE errors
-- ⚠️ Both iOS and Android working
+- ✅ Both iOS and Android working
 - ✅ Clear permissions flow
+- ✅ Non-blocking message send queue (FIFO)
 
 Legend:
 - ✅ Implemented and working

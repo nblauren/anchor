@@ -574,6 +574,15 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.4.7"
+  flutter_nearby_connections_plus:
+    dependency: "direct main"
+    description:
+      path: "."
+      ref: "feature/fix-ios-podspec-module-name-mismatch"
+      resolved-ref: de9dc02bf4a2f49e7bf0ee19a7e10631c7ec8ddd
+      url: "https://github.com/AppDev42/flutter_nearby_connections_plus.git"
+    source: git
+    version: "1.2.3"
   flutter_plugin_android_lifecycle:
     dependency: transitive
     description:
