@@ -209,9 +209,20 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                 },
               ),
               // View mode toggle: Grid / Radar
-              _ViewModeToggle(
-                current: _viewMode,
-                onChanged: _setViewMode,
+              IconButton(
+                icon: Icon(
+                  _viewMode == _ViewMode.grid
+                      ? Icons.radar
+                      : Icons.grid_view_rounded,
+                ),
+                tooltip: _viewMode == _ViewMode.grid
+                    ? 'Switch to Radar'
+                    : 'Switch to Grid',
+                onPressed: () => _setViewMode(
+                  _viewMode == _ViewMode.grid
+                      ? _ViewMode.radar
+                      : _ViewMode.grid,
+                ),
               ),
               // Filter button (grid mode only)
               if (_viewMode == _ViewMode.grid)
@@ -543,99 +554,6 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
               },
               icon: const Icon(Icons.refresh),
               label: const Text('Retry'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ── View mode toggle (Grid / Radar) ───────────────────────────────────────────
-
-class _ViewModeToggle extends StatelessWidget {
-  const _ViewModeToggle({
-    required this.current,
-    required this.onChanged,
-  });
-
-  final _ViewMode current;
-  final ValueChanged<_ViewMode> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-      child: Container(
-        height: 32,
-        decoration: BoxDecoration(
-          color: AppTheme.darkCard,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.white12),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _ToggleButton(
-              icon: Icons.grid_view_rounded,
-              label: 'Grid',
-              selected: current == _ViewMode.grid,
-              onTap: () => onChanged(_ViewMode.grid),
-            ),
-            Container(width: 1, color: Colors.white12),
-            _ToggleButton(
-              icon: Icons.radar,
-              label: 'Radar',
-              selected: current == _ViewMode.radar,
-              onTap: () => onChanged(_ViewMode.radar),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ToggleButton extends StatelessWidget {
-  const _ToggleButton({
-    required this.icon,
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = selected ? AppTheme.primaryLight : AppTheme.textHint;
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        padding: const EdgeInsets.symmetric(horizontal: 10),
-        height: double.infinity,
-        decoration: BoxDecoration(
-          color: selected
-              ? AppTheme.primaryLight.withAlpha(30)
-              : Colors.transparent,
-          borderRadius: BorderRadius.circular(7),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 14, color: color),
-            const SizedBox(width: 4),
-            Text(
-              label,
-              style: TextStyle(
-                  color: color,
-                  fontSize: 12,
-                  fontWeight:
-                      selected ? FontWeight.w600 : FontWeight.normal),
             ),
           ],
         ),
