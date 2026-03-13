@@ -160,9 +160,9 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
       child: Scaffold(
         body: CustomScrollView(
           slivers: [
-          // Photo carousel with app bar
+          // Fullscreen photo carousel with app bar
           SliverAppBar(
-            expandedHeight: MediaQuery.of(context).size.height * 0.5,
+            expandedHeight: MediaQuery.of(context).size.height,
             pinned: true,
             flexibleSpace: FlexibleSpaceBar(
               background: _buildPhotoCarousel(),
@@ -199,79 +199,15 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
             ],
           ),
 
-          // Profile info
+          // Scrollable content below the fold
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.all(20),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Name and age
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          _peer.age != null
-                              ? '${_peer.name}, ${_peer.age}'
-                              : _peer.name,
-                          style: Theme.of(context)
-                              .textTheme
-                              .headlineSmall
-                              ?.copyWith(
-                                fontWeight: FontWeight.bold,
-                              ),
-                        ),
-                      ),
-                      // Online indicator
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 6,
-                        ),
-                        decoration: BoxDecoration(
-                          color: _peer.isRecent
-                              ? Colors.greenAccent.withValues(alpha: 0.2)
-                              : _peer.isNearby
-                                  ? Colors.yellowAccent.withValues(alpha: 0.2)
-                                  : AppTheme.textHint.withValues(alpha: 0.2),
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Container(
-                              width: 8,
-                              height: 8,
-                              decoration: BoxDecoration(
-                                color: _peer.isRecent
-                                    ? Colors.greenAccent
-                                    : _peer.isNearby
-                                        ? Colors.yellowAccent
-                                        : AppTheme.textHint,
-                                shape: BoxShape.circle,
-                              ),
-                            ),
-                            const SizedBox(width: 6),
-                            Text(
-                              _peer.lastSeenText,
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: _peer.isRecent
-                                    ? Colors.greenAccent
-                                    : _peer.isNearby
-                                        ? Colors.yellowAccent
-                                        : AppTheme.textSecondary,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-
                   // Signal strength
                   if (_peer.signalStrengthText != null) ...[
-                    const SizedBox(height: 8),
                     Row(
                       children: [
                         const Icon(
@@ -289,13 +225,10 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
                         ),
                       ],
                     ),
+                    const SizedBox(height: 16),
                   ],
 
-                  const SizedBox(height: 20),
-                  const Divider(),
-                  const SizedBox(height: 20),
-
-                  // Bio section
+                  // About section
                   Text(
                     'About',
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
@@ -314,7 +247,7 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
                     ),
                   ),
 
-                  // ── Position & Interests (full profile only, not grid) ────
+                  // ── Position & Interests ────
                   if (_peer.positionLabel != null ||
                       _peer.interestLabels.isNotEmpty) ...[
                     const SizedBox(height: 20),
@@ -401,38 +334,7 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
                     const SizedBox(height: 16),
                   ],
 
-                  const SizedBox(height: 32),
-
-                  // Action buttons
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: [
-                      // Message button
-                      _ActionIconButton(
-                        icon: Icons.chat_bubble_outline,
-                        label: 'Message',
-                        onPressed: _openChat,
-                      ),
-                      // Drop Anchor button
-                      _ActionIconButton(
-                        icon: Icons.anchor,
-                        label: _anchorDropped ? 'Anchored!' : 'Drop Anchor',
-                        onPressed: _anchorDropped ? null : _dropAnchor,
-                        color: _anchorDropped
-                            ? const Color(0xFFEC4899)
-                            : null,
-                      ),
-                      // Block button
-                      _ActionIconButton(
-                        icon: Icons.block,
-                        label: 'Block',
-                        onPressed: _showBlockConfirmation,
-                        color: AppTheme.error,
-                      ),
-                    ],
-                  ),
-
-                  const SizedBox(height: 100), // Bottom padding
+                  SizedBox(height: MediaQuery.of(context).padding.bottom + 32),
                 ],
               ),
             ),
@@ -452,6 +354,122 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
       return [_peer.thumbnailData!];
     }
     return [];
+  }
+
+  Widget _buildBottomOverlay() {
+    final bottomPadding = MediaQuery.of(context).padding.bottom;
+    return Positioned(
+      bottom: 0,
+      left: 0,
+      right: 0,
+      child: Container(
+        padding: EdgeInsets.fromLTRB(20, 40, 72, 24 + bottomPadding),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.bottomCenter,
+            end: Alignment.topCenter,
+            colors: [
+              Colors.black.withValues(alpha: 0.8),
+              Colors.black.withValues(alpha: 0.4),
+              Colors.transparent,
+            ],
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Name and age
+            Text(
+              _peer.age != null
+                  ? '${_peer.name}, ${_peer.age}'
+                  : _peer.name,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 28,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 6),
+            // Online status badge
+            Row(
+              children: [
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: _peer.isRecent
+                        ? Colors.greenAccent
+                        : _peer.isNearby
+                            ? Colors.yellowAccent
+                            : AppTheme.textHint,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  _peer.lastSeenText,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: _peer.isRecent
+                        ? Colors.greenAccent
+                        : _peer.isNearby
+                            ? Colors.yellowAccent
+                            : Colors.white70,
+                  ),
+                ),
+              ],
+            ),
+            // Bio preview
+            if (_peer.bio?.isNotEmpty == true) ...[
+              const SizedBox(height: 8),
+              Text(
+                _peer.bio!,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 14,
+                  height: 1.4,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildActionButtons() {
+    final bottomPadding = MediaQuery.of(context).padding.bottom;
+    return Positioned(
+      right: 12,
+      bottom: 100 + bottomPadding,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _ActionIconButton(
+            icon: Icons.chat_bubble_outline,
+            label: 'Message',
+            onPressed: _openChat,
+          ),
+          const SizedBox(height: 16),
+          _ActionIconButton(
+            icon: Icons.anchor,
+            label: _anchorDropped ? 'Anchored!' : 'Anchor',
+            onPressed: _anchorDropped ? null : _dropAnchor,
+            color: _anchorDropped ? const Color(0xFFEC4899) : null,
+          ),
+          const SizedBox(height: 16),
+          _ActionIconButton(
+            icon: Icons.block,
+            label: 'Block',
+            onPressed: _showBlockConfirmation,
+            color: AppTheme.error,
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildPhotoCarousel() {
@@ -481,16 +499,32 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
                 ),
               ),
             ),
+            _buildBottomOverlay(),
+            _buildActionButtons(),
           ],
         );
       }
-      return _buildRelayedPhotoPlaceholder();
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          _buildRelayedPhotoPlaceholder(),
+          _buildBottomOverlay(),
+          _buildActionButtons(),
+        ],
+      );
     }
 
     final photos = _photos;
 
     if (photos.isEmpty) {
-      return _buildPlaceholder();
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          _buildPlaceholder(),
+          _buildBottomOverlay(),
+          _buildActionButtons(),
+        ],
+      );
     }
 
     // Determine how many slots to show: loaded + pending fetches
@@ -518,15 +552,6 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
           },
         ),
 
-        // Page indicator (shown when multiple photos or pending slots)
-        if (totalSlots > 1)
-          Positioned(
-            bottom: 20,
-            left: 0,
-            right: 0,
-            child: _buildPageIndicator(totalSlots),
-          ),
-
         // Gradient for back button visibility
         Positioned(
           top: 0,
@@ -546,6 +571,21 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
             ),
           ),
         ),
+
+        // Bottom overlay with name, status, bio
+        _buildBottomOverlay(),
+
+        // Page indicator (above the overlay)
+        if (totalSlots > 1)
+          Positioned(
+            bottom: 160,
+            left: 0,
+            right: 0,
+            child: _buildPageIndicator(totalSlots),
+          ),
+
+        // Vertical action buttons on right
+        _buildActionButtons(),
       ],
     );
   }
@@ -742,11 +782,15 @@ class _ActionIconButton extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            width: 56,
-            height: 56,
+            width: 52,
+            height: 52,
             decoration: BoxDecoration(
-              color: effectiveColor.withValues(alpha: dimmed ? 0.08 : 0.15),
+              color: Colors.black.withValues(alpha: dimmed ? 0.3 : 0.5),
               shape: BoxShape.circle,
+              border: Border.all(
+                color: effectiveColor.withValues(alpha: dimmed ? 0.2 : 0.6),
+                width: 1.5,
+              ),
             ),
             child: Icon(
               icon,
@@ -754,13 +798,19 @@ class _ActionIconButton extends StatelessWidget {
               size: 24,
             ),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 4),
           Text(
             label,
             style: TextStyle(
-              fontSize: 12,
-              color: effectiveColor.withValues(alpha: dimmed ? 0.4 : 1.0),
-              fontWeight: FontWeight.w500,
+              fontSize: 11,
+              color: Colors.white.withValues(alpha: dimmed ? 0.4 : 0.9),
+              fontWeight: FontWeight.w600,
+              shadows: const [
+                Shadow(
+                  blurRadius: 4,
+                  color: Colors.black,
+                ),
+              ],
             ),
           ),
         ],

@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../theme/app_theme.dart';
-
-/// Splash screen displayed during app initialization
+/// Loading placeholder shown while async initialization completes
 class SplashScreen extends StatelessWidget {
   const SplashScreen({super.key});
 
@@ -10,20 +8,7 @@ class SplashScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return const Scaffold(
       body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.anchor,
-              size: 80,
-              color: AppTheme.primaryLight,
-            ),
-            SizedBox(height: 24),
-            CircularProgressIndicator(
-              color: AppTheme.primaryLight,
-            ),
-          ],
-        ),
+        child: CircularProgressIndicator(),
       ),
     );
   }
