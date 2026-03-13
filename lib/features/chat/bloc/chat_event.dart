@@ -270,3 +270,27 @@ class RegisterPendingOutgoingPhoto extends ChatEvent {
   @override
   List<Object?> get props => [photo];
 }
+
+/// A peer's BLE peripheral UUID changed due to MAC rotation.
+/// Updates the active conversation's peerId so sends target the new address.
+/// A peer has gone out of range — cancel any active photo transfers with them.
+class ChatPeerLost extends ChatEvent {
+  const ChatPeerLost(this.peerId);
+  final String peerId;
+
+  @override
+  List<Object?> get props => [peerId];
+}
+
+class ChatPeerIdMigrated extends ChatEvent {
+  const ChatPeerIdMigrated({
+    required this.oldPeerId,
+    required this.newPeerId,
+  });
+
+  final String oldPeerId;
+  final String newPeerId;
+
+  @override
+  List<Object?> get props => [oldPeerId, newPeerId];
+}

@@ -20,7 +20,8 @@
       "Bash(cat ~/.pub-cache/git/flutter_nearby_connections_plus-*/lib/src/strategy.dart 2>/dev/null)",
       "Bash(xcodebuild -version 2>&1 && xcrun --sdk iphoneos --show-sdk-version 2>&1)",
       "Bash(flutter devices:*)",
-      "Bash(flutter build:*)"
+      "Bash(flutter build:*)",
+      "Bash(flutter test:*)"
     ]
   }
 }

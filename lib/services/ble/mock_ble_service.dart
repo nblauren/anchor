@@ -24,6 +24,8 @@ class MockBleService implements BleServiceInterface {
   final _statusController = StreamController<BleStatus>.broadcast();
   final _peerDiscoveredController = StreamController<DiscoveredPeer>.broadcast();
   final _peerLostController = StreamController<String>.broadcast();
+  final _peerIdChangedController =
+      StreamController<PeerIdChanged>.broadcast();
   final _messageReceivedController = StreamController<ReceivedMessage>.broadcast();
   final _photoProgressController = StreamController<PhotoTransferProgress>.broadcast();
   final _photoReceivedController = StreamController<ReceivedPhoto>.broadcast();
@@ -106,6 +108,7 @@ class MockBleService implements BleServiceInterface {
     await _statusController.close();
     await _peerDiscoveredController.close();
     await _peerLostController.close();
+    await _peerIdChangedController.close();
     await _messageReceivedController.close();
     await _photoProgressController.close();
     await _photoReceivedController.close();
@@ -178,6 +181,10 @@ class MockBleService implements BleServiceInterface {
 
   @override
   Stream<String> get peerLostStream => _peerLostController.stream;
+
+  @override
+  Stream<PeerIdChanged> get peerIdChangedStream =>
+      _peerIdChangedController.stream;
 
   @override
   Future<void> startScanning() async {

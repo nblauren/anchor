@@ -833,6 +833,11 @@ class $DiscoveredPeersTable extends DiscoveredPeers
   late final GeneratedColumn<String> peerId = GeneratedColumn<String>(
       'peer_id', aliasedName, false,
       type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _userIdMeta = const VerificationMeta('userId');
+  @override
+  late final GeneratedColumn<String> userId = GeneratedColumn<String>(
+      'user_id', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
   static const VerificationMeta _nameMeta = const VerificationMeta('name');
   @override
   late final GeneratedColumn<String> name = GeneratedColumn<String>(
@@ -890,6 +895,7 @@ class $DiscoveredPeersTable extends DiscoveredPeers
   @override
   List<GeneratedColumn> get $columns => [
         peerId,
+        userId,
         name,
         age,
         bio,
@@ -916,6 +922,10 @@ class $DiscoveredPeersTable extends DiscoveredPeers
           peerId.isAcceptableOrUnknown(data['peer_id']!, _peerIdMeta));
     } else if (isInserting) {
       context.missing(_peerIdMeta);
+    }
+    if (data.containsKey('user_id')) {
+      context.handle(_userIdMeta,
+          userId.isAcceptableOrUnknown(data['user_id']!, _userIdMeta));
     }
     if (data.containsKey('name')) {
       context.handle(
@@ -972,6 +982,8 @@ class $DiscoveredPeersTable extends DiscoveredPeers
     return DiscoveredPeerEntry(
       peerId: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}peer_id'])!,
+      userId: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}user_id']),
       name: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}name'])!,
       age: attachedDatabase.typeMapping
@@ -1002,6 +1014,10 @@ class $DiscoveredPeersTable extends DiscoveredPeers
 class DiscoveredPeerEntry extends DataClass
     implements Insertable<DiscoveredPeerEntry> {
   final String peerId;
+
+  /// Stable application-level user ID from the peer's BLE profile.
+  /// Used to deduplicate when BLE MAC rotation assigns a new peerId.
+  final String? userId;
   final String name;
   final int? age;
   final String? bio;
@@ -1017,6 +1033,7 @@ class DiscoveredPeerEntry extends DataClass
   final String? interests;
   const DiscoveredPeerEntry(
       {required this.peerId,
+      this.userId,
       required this.name,
       this.age,
       this.bio,
@@ -1030,6 +1047,9 @@ class DiscoveredPeerEntry extends DataClass
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
     map['peer_id'] = Variable<String>(peerId);
+    if (!nullToAbsent || userId != null) {
+      map['user_id'] = Variable<String>(userId);
+    }
     map['name'] = Variable<String>(name);
     if (!nullToAbsent || age != null) {
       map['age'] = Variable<int>(age);
@@ -1057,6 +1077,8 @@ class DiscoveredPeerEntry extends DataClass
   DiscoveredPeersCompanion toCompanion(bool nullToAbsent) {
     return DiscoveredPeersCompanion(
       peerId: Value(peerId),
+      userId:
+          userId == null && nullToAbsent ? const Value.absent() : Value(userId),
       name: Value(name),
       age: age == null && nullToAbsent ? const Value.absent() : Value(age),
       bio: bio == null && nullToAbsent ? const Value.absent() : Value(bio),
@@ -1080,6 +1102,7 @@ class DiscoveredPeerEntry extends DataClass
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return DiscoveredPeerEntry(
       peerId: serializer.fromJson<String>(json['peerId']),
+      userId: serializer.fromJson<String?>(json['userId']),
       name: serializer.fromJson<String>(json['name']),
       age: serializer.fromJson<int?>(json['age']),
       bio: serializer.fromJson<String?>(json['bio']),
@@ -1096,6 +1119,7 @@ class DiscoveredPeerEntry extends DataClass
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return <String, dynamic>{
       'peerId': serializer.toJson<String>(peerId),
+      'userId': serializer.toJson<String?>(userId),
       'name': serializer.toJson<String>(name),
       'age': serializer.toJson<int?>(age),
       'bio': serializer.toJson<String?>(bio),
@@ -1110,6 +1134,7 @@ class DiscoveredPeerEntry extends DataClass
 
   DiscoveredPeerEntry copyWith(
           {String? peerId,
+          Value<String?> userId = const Value.absent(),
           String? name,
           Value<int?> age = const Value.absent(),
           Value<String?> bio = const Value.absent(),
@@ -1121,6 +1146,7 @@ class DiscoveredPeerEntry extends DataClass
           Value<String?> interests = const Value.absent()}) =>
       DiscoveredPeerEntry(
         peerId: peerId ?? this.peerId,
+        userId: userId.present ? userId.value : this.userId,
         name: name ?? this.name,
         age: age.present ? age.value : this.age,
         bio: bio.present ? bio.value : this.bio,
@@ -1135,6 +1161,7 @@ class DiscoveredPeerEntry extends DataClass
   DiscoveredPeerEntry copyWithCompanion(DiscoveredPeersCompanion data) {
     return DiscoveredPeerEntry(
       peerId: data.peerId.present ? data.peerId.value : this.peerId,
+      userId: data.userId.present ? data.userId.value : this.userId,
       name: data.name.present ? data.name.value : this.name,
       age: data.age.present ? data.age.value : this.age,
       bio: data.bio.present ? data.bio.value : this.bio,
@@ -1154,6 +1181,7 @@ class DiscoveredPeerEntry extends DataClass
   String toString() {
     return (StringBuffer('DiscoveredPeerEntry(')
           ..write('peerId: $peerId, ')
+          ..write('userId: $userId, ')
           ..write('name: $name, ')
           ..write('age: $age, ')
           ..write('bio: $bio, ')
@@ -1170,6 +1198,7 @@ class DiscoveredPeerEntry extends DataClass
   @override
   int get hashCode => Object.hash(
       peerId,
+      userId,
       name,
       age,
       bio,
@@ -1184,6 +1213,7 @@ class DiscoveredPeerEntry extends DataClass
       identical(this, other) ||
       (other is DiscoveredPeerEntry &&
           other.peerId == this.peerId &&
+          other.userId == this.userId &&
           other.name == this.name &&
           other.age == this.age &&
           other.bio == this.bio &&
@@ -1197,6 +1227,7 @@ class DiscoveredPeerEntry extends DataClass
 
 class DiscoveredPeersCompanion extends UpdateCompanion<DiscoveredPeerEntry> {
   final Value<String> peerId;
+  final Value<String?> userId;
   final Value<String> name;
   final Value<int?> age;
   final Value<String?> bio;
@@ -1209,6 +1240,7 @@ class DiscoveredPeersCompanion extends UpdateCompanion<DiscoveredPeerEntry> {
   final Value<int> rowid;
   const DiscoveredPeersCompanion({
     this.peerId = const Value.absent(),
+    this.userId = const Value.absent(),
     this.name = const Value.absent(),
     this.age = const Value.absent(),
     this.bio = const Value.absent(),
@@ -1222,6 +1254,7 @@ class DiscoveredPeersCompanion extends UpdateCompanion<DiscoveredPeerEntry> {
   });
   DiscoveredPeersCompanion.insert({
     required String peerId,
+    this.userId = const Value.absent(),
     required String name,
     this.age = const Value.absent(),
     this.bio = const Value.absent(),
@@ -1237,6 +1270,7 @@ class DiscoveredPeersCompanion extends UpdateCompanion<DiscoveredPeerEntry> {
         lastSeenAt = Value(lastSeenAt);
   static Insertable<DiscoveredPeerEntry> custom({
     Expression<String>? peerId,
+    Expression<String>? userId,
     Expression<String>? name,
     Expression<int>? age,
     Expression<String>? bio,
@@ -1250,6 +1284,7 @@ class DiscoveredPeersCompanion extends UpdateCompanion<DiscoveredPeerEntry> {
   }) {
     return RawValuesInsertable({
       if (peerId != null) 'peer_id': peerId,
+      if (userId != null) 'user_id': userId,
       if (name != null) 'name': name,
       if (age != null) 'age': age,
       if (bio != null) 'bio': bio,
@@ -1265,6 +1300,7 @@ class DiscoveredPeersCompanion extends UpdateCompanion<DiscoveredPeerEntry> {
 
   DiscoveredPeersCompanion copyWith(
       {Value<String>? peerId,
+      Value<String?>? userId,
       Value<String>? name,
       Value<int?>? age,
       Value<String?>? bio,
@@ -1277,6 +1313,7 @@ class DiscoveredPeersCompanion extends UpdateCompanion<DiscoveredPeerEntry> {
       Value<int>? rowid}) {
     return DiscoveredPeersCompanion(
       peerId: peerId ?? this.peerId,
+      userId: userId ?? this.userId,
       name: name ?? this.name,
       age: age ?? this.age,
       bio: bio ?? this.bio,
@@ -1295,6 +1332,9 @@ class DiscoveredPeersCompanion extends UpdateCompanion<DiscoveredPeerEntry> {
     final map = <String, Expression>{};
     if (peerId.present) {
       map['peer_id'] = Variable<String>(peerId.value);
+    }
+    if (userId.present) {
+      map['user_id'] = Variable<String>(userId.value);
     }
     if (name.present) {
       map['name'] = Variable<String>(name.value);
@@ -1333,6 +1373,7 @@ class DiscoveredPeersCompanion extends UpdateCompanion<DiscoveredPeerEntry> {
   String toString() {
     return (StringBuffer('DiscoveredPeersCompanion(')
           ..write('peerId: $peerId, ')
+          ..write('userId: $userId, ')
           ..write('name: $name, ')
           ..write('age: $age, ')
           ..write('bio: $bio, ')
@@ -3216,6 +3257,7 @@ typedef $$UserPhotosTableProcessedTableManager = ProcessedTableManager<
 typedef $$DiscoveredPeersTableCreateCompanionBuilder = DiscoveredPeersCompanion
     Function({
   required String peerId,
+  Value<String?> userId,
   required String name,
   Value<int?> age,
   Value<String?> bio,
@@ -3230,6 +3272,7 @@ typedef $$DiscoveredPeersTableCreateCompanionBuilder = DiscoveredPeersCompanion
 typedef $$DiscoveredPeersTableUpdateCompanionBuilder = DiscoveredPeersCompanion
     Function({
   Value<String> peerId,
+  Value<String?> userId,
   Value<String> name,
   Value<int?> age,
   Value<String?> bio,
@@ -3274,6 +3317,9 @@ class $$DiscoveredPeersTableFilterComposer
   });
   ColumnFilters<String> get peerId => $composableBuilder(
       column: $table.peerId, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get userId => $composableBuilder(
+      column: $table.userId, builder: (column) => ColumnFilters(column));
 
   ColumnFilters<String> get name => $composableBuilder(
       column: $table.name, builder: (column) => ColumnFilters(column));
@@ -3336,6 +3382,9 @@ class $$DiscoveredPeersTableOrderingComposer
   ColumnOrderings<String> get peerId => $composableBuilder(
       column: $table.peerId, builder: (column) => ColumnOrderings(column));
 
+  ColumnOrderings<String> get userId => $composableBuilder(
+      column: $table.userId, builder: (column) => ColumnOrderings(column));
+
   ColumnOrderings<String> get name => $composableBuilder(
       column: $table.name, builder: (column) => ColumnOrderings(column));
 
@@ -3376,6 +3425,9 @@ class $$DiscoveredPeersTableAnnotationComposer
   });
   GeneratedColumn<String> get peerId =>
       $composableBuilder(column: $table.peerId, builder: (column) => column);
+
+  GeneratedColumn<String> get userId =>
+      $composableBuilder(column: $table.userId, builder: (column) => column);
 
   GeneratedColumn<String> get name =>
       $composableBuilder(column: $table.name, builder: (column) => column);
@@ -3451,6 +3503,7 @@ class $$DiscoveredPeersTableTableManager extends RootTableManager<
               $$DiscoveredPeersTableAnnotationComposer($db: db, $table: table),
           updateCompanionCallback: ({
             Value<String> peerId = const Value.absent(),
+            Value<String?> userId = const Value.absent(),
             Value<String> name = const Value.absent(),
             Value<int?> age = const Value.absent(),
             Value<String?> bio = const Value.absent(),
@@ -3464,6 +3517,7 @@ class $$DiscoveredPeersTableTableManager extends RootTableManager<
           }) =>
               DiscoveredPeersCompanion(
             peerId: peerId,
+            userId: userId,
             name: name,
             age: age,
             bio: bio,
@@ -3477,6 +3531,7 @@ class $$DiscoveredPeersTableTableManager extends RootTableManager<
           ),
           createCompanionCallback: ({
             required String peerId,
+            Value<String?> userId = const Value.absent(),
             required String name,
             Value<int?> age = const Value.absent(),
             Value<String?> bio = const Value.absent(),
@@ -3490,6 +3545,7 @@ class $$DiscoveredPeersTableTableManager extends RootTableManager<
           }) =>
               DiscoveredPeersCompanion.insert(
             peerId: peerId,
+            userId: userId,
             name: name,
             age: age,
             bio: bio,

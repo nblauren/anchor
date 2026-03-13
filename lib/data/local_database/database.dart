@@ -74,6 +74,9 @@ class UserPhotos extends Table {
 @DataClassName('DiscoveredPeerEntry')
 class DiscoveredPeers extends Table {
   TextColumn get peerId => text()();
+  /// Stable application-level user ID from the peer's BLE profile.
+  /// Used to deduplicate when BLE MAC rotation assigns a new peerId.
+  TextColumn get userId => text().nullable()();
   TextColumn get name => text()();
   IntColumn get age => integer().nullable()();
   TextColumn get bio => text().nullable()();
@@ -159,7 +162,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 5;
 
   @override
   MigrationStrategy get migration {
@@ -185,6 +188,10 @@ class AppDatabase extends _$AppDatabase {
           await m.addColumn(userProfiles, userProfiles.interests);
           await m.addColumn(discoveredPeers, discoveredPeers.position);
           await m.addColumn(discoveredPeers, discoveredPeers.interests);
+        }
+        if (from < 5) {
+          // Migration from v4 to v5: add userId to discovered_peers for MAC rotation dedup
+          await m.addColumn(discoveredPeers, discoveredPeers.userId);
         }
       },
       beforeOpen: (details) async {

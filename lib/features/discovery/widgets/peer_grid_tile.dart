@@ -32,8 +32,25 @@ class PeerGridTile extends StatelessWidget {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            // Thumbnail or placeholder
-            _buildThumbnail(),
+            // Thumbnail or placeholder (greyed out when offline)
+            if (!peer.isOnline)
+              ColorFiltered(
+                colorFilter: const ColorFilter.mode(
+                  Colors.grey,
+                  BlendMode.saturation,
+                ),
+                child: _buildThumbnail(),
+              )
+            else
+              _buildThumbnail(),
+
+            // Dark overlay for offline peers
+            if (!peer.isOnline)
+              Positioned.fill(
+                child: Container(
+                  color: Colors.black.withValues(alpha: 0.4),
+                ),
+              ),
 
             // Gradient overlay for text readability
             Positioned(
@@ -314,6 +331,7 @@ class PeerGridTile extends StatelessWidget {
 
   /// Human-readable distance label based on RSSI or relay status.
   String get _distanceBadge {
+    if (!peer.isOnline) return 'Offline';
     if (peer.isRelayed) return 'Via mesh';
     final rssi = peer.rssi;
     if (rssi == null) return peer.isRecent ? 'Nearby' : peer.lastSeenText;
@@ -323,6 +341,7 @@ class PeerGridTile extends StatelessWidget {
   }
 
   Color get _badgeColor {
+    if (!peer.isOnline) return Colors.grey;
     if (peer.isRelayed) return const Color(0xFF818CF8); // indigo for relay
     if (peer.isRecent) return Colors.greenAccent;
     if (peer.isNearby) return Colors.yellowAccent;

@@ -180,3 +180,21 @@ class ClearFilters extends DiscoveryEvent {
   const ClearFilters();
 }
 
+/// A peer's BLE peripheral UUID changed due to MAC rotation.
+/// Triggers DB migration (conversations, blocks, drops) and removes the stale
+/// peer from the in-memory discovery list.
+class PeerIdChangedEvent extends DiscoveryEvent {
+  const PeerIdChangedEvent({
+    required this.oldPeerId,
+    required this.newPeerId,
+    required this.userId,
+  });
+
+  final String oldPeerId;
+  final String newPeerId;
+  final String userId;
+
+  @override
+  List<Object?> get props => [oldPeerId, newPeerId, userId];
+}
+

@@ -63,6 +63,9 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     on<NearbyTransferProgressUpdated>(_onNearbyTransferProgress);
     on<NearbyPayloadCompleted>(_onNearbyPayloadCompleted);
     on<WifiTransferReadyReceived>(_onWifiTransferReady);
+    // Peer loss + MAC rotation
+    on<ChatPeerLost>(_onChatPeerLost);
+    on<ChatPeerIdMigrated>(_onChatPeerIdMigrated);
 
     // Subscribe to transport manager streams (Wi-Fi Aware or BLE — unified)
     _messageSubscription = _transportManager.messageReceivedStream.listen(
@@ -84,6 +87,18 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     _photoRequestSubscription =
         _transportManager.photoRequestReceivedStream.listen(
       (request) => add(PhotoRequestReceived(request)),
+    );
+
+    _peerIdChangedSubscription =
+        _transportManager.peerIdChangedStream.listen(
+      (change) => add(ChatPeerIdMigrated(
+        oldPeerId: change.oldPeerId,
+        newPeerId: change.newPeerId,
+      )),
+    );
+
+    _peerLostSubscription = _transportManager.peerLostStream.listen(
+      (peerId) => add(ChatPeerLost(peerId)),
     );
 
     // Initialize Nearby / Wi-Fi Direct and subscribe to streams.
@@ -120,6 +135,11 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   StreamSubscription<ble.ReceivedPhoto>? _photoReceivedSubscription;
   StreamSubscription<ble.ReceivedPhotoPreview>? _photoPreviewSubscription;
   StreamSubscription<ble.ReceivedPhotoRequest>? _photoRequestSubscription;
+  StreamSubscription<ble.PeerIdChanged>? _peerIdChangedSubscription;
+  StreamSubscription<String>? _peerLostSubscription;
+
+  // Photo download timeout timers (keyed by messageId)
+  final Map<String, Timer> _photoDownloadTimers = {};
 
   // Nearby / Wi-Fi Direct subscriptions
   StreamSubscription<NearbyTransferProgress>? _nearbyProgressSubscription;
@@ -271,7 +291,12 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
 
   /// Background helper: sends a text message via BLE without blocking the
   /// event queue.  Status updates are dispatched as events.
-  Future<void> _sendTextInBackground(MessageEntry message, String peerId) async {
+  Future<void> _sendTextInBackground(
+    MessageEntry message,
+    String peerId, {
+    int attempt = 1,
+  }) async {
+    const maxRetries = 3;
     try {
       final payload = ble.MessagePayload(
         messageId: message.id,
@@ -280,9 +305,33 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       );
 
       final success = await _transportManager.sendMessage(peerId, payload);
+      if (success) {
+        add(MessageStatusUpdated(
+          messageId: message.id,
+          status: MessageStatus.sent,
+        ));
+        add(const LoadConversations());
+        return;
+      }
+
+      // Peer not reachable — wait for the triggered scan to find them,
+      // then retry (up to maxRetries).
+      if (attempt < maxRetries) {
+        Logger.info(
+          'ChatBloc: Send attempt $attempt failed for ${peerId.substring(0, 8)}, '
+              'retrying in ${attempt * 3}s...',
+          'Chat',
+        );
+        await Future<void>.delayed(Duration(seconds: attempt * 3));
+        if (!isClosed) {
+          await _sendTextInBackground(message, peerId, attempt: attempt + 1);
+          return;
+        }
+      }
+
       add(MessageStatusUpdated(
         messageId: message.id,
-        status: success ? MessageStatus.sent : MessageStatus.failed,
+        status: MessageStatus.failed,
       ));
       add(const LoadConversations());
     } catch (e) {
@@ -368,14 +417,24 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         ),
       ));
 
-      // 4. Send lightweight notification (no thumbnail).
-      final previewSent = await _transportManager.sendPhotoPreview(
-        peerId: peerId,
-        messageId: message.id,
-        photoId: photoId,
-        thumbnailBytes: Uint8List(0),
-        originalSize: blePhotoBytes.length,
-      );
+      // 4. Send lightweight notification (no thumbnail) — retry up to 3 times.
+      var previewSent = false;
+      for (var attempt = 1; attempt <= 3; attempt++) {
+        previewSent = await _transportManager.sendPhotoPreview(
+          peerId: peerId,
+          messageId: message.id,
+          photoId: photoId,
+          thumbnailBytes: Uint8List(0),
+          originalSize: blePhotoBytes.length,
+        );
+        if (previewSent || isClosed) break;
+        Logger.info(
+          'ChatBloc: Photo preview send attempt $attempt failed, '
+              'retrying in ${attempt * 3}s...',
+          'Chat',
+        );
+        await Future<void>.delayed(Duration(seconds: attempt * 3));
+      }
 
       add(MessageStatusUpdated(
         messageId: message.id,
@@ -426,9 +485,11 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         thumbnailPath: thumbnailPath,
       );
 
+      final previewSender =
+          await _peerRepository.getPeerById(preview.fromPeerId);
       await _notificationService.showMessageNotification(
         fromPeerId: preview.fromPeerId,
-        fromName: state.currentConversation?.peerName ?? 'Someone',
+        fromName: previewSender?.name ?? state.currentConversation?.peerName ?? 'Someone nearby',
         messagePreview:
             'Photo (${preview.formattedOriginalSize}) – Tap to download',
       );
@@ -475,6 +536,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
 
       if (!success) {
         // Revert to delivered so user can retry.
+        _photoDownloadTimers.remove(event.messageId)?.cancel();
         add(MessageStatusUpdated(
           messageId: event.messageId,
           status: MessageStatus.delivered,
@@ -483,6 +545,21 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
             Map<String, PhotoTransferInfo>.from(state.photoTransfers)
               ..remove(event.messageId);
         emit(state.copyWith(photoTransfers: revertedTransfers));
+      } else {
+        // Start a timeout — if no photo arrives within 45 seconds, fail.
+        _photoDownloadTimers[event.messageId]?.cancel();
+        _photoDownloadTimers[event.messageId] = Timer(
+          const Duration(seconds: 45),
+          () {
+            if (!isClosed && state.photoTransfers.containsKey(event.messageId)) {
+              Logger.warning(
+                'ChatBloc: Photo download timed out for ${event.messageId}',
+                'Chat',
+              );
+              _cancelPhotoDownload(event.messageId);
+            }
+          },
+        );
       }
     } catch (e) {
       Logger.error('Failed to send photo request', e, null, 'ChatBloc');
@@ -695,9 +772,11 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       final conversation =
           await _chatRepository.getOrCreateConversation(bleMsg.fromPeerId);
 
+      final senderPeer =
+          await _peerRepository.getPeerById(bleMsg.fromPeerId);
       await _notificationService.showMessageNotification(
         fromPeerId: bleMsg.fromPeerId,
-        fromName: state.currentConversation?.peerName ?? 'Unknown',
+        fromName: senderPeer?.name ?? state.currentConversation?.peerName ?? 'Someone nearby',
         messagePreview: bleMsg.type == ble.MessageType.text
             ? bleMsg.content
             : 'Photo received',
@@ -744,7 +823,8 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         Map<String, PhotoTransferInfo>.from(state.photoTransfers);
 
     if (progress.status == ble.PhotoTransferStatus.completed) {
-      // Remove from tracking and update message status
+      // Transfer done — clear timeout and tracking
+      _photoDownloadTimers.remove(progress.messageId)?.cancel();
       updatedTransfers.remove(progress.messageId);
       add(MessageStatusUpdated(
         messageId: progress.messageId,
@@ -752,7 +832,8 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       ));
     } else if (progress.status == ble.PhotoTransferStatus.failed ||
         progress.status == ble.PhotoTransferStatus.cancelled) {
-      // Remove from tracking and mark as failed
+      // Clear timeout and remove from tracking
+      _photoDownloadTimers.remove(progress.messageId)?.cancel();
       updatedTransfers.remove(progress.messageId);
       add(MessageStatusUpdated(
         messageId: progress.messageId,
@@ -835,6 +916,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     PhotoPreviewUpgraded event,
     Emitter<ChatState> emit,
   ) {
+    _photoDownloadTimers.remove(event.previewMessageId)?.cancel();
     final updatedTransfers =
         Map<String, PhotoTransferInfo>.from(state.photoTransfers)
           ..remove(event.previewMessageId);
@@ -952,13 +1034,23 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         ),
       ));
 
-      final success = await _transportManager.sendPhotoPreview(
-        peerId: peerId,
-        messageId: message.id,
-        photoId: photoId,
-        thumbnailBytes: Uint8List(0),
-        originalSize: bleBytes.length,
-      );
+      var success = false;
+      for (var attempt = 1; attempt <= 3; attempt++) {
+        success = await _transportManager.sendPhotoPreview(
+          peerId: peerId,
+          messageId: message.id,
+          photoId: photoId,
+          thumbnailBytes: Uint8List(0),
+          originalSize: bleBytes.length,
+        );
+        if (success || isClosed) break;
+        Logger.info(
+          'ChatBloc: Photo retry attempt $attempt failed, '
+              'retrying in ${attempt * 3}s...',
+          'Chat',
+        );
+        await Future<void>.delayed(Duration(seconds: attempt * 3));
+      }
 
       add(MessageStatusUpdated(
         messageId: message.id,
@@ -988,14 +1080,65 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     }
   }
 
+  /// Cancel a photo download: clear timer, remove transfer tracking, revert
+  /// message status to [delivered] so the user can tap to retry.
+  ///
+  /// Called from Timer callbacks (no Emitter access) — dispatches events
+  /// through the normal Bloc pipeline.
+  void _cancelPhotoDownload(String messageId) {
+    _photoDownloadTimers.remove(messageId)?.cancel();
+    // CancelPhotoTransfer removes from photoTransfers map (clears spinner).
+    add(CancelPhotoTransfer(messageId));
+    // Revert to delivered so user can tap to retry.
+    add(MessageStatusUpdated(
+      messageId: messageId,
+      status: MessageStatus.delivered,
+    ));
+  }
+
+  /// Peer went out of range — cancel any active photo downloads from them.
+  Future<void> _onChatPeerLost(
+    ChatPeerLost event,
+    Emitter<ChatState> emit,
+  ) async {
+    final currentConv = state.currentConversation;
+    if (currentConv == null || currentConv.peerId != event.peerId) return;
+
+    // Find all active incoming photo transfers for this peer and cancel them.
+    final transfersToCancel = <String>[];
+    for (final entry in state.photoTransfers.entries) {
+      if (!entry.value.isSending) {
+        transfersToCancel.add(entry.key);
+      }
+    }
+
+    if (transfersToCancel.isEmpty) return;
+
+    for (final messageId in transfersToCancel) {
+      _cancelPhotoDownload(messageId);
+    }
+
+    Logger.info(
+      'ChatBloc: Cancelled ${transfersToCancel.length} photo download(s) — '
+          'peer ${event.peerId.substring(0, 8)} lost',
+      'Chat',
+    );
+  }
+
   Future<void> _onCloseConversation(
     CloseConversation event,
     Emitter<ChatState> emit,
   ) async {
     _echoTimer?.cancel();
+    // Cancel all photo download timers
+    for (final timer in _photoDownloadTimers.values) {
+      timer.cancel();
+    }
+    _photoDownloadTimers.clear();
     emit(state.copyWith(
       clearCurrentConversation: true,
       messages: [],
+      photoTransfers: const {},
     ));
   }
 
@@ -1160,9 +1303,11 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
           thumbnailPath: thumbnailPath,
         );
 
+        final wifiSender =
+            await _peerRepository.getPeerById(bleDeviceId);
         await _notificationService.showMessageNotification(
           fromPeerId: bleDeviceId,
-          fromName: state.currentConversation?.peerName ?? 'Someone',
+          fromName: wifiSender?.name ?? state.currentConversation?.peerName ?? 'Someone nearby',
           messagePreview: 'Photo – Tap to download',
         );
 
@@ -1325,6 +1470,61 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     emit(state.copyWith(pendingOutgoingPhotos: updatedPending));
   }
 
+  // ---------------------------------------------------------------------------
+  // MAC rotation — update active conversation peerId
+  // ---------------------------------------------------------------------------
+
+  Future<void> _onChatPeerIdMigrated(
+    ChatPeerIdMigrated event,
+    Emitter<ChatState> emit,
+  ) async {
+    final current = state.currentConversation;
+    if (current == null || current.peerId != event.oldPeerId) return;
+
+    // Update the active conversation to target the new BLE address.
+    // The DB migration (conversation.peerId update) is handled by
+    // DiscoveryBloc._onPeerIdChanged before this event fires.
+    emit(state.copyWith(
+      currentConversation: CurrentConversation(
+        id: current.id,
+        peerId: event.newPeerId,
+        peerName: current.peerName,
+      ),
+    ));
+
+    // Also update any pending outgoing photos targeting the old peerId
+    final updatedPending =
+        Map<String, PendingOutgoingPhoto>.from(state.pendingOutgoingPhotos);
+    var changed = false;
+    for (final entry in updatedPending.entries.toList()) {
+      if (entry.value.peerId == event.oldPeerId) {
+        updatedPending[entry.key] = PendingOutgoingPhoto(
+          photoId: entry.value.photoId,
+          localPhotoPath: entry.value.localPhotoPath,
+          messageId: entry.value.messageId,
+          peerId: event.newPeerId,
+        );
+        changed = true;
+      }
+    }
+    if (changed) {
+      emit(state.copyWith(pendingOutgoingPhotos: updatedPending));
+    }
+
+    // Update transferToBleId mappings
+    for (final entry in _transferToBleId.entries.toList()) {
+      if (entry.value == event.oldPeerId) {
+        _transferToBleId[entry.key] = event.newPeerId;
+      }
+    }
+
+    Logger.info(
+      'ChatBloc: Migrated active conversation peerId '
+          '${event.oldPeerId} → ${event.newPeerId}',
+      'Chat',
+    );
+  }
+
   @override
   Future<void> close() {
     _echoTimer?.cancel();
@@ -1333,8 +1533,14 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     _photoReceivedSubscription?.cancel();
     _photoPreviewSubscription?.cancel();
     _photoRequestSubscription?.cancel();
+    _peerIdChangedSubscription?.cancel();
+    _peerLostSubscription?.cancel();
     _nearbyProgressSubscription?.cancel();
     _nearbyPayloadSubscription?.cancel();
+    for (final timer in _photoDownloadTimers.values) {
+      timer.cancel();
+    }
+    _photoDownloadTimers.clear();
     return super.close();
   }
 }

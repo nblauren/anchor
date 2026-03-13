@@ -73,6 +73,8 @@ class TransportManager {
       StreamController<ble.ReceivedPhoto>.broadcast();
   final _anchorDropReceivedController =
       StreamController<ble.AnchorDropReceived>.broadcast();
+  final _peerIdChangedController =
+      StreamController<ble.PeerIdChanged>.broadcast();
   final _activeTransportController =
       StreamController<TransportType>.broadcast();
 
@@ -239,6 +241,9 @@ class TransportManager {
 
   Stream<ble.AnchorDropReceived> get anchorDropReceivedStream =>
       _anchorDropReceivedController.stream;
+
+  Stream<ble.PeerIdChanged> get peerIdChangedStream =>
+      _peerIdChangedController.stream;
 
   // ==================== Unified Send Operations ====================
 
@@ -470,6 +475,13 @@ class TransportManager {
       _bleService.anchorDropReceivedStream.listen(
         _anchorDropReceivedController.add,
       ),
+      _bleService.peerIdChangedStream.listen((change) {
+        final transport = _peerTransport.remove(change.oldPeerId);
+        if (transport != null) {
+          _peerTransport[change.newPeerId] = transport;
+        }
+        _peerIdChangedController.add(change);
+      }),
     ]);
   }
 
@@ -501,6 +513,14 @@ class TransportManager {
       _bleService.anchorDropReceivedStream.listen(
         _anchorDropReceivedController.add,
       ),
+      _bleService.peerIdChangedStream.listen((change) {
+        // Update transport mapping for the new peerId
+        final transport = _peerTransport.remove(change.oldPeerId);
+        if (transport != null) {
+          _peerTransport[change.newPeerId] = transport;
+        }
+        _peerIdChangedController.add(change);
+      }),
     ]);
   }
 

@@ -69,9 +69,34 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
     on<_ClearAnchorDropNotification>(
       (event, emit) => emit(state.copyWith(incomingAnchorDropName: null)),
     );
-    on<_ApplyDebouncedState>((event, emit) => emit(event.newState));
+    on<_ApplyDebouncedState>((event, emit) {
+      // Merge debounced state into current state instead of replacing wholesale.
+      // This prevents stale snapshots from re-adding peers that were removed
+      // by PeerLost or PeerIdChanged events that fired between scheduling and
+      // debounce expiry.
+      final currentPeerIds = {for (final p in state.peers) p.peerId};
+      final debouncedPeerMap = {
+        for (final p in event.newState.peers) p.peerId: p
+      };
+
+      // Update existing current peers with debounced data
+      final merged = state.peers.map((p) {
+        final debounced = debouncedPeerMap[p.peerId];
+        return debounced ?? p;
+      }).toList();
+
+      // Add genuinely new peers from debounced state
+      for (final p in event.newState.peers) {
+        if (!currentPeerIds.contains(p.peerId)) {
+          merged.insert(0, p);
+        }
+      }
+
+      emit(state.copyWith(peers: merged));
+    });
     on<TogglePositionFilter>(_onTogglePositionFilter);
     on<ToggleInterestFilter>(_onToggleInterestFilter);
+    on<PeerIdChangedEvent>(_onPeerIdChanged);
     on<ClearFilters>(
       (event, emit) => emit(state.copyWith(
         filterPositionIds: const {},
@@ -92,6 +117,15 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
       (drop) => add(AnchorDropSignalReceived(fromPeerId: drop.fromPeerId)),
     );
 
+    _peerIdChangedSubscription =
+        _transportManager.peerIdChangedStream.listen(
+      (change) => add(PeerIdChangedEvent(
+        oldPeerId: change.oldPeerId,
+        newPeerId: change.newPeerId,
+        userId: change.userId,
+      )),
+    );
+
     // Debounce timer for batching peer updates
     _debounceTimer?.cancel();
   }
@@ -105,6 +139,7 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
   StreamSubscription<ble.DiscoveredPeer>? _peerDiscoveredSubscription;
   StreamSubscription<String>? _peerLostSubscription;
   StreamSubscription<ble.AnchorDropReceived>? _anchorDropSubscription;
+  StreamSubscription<ble.PeerIdChanged>? _peerIdChangedSubscription;
 
   /// Handle BLE peer discovered event - convert to bloc event
   void _onBlePeerDiscovered(ble.DiscoveredPeer peer) {
@@ -251,6 +286,9 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
         }
       }
 
+      // Always ensure re-discovered peers are marked online
+      peer = peer.copyWith(isOnline: true);
+
       final existingIndex =
           state.peers.indexWhere((p) => p.peerId == event.peerId);
       final isNewPeer = existingIndex < 0;
@@ -320,20 +358,19 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
     }
   }
 
-  /// Handle peer lost (not seen for a while)
+  /// Handle peer lost (not seen for a while).
+  /// Marks the peer as offline in the Discovery grid instead of removing it.
+  /// The peer stays visible (greyed out) so users can still see who was nearby.
   Future<void> _onPeerLost(
     PeerLost event,
     Emitter<DiscoveryState> emit,
   ) async {
-    // Just update UI indicator - peer stays in database
     final updatedPeers = state.peers.map((p) {
       if (p.peerId == event.peerId) {
-        // Mark as not recently seen by keeping the old lastSeenAt
-        return p;
+        return p.copyWith(isOnline: false);
       }
       return p;
     }).toList();
-
     emit(state.copyWith(peers: updatedPeers));
   }
 
@@ -540,6 +577,45 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
     }
   }
 
+  /// Handle BLE MAC rotation: migrate DB records and remove stale peer from UI.
+  Future<void> _onPeerIdChanged(
+    PeerIdChangedEvent event,
+    Emitter<DiscoveryState> emit,
+  ) async {
+    try {
+      // 1. Migrate DB records (conversations, peers, blocks, anchor drops)
+      await _peerRepository.migratePeerId(
+        oldPeerId: event.oldPeerId,
+        newPeerId: event.newPeerId,
+        userId: event.userId,
+      );
+
+      // 2. Remove stale peer from in-memory list (new peerId arrives via
+      //    the normal peerDiscovered stream shortly after)
+      final updatedPeers =
+          state.peers.where((p) => p.peerId != event.oldPeerId).toList();
+
+      // 3. Migrate droppedAnchorPeerIds
+      final updatedDropped = Set<String>.from(state.droppedAnchorPeerIds);
+      if (updatedDropped.remove(event.oldPeerId)) {
+        updatedDropped.add(event.newPeerId);
+      }
+
+      emit(state.copyWith(
+        peers: updatedPeers,
+        droppedAnchorPeerIds: updatedDropped,
+      ));
+
+      Logger.info(
+        'DiscoveryBloc: Migrated peer ${event.oldPeerId} → ${event.newPeerId}',
+        'Discovery',
+      );
+    } catch (e) {
+      Logger.error(
+          'DiscoveryBloc: Failed to migrate peer ID', e, null, 'Discovery');
+    }
+  }
+
   /// Debounce UI updates to batch rapid changes.
   /// Uses add() for the timer callback to avoid calling emit after the
   /// event handler has completed (which would throw an AssertionError).
@@ -650,6 +726,7 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
     _peerDiscoveredSubscription?.cancel();
     _peerLostSubscription?.cancel();
     _anchorDropSubscription?.cancel();
+    _peerIdChangedSubscription?.cancel();
     return super.close();
   }
 }

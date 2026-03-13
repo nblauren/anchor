@@ -30,6 +30,7 @@ class DiscoveredPeer extends Equatable {
     this.isRelayed = false,
     this.hopCount = 0,
     this.fullPhotoCount = 0,
+    this.isOnline = true,
   });
 
   final String peerId;
@@ -53,6 +54,9 @@ class DiscoveredPeer extends Equatable {
   /// Total number of profile photos available from this peer via fff4.
   /// 0 = unknown, 1 = primary only, >1 = extra photos available on-demand.
   final int fullPhotoCount;
+  /// Whether the peer is currently reachable via BLE. When false the tile is
+  /// shown greyed-out in the Discovery grid instead of being removed.
+  final bool isOnline;
 
   /// Decoded position label, or null when not shared.
   String? get positionLabel => ProfileConstants.positionLabel(position);
@@ -130,6 +134,7 @@ class DiscoveredPeer extends Equatable {
     bool? isRelayed,
     int? hopCount,
     int? fullPhotoCount,
+    bool? isOnline,
   }) {
     return DiscoveredPeer(
       peerId: peerId ?? this.peerId,
@@ -146,6 +151,7 @@ class DiscoveredPeer extends Equatable {
       isRelayed: isRelayed ?? this.isRelayed,
       hopCount: hopCount ?? this.hopCount,
       fullPhotoCount: fullPhotoCount ?? this.fullPhotoCount,
+      isOnline: isOnline ?? this.isOnline,
     );
   }
 
@@ -165,6 +171,7 @@ class DiscoveredPeer extends Equatable {
         isRelayed,
         hopCount,
         fullPhotoCount,
+        isOnline,
       ];
 }
 
@@ -215,7 +222,11 @@ class DiscoveryState extends Equatable {
         .where((p) => !p.isBlocked && seen.add(p.peerId))
         .where(_passesFilters)
         .toList()
-      ..sort((a, b) => b.lastSeenAt.compareTo(a.lastSeenAt));
+      ..sort((a, b) {
+        // Online peers always sort before offline peers
+        if (a.isOnline != b.isOnline) return a.isOnline ? -1 : 1;
+        return b.lastSeenAt.compareTo(a.lastSeenAt);
+      });
   }
 
   bool _passesFilters(DiscoveredPeer p) {

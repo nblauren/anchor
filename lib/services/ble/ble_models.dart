@@ -432,6 +432,23 @@ class ReceivedPhotoRequest extends Equatable {
   List<Object?> get props => [fromPeerId, messageId, photoId, timestamp];
 }
 
+/// Emitted when a known userId appears under a new BLE peripheral UUID
+/// (MAC rotation). Consumers should migrate data from oldPeerId to newPeerId.
+class PeerIdChanged extends Equatable {
+  const PeerIdChanged({
+    required this.oldPeerId,
+    required this.newPeerId,
+    required this.userId,
+  });
+
+  final String oldPeerId;
+  final String newPeerId;
+  final String userId;
+
+  @override
+  List<Object?> get props => [oldPeerId, newPeerId, userId];
+}
+
 /// BLE error
 class BleError extends Equatable {
   const BleError({

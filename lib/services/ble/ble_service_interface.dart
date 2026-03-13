@@ -67,6 +67,11 @@ abstract class BleServiceInterface {
   /// (default 2 minutes). The UI should mark these peers as out-of-range.
   Stream<String> get peerLostStream;
 
+  /// Emitted when a known userId appears under a new BLE peripheral UUID
+  /// (MAC address rotation). Consumers should migrate conversations and
+  /// other data from oldPeerId to newPeerId.
+  Stream<PeerIdChanged> get peerIdChangedStream;
+
   /// Start scanning for nearby peers
   Future<void> startScanning();
 

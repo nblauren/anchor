@@ -75,6 +75,7 @@ class FlutterBluePlusBleService implements BleServiceInterface {
   final _peerDiscoveredController =
       StreamController<DiscoveredPeer>.broadcast();
   final _peerLostController = StreamController<String>.broadcast();
+  final _peerIdChangedController = StreamController<PeerIdChanged>.broadcast();
   final _messageReceivedController =
       StreamController<ReceivedMessage>.broadcast();
   final _photoProgressController =
@@ -99,6 +100,24 @@ class FlutterBluePlusBleService implements BleServiceInterface {
   // (which carry the sender's app userId) can be routed to the correct peer.
   final Map<String, String> _userIdToPeerId = {};
 
+  // Map from Central UUID → app userId.  Populated when we receive a write
+  // from a Central whose userId isn't in _userIdToPeerId yet (i.e. we haven't
+  // scanned their Peripheral advertisement).  Once we discover them via scan
+  // and learn their peripheral UUID, we emit PeerIdChanged so conversations
+  // migrate from the Central UUID to the correct Peripheral UUID.
+  final Map<String, String> _centralUuidToUserId = {};
+
+  // Consecutive GATT connection failures per peer.  After 2 failures we treat
+  // the peer as gone (app closed / out of range) and emit peerLost immediately.
+  final Map<String, int> _consecutiveConnectFailures = {};
+
+  // Peers confirmed gone (app closed / out of range).  Scan results from
+  // the iOS Core Bluetooth cache still arrive after the peer is gone, so we
+  // suppress re-discovery until a GATT connection actually succeeds.
+  // Each entry expires after 60 s so that if the peer genuinely comes back,
+  // they can be rediscovered.
+  final Map<String, DateTime> _deadPeers = {};
+
   // Scan lifecycle
   Timer? _scanRestartTimer;
   static const _normalScanDuration = Duration(seconds: 5);
@@ -118,6 +137,7 @@ class FlutterBluePlusBleService implements BleServiceInterface {
   StreamSubscription? _charWriteSubscription;
   StreamSubscription? _charNotifyStateSubscription;
   StreamSubscription? _charNotifiedSubscription;
+  StreamSubscription? _connectionStateSubscription;
 
   // In-memory message ID deduplication — prevents the same BLE write
   // from being processed twice if the transport retransmits it.
@@ -136,6 +156,10 @@ class FlutterBluePlusBleService implements BleServiceInterface {
 
   // Timer that periodically broadcasts this device's neighbor list.
   Timer? _neighborListTimer;
+
+  // Sequential write lock to prevent "prepare queue is full" on iOS.
+  // All mesh broadcast writes go through _sequentialBroadcast.
+  Future<void> _broadcastLock = Future.value();
 
   // GATT characteristics (server side)
   GATTCharacteristic? _serverProfileChar;
@@ -245,6 +269,7 @@ class FlutterBluePlusBleService implements BleServiceInterface {
   Future<void> stop() async {
     Logger.info('BleService: Stopping...', 'BLE');
 
+    _peripheralRetryTimer?.cancel();
     await stopScanning();
     await stopBroadcasting();
 
@@ -265,6 +290,14 @@ class FlutterBluePlusBleService implements BleServiceInterface {
     _maxWriteLengths.clear();
     _lastProfileReadTime.clear();
     _userIdToPeerId.clear();
+    _connectingPeers.clear();
+    for (final c in _connectCompleters.values) {
+      if (!c.isCompleted) c.complete();
+    }
+    _connectCompleters.clear();
+    _consecutiveConnectFailures.clear();
+    _deadPeers.clear();
+    _centralUuidToUserId.clear();
     _thumbnailBuffers.clear();
     _thumbnailExpectedSizes.clear();
     _peerPhotoSizes.clear();
@@ -295,10 +328,12 @@ class FlutterBluePlusBleService implements BleServiceInterface {
     await _charWriteSubscription?.cancel();
     await _charNotifyStateSubscription?.cancel();
     await _charNotifiedSubscription?.cancel();
+    await _connectionStateSubscription?.cancel();
 
     await _statusController.close();
     await _peerDiscoveredController.close();
     await _peerLostController.close();
+    await _peerIdChangedController.close();
     await _messageReceivedController.close();
     await _photoProgressController.close();
     await _photoReceivedController.close();
@@ -388,12 +423,14 @@ class FlutterBluePlusBleService implements BleServiceInterface {
 
     // Don't attempt GATT setup when the peripheral isn't ready — the platform
     // calls may silently fail. _onPeripheralStateChanged will retry when it
-    // transitions to poweredOn.
+    // transitions to poweredOn.  Also schedule a delayed retry in case the
+    // state is transiently 'unknown' and never fires poweredOn again.
     if (!_peripheralPoweredOn) {
       Logger.warning(
         'BleService: Skipping GATT setup — peripheral state: ${_peripheral.state}',
         'BLE',
       );
+      _schedulePeripheralRetry();
       return;
     }
 
@@ -502,6 +539,12 @@ class FlutterBluePlusBleService implements BleServiceInterface {
       _charNotifiedSubscription =
           _central.characteristicNotified.listen(_onCharacteristicNotified);
 
+      // Handle peripheral disconnection — clear cached characteristics so the
+      // next sendMessage attempt reconnects instead of using stale handles.
+      await _connectionStateSubscription?.cancel();
+      _connectionStateSubscription =
+          _central.connectionStateChanged.listen(_onConnectionStateChanged);
+
       _gattServerReady = true;
       Logger.info('BleService: GATT server ready', 'BLE');
     } catch (e) {
@@ -591,6 +634,17 @@ class FlutterBluePlusBleService implements BleServiceInterface {
       final fromPeerId = _resolveSenderPeerId(json, args.central.uuid);
       final type = json['type'] as String? ?? 'message';
 
+      // Peer is alive — refresh their timeout timer.
+      _refreshPeerTimeout(fromPeerId);
+
+      // If we received a message from a Central that we haven't discovered
+      // as a Peripheral yet, trigger an immediate scan so we can establish
+      // the reverse connection and send messages back.
+      if (!_messagingChars.containsKey(fromPeerId) &&
+          !_discoveredPeripherals.containsKey(fromPeerId)) {
+        _triggerImmediateScan();
+      }
+
       if (type == 'photo_start') {
         _handlePhotoStart(json, fromPeerId);
       } else if (type == 'photo_chunk') {
@@ -616,6 +670,12 @@ class FlutterBluePlusBleService implements BleServiceInterface {
   /// Resolve the sender's peerId from the payload's sender_id field,
   /// mapping their app userId back to the BLE peripheral UUID we use
   /// in our database.
+  ///
+  /// On iOS the Central UUID ≠ the Peripheral UUID for the same device.
+  /// If we haven't scanned the sender's Peripheral yet, we fall back to the
+  /// Central UUID and record a pending `_centralUuidToUserId` entry so that
+  /// when the scan completes and we learn the correct Peripheral UUID, we can
+  /// emit [PeerIdChanged] and migrate the conversation.
   String _resolveSenderPeerId(Map<String, dynamic> json, UUID centralUuid) {
     final senderId = json['sender_id'] as String?;
     if (senderId != null &&
@@ -623,7 +683,14 @@ class FlutterBluePlusBleService implements BleServiceInterface {
         _userIdToPeerId.containsKey(senderId)) {
       return _userIdToPeerId[senderId]!;
     }
-    return centralUuid.toString();
+
+    // We don't know this userId → peripheral mapping yet.  Record the
+    // central UUID → userId so _updatePeerFromProfile can migrate later.
+    final centralId = centralUuid.toString();
+    if (senderId != null && senderId.isNotEmpty) {
+      _centralUuidToUserId[centralId] = senderId;
+    }
+    return centralId;
   }
 
   void _handleReceivedMessage(Map<String, dynamic> json, String fromPeerId) {
@@ -796,6 +863,48 @@ class FlutterBluePlusBleService implements BleServiceInterface {
             'BleService: Relay write failed to $targetPeerId: $e', 'BLE'));
   }
 
+  /// Sequentially write [data] to multiple connected peers with a small delay
+  /// between each write to avoid overflowing iOS Core Bluetooth's prepare
+  /// queue (CBATTErrorDomain Code=9).
+  void _sequentialBroadcast(
+    Uint8List data, {
+    String? excludePeerId,
+    String debugLabel = 'broadcast',
+  }) {
+    final targets = _messagingChars.entries.where((entry) {
+      if (entry.key == excludePeerId) return false;
+      if (_deadPeers.containsKey(entry.key)) return false;
+      return _discoveredPeripherals.containsKey(entry.key);
+    }).toList();
+
+    if (targets.isEmpty) return;
+
+    _broadcastLock = _broadcastLock.then((_) async {
+      for (final entry in targets) {
+        final peripheral = _discoveredPeripherals[entry.key];
+        if (peripheral == null) continue;
+        try {
+          await _central.writeCharacteristic(
+            peripheral,
+            entry.value,
+            value: data,
+            type: GATTCharacteristicWriteType.withResponse,
+          );
+        } catch (e) {
+          Logger.warning(
+              'BleService: $debugLabel write failed to ${entry.key}: $e',
+              'BLE');
+        }
+        // Small delay between writes to let iOS flush the prepare queue
+        if (targets.length > 1) {
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+        }
+      }
+    }).catchError((Object e) {
+      Logger.warning('BleService: $debugLabel chain error: $e', 'BLE');
+    });
+  }
+
   // ==================== Mesh Peer Discovery ====================
 
   /// Broadcast a `peer_announce` for a directly-discovered peer so that
@@ -840,25 +949,11 @@ class FlutterBluePlusBleService implements BleServiceInterface {
         const Duration(minutes: 5), () => _seenMessageIds.remove(msgId));
 
     final data = Uint8List.fromList(utf8.encode(jsonEncode(json)));
-    int count = 0;
-    for (final entry in _messagingChars.entries) {
-      final peripheral = _discoveredPeripherals[entry.key];
-      if (peripheral == null) continue;
-      _central
-          .writeCharacteristic(
-            peripheral,
-            entry.value,
-            value: data,
-            type: GATTCharacteristicWriteType.withResponse,
-          )
-          .catchError((Object e) => Logger.warning(
-              'BleService: Peer announce write failed to ${entry.key}: $e',
-              'BLE'));
-      count++;
-    }
+    _sequentialBroadcast(data, debugLabel: 'Peer announce');
 
     Logger.info(
-        'BleService: Announced "${peer.name}" to $count mesh peers', 'BLE');
+        'BleService: Announced "${peer.name}" to ${_messagingChars.length} mesh peers',
+        'BLE');
   }
 
   /// Handle an incoming `peer_announce` — emit the announced peer to the
@@ -966,21 +1061,12 @@ class FlutterBluePlusBleService implements BleServiceInterface {
       }
     }
 
-    // Fallback: flood
-    for (final entry in _messagingChars.entries) {
-      if (entry.key == excludePeerId) continue;
-      final peripheral = _discoveredPeripherals[entry.key];
-      if (peripheral == null) continue;
-      _central
-          .writeCharacteristic(
-            peripheral,
-            entry.value,
-            value: data,
-            type: GATTCharacteristicWriteType.withResponse,
-          )
-          .catchError((Object e) => Logger.warning(
-              'BleService: Peer announce relay failed: $e', 'BLE'));
-    }
+    // Fallback: flood (sequentially to avoid prepare queue overflow)
+    _sequentialBroadcast(
+      data,
+      excludePeerId: excludePeerId,
+      debugLabel: 'Peer announce relay',
+    );
   }
 
   void _handleReceivedPhotoChunk(Map<String, dynamic> json, String fromPeerId) {
@@ -1276,10 +1362,60 @@ class FlutterBluePlusBleService implements BleServiceInterface {
         'BleService: Peripheral not ready (${_peripheral.state}), will retry when ready',
         'BLE',
       );
+      // The bluetooth_low_energy package can report a transient 'unknown'
+      // state during startup before settling on 'poweredOn'.  If the
+      // _onPeripheralStateChanged callback never fires again, we'd be stuck.
+      // Schedule a delayed retry that checks the actual peripheral state.
+      _schedulePeripheralRetry();
       return;
     }
 
     await _startAdvertisingAndGatt(payload);
+  }
+
+  Timer? _peripheralRetryTimer;
+
+  /// Schedule a delayed retry for advertising when the peripheral state is
+  /// transiently 'unknown' at startup.  Retries up to 5 times (every 2s).
+  void _schedulePeripheralRetry({int attempt = 1}) {
+    if (attempt > 5) {
+      Logger.warning(
+        'BleService: Peripheral still not ready after 5 retries — '
+            'advertising will start when state changes to poweredOn',
+        'BLE',
+      );
+      return;
+    }
+    _peripheralRetryTimer?.cancel();
+    _peripheralRetryTimer = Timer(const Duration(seconds: 2), () {
+      // Re-check actual state from the peripheral manager
+      final currentState = _peripheral.state;
+      if (currentState == BluetoothLowEnergyState.poweredOn) {
+        Logger.info(
+          'BleService: Peripheral now poweredOn (retry $attempt) — '
+              'starting advertising',
+          'BLE',
+        );
+        _peripheralPoweredOn = true;
+        if (_pendingPayload != null && !_isBroadcasting) {
+          if (!_gattServerReady) {
+            _setupGattServer().then((_) {
+              if (_pendingPayload != null && !_isBroadcasting) {
+                _startAdvertisingAndGatt(_pendingPayload!);
+              }
+            });
+          } else {
+            _startAdvertisingAndGatt(_pendingPayload!);
+          }
+        }
+      } else {
+        Logger.info(
+          'BleService: Peripheral still $currentState (retry $attempt/5)',
+          'BLE',
+        );
+        _schedulePeripheralRetry(attempt: attempt + 1);
+      }
+    });
   }
 
   Future<void> _startAdvertisingAndGatt(BroadcastPayload payload) async {
@@ -1301,9 +1437,6 @@ class FlutterBluePlusBleService implements BleServiceInterface {
         name: compactName,
         serviceUUIDs: [
           _serviceUuid,
-          _messagingCharUuid,
-          _profileCharUuid,
-          _thumbnailCharUuid
         ],
       ));
 
@@ -1395,6 +1528,10 @@ class FlutterBluePlusBleService implements BleServiceInterface {
   Stream<String> get peerLostStream => _peerLostController.stream;
 
   @override
+  Stream<PeerIdChanged> get peerIdChangedStream =>
+      _peerIdChangedController.stream;
+
+  @override
   Future<void> startScanning() async {
     if (_isScanning) return;
     _ensureInitialized();
@@ -1450,6 +1587,30 @@ class FlutterBluePlusBleService implements BleServiceInterface {
     }
   }
 
+  /// Cancel any active scan pause and start a new scan cycle immediately.
+  /// Called when we need to discover a peer we know is in range (e.g. they
+  /// sent us a message but we haven't scanned their advertisement yet).
+  void _triggerImmediateScan() {
+    if (!_isScanning) return;
+
+    // Don't trigger too frequently — at most once every 3 seconds
+    final now = DateTime.now();
+    if (_lastImmediateScanAt != null &&
+        now.difference(_lastImmediateScanAt!) < const Duration(seconds: 3)) {
+      return;
+    }
+    _lastImmediateScanAt = now;
+
+    Logger.info('BleService: Triggering immediate scan cycle', 'BLE');
+    _scanRestartTimer?.cancel();
+    try {
+      _central.stopDiscovery().catchError((_) {});
+    } catch (_) {}
+    _runScanCycle();
+  }
+
+  DateTime? _lastImmediateScanAt;
+
   @override
   Future<void> stopScanning() async {
     if (!_isScanning) return;
@@ -1483,6 +1644,17 @@ class FlutterBluePlusBleService implements BleServiceInterface {
     final adv = event.advertisement;
     final rssi = event.rssi;
     final now = DateTime.now();
+
+    // Skip peers recently marked as gone — iOS Core Bluetooth caches
+    // advertisements and keeps reporting them after the peer's app closes.
+    // The dead entry expires after 60 s so genuine comebacks are allowed.
+    final deadSince = _deadPeers[deviceId];
+    if (deadSince != null) {
+      if (now.difference(deadSince) < const Duration(seconds: 60)) {
+        return;
+      }
+      _deadPeers.remove(deviceId);
+    }
 
     // Skip if same peer and RSSI change < 5 dBm within 3 seconds
     if (_lastEmit.containsKey(deviceId)) {
@@ -1553,7 +1725,39 @@ class FlutterBluePlusBleService implements BleServiceInterface {
   // Cached maximum write lengths per peripheral (avoids repeated queries)
   final Map<String, int> _maxWriteLengths = {};
 
+  // Peers currently being connected to — prevents concurrent connect calls
+  // on the same peripheral which cause iOS Core Bluetooth to disconnect.
+  final Set<String> _connectingPeers = {};
+  // Completers so callers can await an in-progress connection attempt
+  // instead of starting a duplicate one.
+  final Map<String, Completer<void>> _connectCompleters = {};
+
   Future<void> _connectAndReadProfile(
+      String peerId, Peripheral peripheral) async {
+    // If another call is already connecting this peer, wait for it.
+    if (_connectingPeers.contains(peerId)) {
+      final completer = _connectCompleters[peerId];
+      if (completer != null && !completer.isCompleted) {
+        await completer.future;
+      }
+      return;
+    }
+
+    _connectingPeers.add(peerId);
+    _connectCompleters[peerId] = Completer<void>();
+
+    try {
+      await _connectAndReadProfileImpl(peerId, peripheral);
+    } finally {
+      _connectingPeers.remove(peerId);
+      final completer = _connectCompleters.remove(peerId);
+      if (completer != null && !completer.isCompleted) {
+        completer.complete();
+      }
+    }
+  }
+
+  Future<void> _connectAndReadProfileImpl(
       String peerId, Peripheral peripheral) async {
     final isAlreadyConnected = _messagingChars.containsKey(peerId);
 
@@ -1614,13 +1818,30 @@ class FlutterBluePlusBleService implements BleServiceInterface {
           }
         }
       } catch (e) {
+        final failures = (_consecutiveConnectFailures[peerId] ?? 0) + 1;
+        _consecutiveConnectFailures[peerId] = failures;
         Logger.warning(
-          'BleService: Connect to $peerId failed: $e',
+          'BleService: Connect to $peerId failed ($failures consecutive): $e',
           'BLE',
         );
+        // After 2 consecutive failures the peer is likely gone (app closed
+        // or moved out of range).  Emit peerLost immediately instead of
+        // waiting for the full 2-minute timeout.
+        if (failures >= 2 && _visiblePeers.containsKey(peerId)) {
+          Logger.info(
+            'BleService: Removing unreachable peer $peerId after $failures failures',
+            'BLE',
+          );
+          _onPeerLost(peerId);
+        }
         return;
       }
     }
+
+    // Connection succeeded — peer is genuinely alive.
+    _consecutiveConnectFailures.remove(peerId);
+    _deadPeers.remove(peerId);
+    _refreshPeerTimeout(peerId);
 
     // ── Throttled profile + thumbnail re-read ──
     // Always read on first contact; re-read at most once per 30 s thereafter
@@ -1785,9 +2006,35 @@ class FlutterBluePlusBleService implements BleServiceInterface {
                 '$previousPeerId → $peerId, retiring stale entry',
             'BLE',
           );
+          _peerIdChangedController.add(PeerIdChanged(
+            oldPeerId: previousPeerId,
+            newPeerId: peerId,
+            userId: userId,
+          ));
           _onPeerLost(previousPeerId);
         }
         _userIdToPeerId[userId] = peerId;
+
+        // Check if a Central UUID was temporarily used as the peerId for this
+        // user (when we received a write before scanning their Peripheral).
+        // If so, migrate the conversation from the Central UUID → Peripheral UUID.
+        final centralId = _centralUuidToUserId.entries
+            .where((e) => e.value == userId)
+            .map((e) => e.key)
+            .firstOrNull;
+        if (centralId != null && centralId != peerId) {
+          Logger.info(
+            'BleService: Migrating Central UUID $centralId → Peripheral $peerId '
+                'for userId $userId',
+            'BLE',
+          );
+          _centralUuidToUserId.remove(centralId);
+          _peerIdChangedController.add(PeerIdChanged(
+            oldPeerId: centralId,
+            newPeerId: peerId,
+            userId: userId,
+          ));
+        }
       }
 
       // Update the existing peer entry in-place — keep the BLE peripheral UUID
@@ -1935,6 +2182,36 @@ class FlutterBluePlusBleService implements BleServiceInterface {
       'BleService: Thumbnail push complete (${data.length}B sent)',
       'BLE',
     );
+  }
+
+  /// Called when a connected peripheral's connection state changes.
+  /// When a peripheral disconnects, clear cached characteristics so the next
+  /// sendMessage attempt triggers a fresh connect + GATT discovery.
+  void _onConnectionStateChanged(
+      PeripheralConnectionStateChangedEventArgs args) {
+    if (args.state == ConnectionState.disconnected) {
+      final peerId = args.peripheral.uuid.toString();
+      final hadConnection = _messagingChars.containsKey(peerId);
+      _messagingChars.remove(peerId);
+      _profileChars.remove(peerId);
+      _thumbnailChars.remove(peerId);
+      _fullPhotosChars.remove(peerId);
+      _maxWriteLengths.remove(peerId);
+      // Release the connection lock so reconnect can proceed.
+      _connectingPeers.remove(peerId);
+      final completer = _connectCompleters.remove(peerId);
+      if (completer != null && !completer.isCompleted) completer.complete();
+      if (hadConnection) {
+        Logger.info(
+          'BleService: Peripheral $peerId disconnected — removing peer',
+          'BLE',
+        );
+        // The peer had an active GATT connection that just dropped.
+        // Immediately remove them from discovery instead of waiting for
+        // the timeout or consecutive connection failures.
+        _onPeerLost(peerId);
+      }
+    }
   }
 
   /// Called on the CENTRAL side when a notification arrives on any characteristic.
@@ -2126,14 +2403,34 @@ class FlutterBluePlusBleService implements BleServiceInterface {
   }
 
   void _emitPeer(DiscoveredPeer peer) {
+    final isNew = !_visiblePeers.containsKey(peer.peerId);
     _visiblePeers[peer.peerId] = peer;
     _peerDiscoveredController.add(peer);
     _updateScanTiming(); // Adapt scan cadence to current density
 
-    _peerTimeoutTimers[peer.peerId]?.cancel();
-    _peerTimeoutTimers[peer.peerId] = Timer(
+    // Only start the timeout timer on first discovery.  Subsequent scan
+    // results may come from the iOS Core Bluetooth cache even after the
+    // peer's app has closed, so we must NOT reset the timer every time.
+    // The timer is refreshed to the full duration after a successful GATT
+    // interaction in _refreshPeerTimeout().
+    if (isNew || !_peerTimeoutTimers.containsKey(peer.peerId)) {
+      _peerTimeoutTimers[peer.peerId]?.cancel();
+      _peerTimeoutTimers[peer.peerId] = Timer(
+        config.peerLostTimeout,
+        () => _onPeerLost(peer.peerId),
+      );
+    }
+  }
+
+  /// Reset the peer timeout to the full [peerLostTimeout] duration.
+  /// Called after a confirmed GATT interaction (profile read, message sent)
+  /// which proves the peer is actually alive, not a cached scan result.
+  void _refreshPeerTimeout(String peerId) {
+    if (!_visiblePeers.containsKey(peerId)) return;
+    _peerTimeoutTimers[peerId]?.cancel();
+    _peerTimeoutTimers[peerId] = Timer(
       config.peerLostTimeout,
-      () => _onPeerLost(peer.peerId),
+      () => _onPeerLost(peerId),
     );
   }
 
@@ -2154,8 +2451,17 @@ class FlutterBluePlusBleService implements BleServiceInterface {
       _fullPhotoBuffers.remove(peerId);
       _fullPhotoExpectedSizes.remove(peerId);
       _peerFullPhotoSizes.remove(peerId);
-      _userIdToPeerId.removeWhere((_, v) => v == peerId);
+      // Keep _userIdToPeerId mapping — the userId→peripheralUUID relationship
+      // is still valid even if the peer is temporarily out of range.  Clearing
+      // it would cause the Central UUID mismatch bug if the peer sends a
+      // message before we re-scan their advertisement.
       _lastAnnouncedAt.remove(peerId);
+      _consecutiveConnectFailures.remove(peerId);
+      _discoveredPeripherals.remove(peerId);
+      _lastEmit.remove(peerId);
+      _lastRssi.remove(peerId);
+      // Suppress cached scan results for this peer for 60 seconds.
+      _deadPeers[peerId] = DateTime.now();
       Logger.info('BleService: Lost peer ${peer?.name}', 'BLE');
       _updateScanTiming(); // Re-evaluate density after peer lost
     }
@@ -2199,19 +2505,7 @@ class FlutterBluePlusBleService implements BleServiceInterface {
     };
 
     final data = Uint8List.fromList(utf8.encode(jsonEncode(json)));
-    for (final entry in _messagingChars.entries) {
-      final peripheral = _discoveredPeripherals[entry.key];
-      if (peripheral == null) continue;
-      _central
-          .writeCharacteristic(
-            peripheral,
-            entry.value,
-            value: data,
-            type: GATTCharacteristicWriteType.withResponse,
-          )
-          .catchError((Object e) => Logger.warning(
-              'BleService: Neighbor list broadcast failed: $e', 'BLE'));
-    }
+    _sequentialBroadcast(data, debugLabel: 'Neighbor list');
 
     Logger.info(
       'BleService: Broadcast neighbor list '
@@ -2243,7 +2537,12 @@ class FlutterBluePlusBleService implements BleServiceInterface {
       }
 
       if (msgChar == null || peripheral == null) {
-        Logger.info('BleService: Peer not reachable: $peerId', 'BLE');
+        Logger.info(
+            'BleService: Peer not reachable: $peerId — triggering scan', 'BLE');
+        // Peer exists in our system (we received messages from them) but we
+        // never discovered their advertisement.  Kick an immediate scan cycle
+        // so the next retry from the FIFO queue can find them.
+        _triggerImmediateScan();
         return false;
       }
 
@@ -2259,6 +2558,7 @@ class FlutterBluePlusBleService implements BleServiceInterface {
       );
 
       Logger.info('BleService: Message sent successfully', 'BLE');
+      _refreshPeerTimeout(peerId);
       return true;
     } catch (e) {
       Logger.error('BleService: Message send failed', e, null, 'BLE');
