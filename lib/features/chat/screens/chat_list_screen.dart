@@ -255,6 +255,8 @@ class _ChatListScreenState extends State<ChatListScreen> {
     String preview;
     if (message.contentType == MessageContentType.photo) {
       preview = '📷 Photo';
+    } else if (message.contentType == MessageContentType.photoPreview) {
+      preview = '📷 Photo — Tap to download';
     } else {
       preview = message.textContent ?? '';
     }

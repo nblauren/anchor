@@ -101,6 +101,8 @@ PODS:
     - TensorFlowLiteSwift (= 2.12.0)
     - TensorFlowLiteSwift/CoreML (= 2.12.0)
     - TensorFlowLiteSwift/Metal (= 2.12.0)
+  - wifi_aware_p2p (0.1.0):
+    - Flutter
 
 DEPENDENCIES:
   - app_badge_plus (from `.symlinks/plugins/app_badge_plus/ios`)
@@ -118,6 +120,7 @@ DEPENDENCIES:
   - shared_preferences_foundation (from `.symlinks/plugins/shared_preferences_foundation/darwin`)
   - sqlite3_flutter_libs (from `.symlinks/plugins/sqlite3_flutter_libs/darwin`)
   - tflite_flutter (from `.symlinks/plugins/tflite_flutter/ios`)
+  - wifi_aware_p2p (from `.symlinks/plugins/wifi_aware_p2p/ios`)
 
 SPEC REPOS:
   trunk:
@@ -161,6 +164,8 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/sqlite3_flutter_libs/darwin"
   tflite_flutter:
     :path: ".symlinks/plugins/tflite_flutter/ios"
+  wifi_aware_p2p:
+    :path: ".symlinks/plugins/wifi_aware_p2p/ios"
 
 SPEC CHECKSUMS:
   app_badge_plus: f2c3391ddd4a207254871e3d6fe41d879fea1d1a
@@ -186,7 +191,8 @@ SPEC CHECKSUMS:
   TensorFlowLiteC: 20785a69299185a379ba9852b6625f00afd7984a
   TensorFlowLiteSwift: 3a4928286e9e35bdd3e17970f48e53c80d25e793
   tflite_flutter: 64b192e11352fe36943ab6656e1d49207f1a5595
+  wifi_aware_p2p: 6b164923675fdd04025e15a870d9abbd99826588
 
-PODFILE CHECKSUM: 064a52b90c65aa8ae07cff95a4fba4084d7ef30c
+PODFILE CHECKSUM: 4a620b122665ebd2423ed1a159bddea2bd8ce987
 
 COCOAPODS: 1.16.2

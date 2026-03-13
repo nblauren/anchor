@@ -11,6 +11,7 @@ import '../../../services/ble/ble.dart' as ble;
 import '../../../services/database_service.dart';
 import '../../../services/image_service.dart' show ImageService, resolvePhotoPath;
 import '../../../services/nsfw_detection_service.dart';
+import '../../../services/transport/transport.dart';
 import 'profile_event.dart';
 import 'profile_state.dart';
 
@@ -34,10 +35,11 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
     required ImageService imageService,
     required ble.BleServiceInterface bleService,
     required NsfwDetectionService nsfwDetectionService,
+    required TransportManager transportManager,
   })  : _databaseService = databaseService,
         _imageService = imageService,
-        _bleService = bleService,
         _nsfwService = nsfwDetectionService,
+        _transportManager = transportManager,
         super(const ProfileState()) {
     on<LoadProfile>(_onLoadProfile);
     on<CreateProfile>(_onCreateProfile);
@@ -55,8 +57,8 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
 
   final DatabaseService _databaseService;
   final ImageService _imageService;
-  final ble.BleServiceInterface _bleService;
   final NsfwDetectionService _nsfwService;
+  final TransportManager _transportManager;
 
   /// Runs NSFW check on [absolutePath]. If the photo fails the check, emits
   /// [ProfileState.nsfwBlockedPhotoId] = [photoId] and returns false.
@@ -515,12 +517,21 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
         thumbnailsList: allThumbnails.isNotEmpty ? allThumbnails : null,
       );
 
-      // Broadcast via BLE
-      await _bleService.broadcastProfile(payload);
+      // Initialize TransportManager on first broadcast (Wi-Fi Aware needs profile)
+      // This is idempotent — subsequent calls are no-ops.
+      await _transportManager.initialize(
+        ownUserId: state.profileId!,
+        profile: payload,
+      );
+      await _transportManager.start();
+
+      // Broadcast via TransportManager (BLE + Wi-Fi Aware if available)
+      await _transportManager.broadcastProfile(payload);
 
       Logger.info(
-        'Profile broadcast via BLE (${allThumbnails.length} photos, '
-        'primary: ${allThumbnails.isNotEmpty ? allThumbnails.first.length : 0}B)',
+        'Profile broadcast via TransportManager (${allThumbnails.length} photos, '
+        'primary: ${allThumbnails.isNotEmpty ? allThumbnails.first.length : 0}B, '
+        'transport: ${_transportManager.activeTransport})',
         'ProfileBloc',
       );
     } catch (e) {

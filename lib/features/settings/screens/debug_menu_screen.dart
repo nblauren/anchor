@@ -7,6 +7,7 @@ import '../../../core/utils/logger.dart';
 import '../../../injection.dart';
 import '../../../services/ble/ble.dart';
 import '../../../services/database_service.dart';
+import '../../../services/transport/transport.dart';
 import '../../discovery/bloc/discovery_bloc.dart';
 import '../../discovery/bloc/discovery_event.dart';
 
@@ -61,11 +62,12 @@ class _DebugMenuScreenState extends State<DebugMenuScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          // BLE Status section
+          // Transport Status section
           _buildSection(
-            'BLE Status',
+            'Transport',
             [
-              _buildInfoRow('Service Type', _isMockBle ? 'Mock' : 'FlutterBluePlus'),
+              _buildTransportStatusRow(),
+              _buildInfoRow('BLE Service', _isMockBle ? 'Mock' : 'FlutterBluePlus'),
               _buildBleStatusRow(),
             ],
           ),
@@ -275,6 +277,42 @@ class _DebugMenuScreenState extends State<DebugMenuScreen> {
           ),
         );
       },
+    );
+  }
+
+  Widget _buildTransportStatusRow() {
+    final transportManager = getIt<TransportManager>();
+    final activeTransport = transportManager.activeTransport;
+    final label = activeTransport == TransportType.wifiAware
+        ? 'Wi-Fi Aware (Android)'
+        : 'BLE + Multipeer';
+    final color = activeTransport == TransportType.wifiAware
+        ? AppTheme.success
+        : AppTheme.primaryLight;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          const Text('Active Transport',
+              style: TextStyle(color: AppTheme.textSecondary)),
+          Row(
+            children: [
+              Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(
+                  color: color,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(label, style: const TextStyle(fontWeight: FontWeight.w500)),
+            ],
+          ),
+        ],
+      ),
     );
   }
 

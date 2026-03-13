@@ -25,7 +25,7 @@ class PositionDropdown extends StatelessWidget {
     final theme = Theme.of(context);
 
     return DropdownButtonFormField<int?>(
-      value: value,
+      initialValue: value,
       isExpanded: true,
       decoration: InputDecoration(
         labelText: 'Position (optional)',

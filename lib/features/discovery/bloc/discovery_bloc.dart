@@ -10,6 +10,7 @@ import '../../../data/repositories/anchor_drop_repository.dart';
 import '../../../data/repositories/peer_repository.dart';
 import '../../../services/ble/ble.dart' as ble;
 import '../../../services/notification_service.dart';
+import '../../../services/transport/transport.dart';
 import 'discovery_event.dart';
 import 'discovery_state.dart';
 
@@ -43,11 +44,11 @@ class _ClearAnchorDropNotification extends DiscoveryEvent {
 class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
   DiscoveryBloc({
     required PeerRepository peerRepository,
-    required ble.BleServiceInterface bleService,
+    required TransportManager transportManager,
     required AnchorDropRepository anchorDropRepository,
     NotificationService? notificationService,
   })  : _peerRepository = peerRepository,
-        _bleService = bleService,
+        _transportManager = transportManager,
         _anchorDropRepository = anchorDropRepository,
         _notificationService = notificationService,
         super(const DiscoveryState()) {
@@ -78,18 +79,16 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
       )),
     );
 
-    // Subscribe to BLE peer discovery stream
-    _peerDiscoveredSubscription = _bleService.peerDiscoveredStream.listen(
+    // Subscribe to transport manager streams (Wi-Fi Aware or BLE)
+    _peerDiscoveredSubscription = _transportManager.peerDiscoveredStream.listen(
       _onBlePeerDiscovered,
     );
 
-    // Subscribe to BLE peer lost stream
-    _peerLostSubscription = _bleService.peerLostStream.listen(
+    _peerLostSubscription = _transportManager.peerLostStream.listen(
       (peerId) => add(PeerLost(peerId)),
     );
 
-    // Subscribe to anchor drop stream
-    _anchorDropSubscription = _bleService.anchorDropReceivedStream.listen(
+    _anchorDropSubscription = _transportManager.anchorDropReceivedStream.listen(
       (drop) => add(AnchorDropSignalReceived(fromPeerId: drop.fromPeerId)),
     );
 
@@ -98,7 +97,7 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
   }
 
   final PeerRepository _peerRepository;
-  final ble.BleServiceInterface _bleService;
+  final TransportManager _transportManager;
   final AnchorDropRepository _anchorDropRepository;
   final NotificationService? _notificationService;
   Timer? _debounceTimer;
@@ -137,8 +136,8 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
   ) async {
     try {
       emit(state.copyWith(isScanning: true));
-      await _bleService.startScanning();
-      Logger.info('BLE scanning started', 'DiscoveryBloc');
+      await _transportManager.startScanning();
+      Logger.info('Discovery scanning started', 'DiscoveryBloc');
     } catch (e) {
       Logger.error('Failed to start BLE scanning', e, null, 'DiscoveryBloc');
       emit(state.copyWith(
@@ -154,9 +153,9 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
     Emitter<DiscoveryState> emit,
   ) async {
     try {
-      await _bleService.stopScanning();
+      await _transportManager.stopScanning();
       emit(state.copyWith(isScanning: false));
-      Logger.info('BLE scanning stopped', 'DiscoveryBloc');
+      Logger.info('Discovery scanning stopped', 'DiscoveryBloc');
     } catch (e) {
       Logger.error('Failed to stop BLE scanning', e, null, 'DiscoveryBloc');
     }
@@ -391,11 +390,11 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
   ) async {
     // Trigger BLE scan to discover new peers
     try {
-      await _bleService.startScanning();
+      await _transportManager.startScanning();
       emit(state.copyWith(isScanning: true));
     } catch (e) {
       Logger.warning(
-          'Could not start BLE scan during refresh: $e', 'DiscoveryBloc');
+          'Could not start scan during refresh: $e', 'DiscoveryBloc');
     }
 
     // Load existing peers from database
@@ -468,7 +467,7 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
     FetchPeerFullPhotos event,
     Emitter<DiscoveryState> emit,
   ) async {
-    await _bleService.fetchFullProfilePhotos(event.peerId);
+    await _transportManager.fetchFullProfilePhotos(event.peerId);
   }
 
   /// User tapped the ⚓ button — send a drop anchor signal via BLE
@@ -488,8 +487,8 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
         ..add(event.peerId);
       emit(state.copyWith(droppedAnchorPeerIds: updated));
 
-      // Best-effort BLE send — peer may not be reachable right now
-      _bleService.sendDropAnchor(event.peerId);
+      // Best-effort send — peer may not be reachable right now
+      _transportManager.sendDropAnchor(event.peerId);
 
       Logger.info('DiscoveryBloc: Anchor dropped on ${event.peerName}', 'Discovery');
     } catch (e) {

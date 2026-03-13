@@ -4,6 +4,7 @@ import 'package:equatable/equatable.dart';
 
 import '../../../core/constants/profile_constants.dart';
 import '../../../data/local_database/database.dart';
+import '../../../services/transport/transport_enums.dart';
 
 enum DiscoveryStatus {
   initial,
@@ -180,6 +181,7 @@ class DiscoveryState extends Equatable {
     this.incomingAnchorDropName,
     this.filterPositionIds = const {},
     this.filterInterestIds = const {},
+    this.activeTransport = TransportType.ble,
   });
 
   final DiscoveryStatus status;
@@ -191,6 +193,8 @@ class DiscoveryState extends Equatable {
   final Set<String> droppedAnchorPeerIds;
   /// Set briefly when a peer drops anchor on us — used to show a SnackBar
   final String? incomingAnchorDropName;
+  /// Which transport layer is currently active.
+  final TransportType activeTransport;
 
   // ── Local-only discovery filters (no BLE impact) ─────────────────────────
 
@@ -253,6 +257,7 @@ class DiscoveryState extends Equatable {
     Object? incomingAnchorDropName = _sentinel,
     Set<int>? filterPositionIds,
     Set<int>? filterInterestIds,
+    TransportType? activeTransport,
   }) {
     return DiscoveryState(
       status: status ?? this.status,
@@ -266,6 +271,7 @@ class DiscoveryState extends Equatable {
           : incomingAnchorDropName as String?,
       filterPositionIds: filterPositionIds ?? this.filterPositionIds,
       filterInterestIds: filterInterestIds ?? this.filterInterestIds,
+      activeTransport: activeTransport ?? this.activeTransport,
     );
   }
 
@@ -280,6 +286,7 @@ class DiscoveryState extends Equatable {
         incomingAnchorDropName,
         filterPositionIds,
         filterInterestIds,
+        activeTransport,
       ];
 }
 

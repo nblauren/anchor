@@ -9,10 +9,14 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
-    <!-- Wi-Fi Direct / Nearby Connections for high-speed photo transfer -->
+    <!-- Wi-Fi Aware (NAN) for peer discovery, messaging, and photo transfer -->
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
-    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" />
+    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES"
+        android:usesPermissionFlags="neverForBody" />
+
+    <!-- Wi-Fi Aware hardware feature (not required — BLE fallback if absent) -->
+    <uses-feature android:name="android.hardware.wifi.aware" android:required="false"/>
 
     <!-- Camera/Gallery for profile photos -->
     <uses-permission android:name="android.permission.CAMERA" />

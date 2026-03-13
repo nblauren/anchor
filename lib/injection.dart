@@ -11,6 +11,8 @@ import 'services/audio_service.dart';
 import 'services/nearby/nearby.dart';
 import 'services/notification_service.dart';
 import 'services/nsfw_detection_service.dart';
+import 'services/transport/transport.dart';
+import 'services/wifi_aware/wifi_aware.dart';
 
 /// Global service locator instance
 final getIt = GetIt.instance;
@@ -61,9 +63,6 @@ Future<void> initializeDependencies({
     Logger.warning('BLE initialization failed: $e', 'DI');
   }
 
-  // High-speed transfer service — lazy init on first use.
-  // Real userId is wired when ChatBloc is created (see below).
-
   // Initialize notification service
   await getIt<NotificationService>().initialize();
 
@@ -71,6 +70,7 @@ Future<void> initializeDependencies({
   getIt.registerLazySingleton<NsfwDetectionService>(() => NsfwDetectorFlutterService());
 
   // High-speed transfer (Wi-Fi Direct via Nearby Connections / Multipeer)
+  // Kept for reference/rollback — no longer actively used by new code path.
   getIt.registerLazySingleton<HighSpeedTransferService>(() {
     if (config.useMockService) {
       Logger.info('Using MockHighSpeedTransferService for testing', 'DI');
@@ -81,6 +81,23 @@ Future<void> initializeDependencies({
     }
   });
 
+  // Wi-Fi Aware transport service
+  getIt.registerLazySingleton<WifiAwareTransportService>(() {
+    if (config.useMockService) {
+      Logger.info('Using MockWifiAwareTransportService for testing', 'DI');
+      return MockWifiAwareTransportService();
+    } else {
+      Logger.info('Using WifiAwareTransportServiceImpl for production', 'DI');
+      return WifiAwareTransportServiceImpl();
+    }
+  });
+
+  // Unified transport manager (Wi-Fi Aware primary, BLE fallback)
+  getIt.registerLazySingleton<TransportManager>(() => TransportManager(
+    wifiAwareService: getIt<WifiAwareTransportService>(),
+    bleService: getIt<BleServiceInterface>(),
+  ));
+
   // Blocs (factories - new instance each time)
   getIt.registerFactory<ProfileBloc>(
     () => ProfileBloc(
@@ -88,13 +105,14 @@ Future<void> initializeDependencies({
       imageService: getIt<ImageService>(),
       bleService: getIt<BleServiceInterface>(),
       nsfwDetectionService: getIt<NsfwDetectionService>(),
+      transportManager: getIt<TransportManager>(),
     ),
   );
 
   getIt.registerFactory<DiscoveryBloc>(
     () => DiscoveryBloc(
       peerRepository: getIt<DatabaseService>().peerRepository,
-      bleService: getIt<BleServiceInterface>(),
+      transportManager: getIt<TransportManager>(),
       anchorDropRepository: getIt<DatabaseService>().anchorDropRepository,
       notificationService: getIt<NotificationService>(),
     ),
@@ -106,7 +124,7 @@ Future<void> initializeDependencies({
       chatRepository: getIt<DatabaseService>().chatRepository,
       peerRepository: getIt<DatabaseService>().peerRepository,
       imageService: getIt<ImageService>(),
-      bleService: getIt<BleServiceInterface>(),
+      transportManager: getIt<TransportManager>(),
       notificationService: getIt<NotificationService>(),
       ownUserId: ownUserId,
       highSpeedTransferService: getIt<HighSpeedTransferService>(),
@@ -130,8 +148,8 @@ Future<void> initializeDependencies({
 
 /// Dispose all dependencies
 Future<void> disposeDependencies() async {
+  await getIt<TransportManager>().dispose();
   await getIt<HighSpeedTransferService>().dispose();
   await getIt<DatabaseService>().close();
-  await getIt<BleServiceInterface>().dispose();
   await getIt.reset();
 }

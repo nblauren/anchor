@@ -1334,6 +1334,15 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "3.0.3"
+  wifi_aware_p2p:
+    dependency: "direct main"
+    description:
+      path: "."
+      ref: main
+      resolved-ref: "9609fc7548ff1b606512fb8fee4d79477c02484e"
+      url: "https://github.com/nblauren/wifi_aware_p2p.git"
+    source: git
+    version: "0.1.0"
   xdg_directories:
     dependency: transitive
     description:

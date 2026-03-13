@@ -43,6 +43,12 @@ dependencies:
       url: https://github.com/AppDev42/flutter_nearby_connections_plus.git
       ref: feature/fix-ios-podspec-module-name-mismatch
 
+  # Wi-Fi Aware (peer-to-peer discovery + messaging + data transfer)
+  wifi_aware_p2p:
+    git:
+      url: https://github.com/nblauren/wifi_aware_p2p.git
+      ref: main
+
   # Audio
   audioplayers: ^6.1.0
 

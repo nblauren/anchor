@@ -2,7 +2,7 @@ import 'package:equatable/equatable.dart';
 
 import '../../../data/local_database/database.dart';
 import '../../../services/ble/ble.dart' as ble;
-import '../../../services/nearby/nearby_models.dart';
+import '../../../services/nearby/nearby.dart';
 import 'chat_state.dart';
 
 abstract class ChatEvent extends Equatable {
@@ -205,9 +205,7 @@ class CancelPhotoTransfer extends ChatEvent {
   List<Object?> get props => [messageId];
 }
 
-// ── Wi-Fi Direct / Nearby transfer events ───────────────────────────────────
-
-/// Nearby transfer progress updated (from HighSpeedTransferService stream).
+/// Nearby Connections transfer progress updated.
 class NearbyTransferProgressUpdated extends ChatEvent {
   const NearbyTransferProgressUpdated(this.progress);
   final NearbyTransferProgress progress;

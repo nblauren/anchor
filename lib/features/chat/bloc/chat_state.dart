@@ -2,7 +2,7 @@ import 'package:equatable/equatable.dart';
 
 import '../../../data/local_database/database.dart';
 import '../../../data/repositories/chat_repository.dart';
-import '../../../services/nearby/nearby_models.dart';
+import '../../../services/transport/transport_enums.dart';
 
 enum ChatStatus {
   initial,
@@ -34,20 +34,28 @@ class PhotoTransferInfo extends Equatable {
     required this.messageId,
     required this.progress,
     required this.isSending,
-    this.transport = TransferTransport.ble,
+    this.transport = TransportType.ble,
   });
 
   final String messageId;
   final double progress; // 0.0 to 1.0
   final bool isSending; // true = sending, false = receiving
   /// Which transport is being used for this transfer.
-  final TransferTransport transport;
+  final TransportType transport;
 
   int get progressPercent => (progress * 100).round();
 
   /// Human-readable transport label for UI.
-  String get transportLabel =>
-      transport == TransferTransport.wifi ? 'Wi-Fi Direct' : 'Bluetooth';
+  String get transportLabel {
+    switch (transport) {
+      case TransportType.wifiAware:
+        return 'Wi-Fi Aware';
+      case TransportType.wifiDirect:
+        return 'Wi-Fi Direct';
+      case TransportType.ble:
+        return 'Bluetooth';
+    }
+  }
 
   @override
   List<Object?> get props => [messageId, progress, isSending, transport];

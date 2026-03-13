@@ -166,9 +166,7 @@ class _PeerListTile extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    peer.age != null
-                        ? '${peer.name}, ${peer.age}'
-                        : peer.name,
+                    peer.age != null ? '${peer.name}, ${peer.age}' : peer.name,
                     style: const TextStyle(
                       fontWeight: FontWeight.w600,
                       fontSize: 15,
@@ -183,9 +181,8 @@ class _PeerListTile extends StatelessWidget {
                         const SizedBox(width: 3),
                         Text(
                           '${peer.hopCount} hop${peer.hopCount == 1 ? '' : 's'}',
-                          style: TextStyle(
-                              fontSize: 11,
-                              color: AppTheme.textHint),
+                          style: const TextStyle(
+                              fontSize: 11, color: AppTheme.textHint),
                         ),
                       ] else if (peer.rssi != null) ...[
                         Icon(Icons.signal_cellular_alt,
@@ -210,8 +207,7 @@ class _PeerListTile extends StatelessWidget {
             ),
 
             const SizedBox(width: 8),
-            const Icon(Icons.chevron_right,
-                size: 18, color: AppTheme.textHint),
+            const Icon(Icons.chevron_right, size: 18, color: AppTheme.textHint),
           ],
         ),
       ),
