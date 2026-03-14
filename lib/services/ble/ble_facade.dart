@@ -904,7 +904,30 @@ class BleFacade implements BleServiceInterface {
         }
       }
 
+      final destinationUserId = _getAppUserIdForPeer(peerId);
+
       if (conn == null || !conn.canSendMessages) {
+        // Direct connection unavailable — try mesh relay as fallback.
+        // The peer may be reachable through an intermediate node (e.g.
+        // A→B→C when C moved out of A's direct range).
+        if (_meshRelay.enabled && _connectionManager.activeConnectionCount > 0) {
+          final data = _serializeMessagePayload(
+            payload,
+            destinationUserId: destinationUserId,
+          );
+          final relayed = _meshRelay.originateMessage(
+            data,
+            destinationUserId ?? '',
+          );
+          if (relayed) {
+            Logger.info(
+              'BleService: Message relayed via mesh for $peerId',
+              'BLE',
+            );
+            return true;
+          }
+        }
+
         Logger.info(
             'BleService: Peer not reachable: $peerId — triggering scan', 'BLE');
         _scanner.triggerImmediateScan();
@@ -913,7 +936,7 @@ class BleFacade implements BleServiceInterface {
 
       final data = _serializeMessagePayload(
         payload,
-        destinationUserId: _getAppUserIdForPeer(peerId),
+        destinationUserId: destinationUserId,
       );
       final success = await _writeQueue.enqueue(
         peerId: peerId,
@@ -964,20 +987,41 @@ class BleFacade implements BleServiceInterface {
         }
       }
 
+      final ownUserId = _gattServer.ownUserId;
+      final destinationUserId = _getAppUserIdForPeer(peerId);
+      final anchorPayload = <String, dynamic>{
+        'type': 'drop_anchor',
+        'sender_id': ownUserId,
+        'timestamp': DateTime.now().toIso8601String(),
+        if (_meshRelay.enabled) ...{
+          'destination_id': destinationUserId ?? '',
+          'ttl': config.meshTtl,
+          'relay_path': <String>[ownUserId],
+        },
+      };
+      final data = Uint8List.fromList(utf8.encode(jsonEncode(anchorPayload)));
+
       if (conn == null || !conn.canSendMessages) {
+        // Direct connection unavailable — try mesh relay
+        if (_meshRelay.enabled && _connectionManager.activeConnectionCount > 0) {
+          final relayed = _meshRelay.originateMessage(
+            data,
+            destinationUserId ?? '',
+          );
+          if (relayed) {
+            Logger.info(
+              'BleService: Anchor drop relayed via mesh for $peerId',
+              'BLE',
+            );
+            return true;
+          }
+        }
+
         Logger.info(
             'BleService: Cannot drop anchor — peer not reachable: $peerId',
             'BLE');
         return false;
       }
-
-      final ownUserId = _gattServer.ownUserId;
-      final anchorPayload = <String, dynamic>{
-        'type': 'drop_anchor',
-        'sender_id': ownUserId,
-        'timestamp': DateTime.now().toIso8601String(),
-      };
-      final data = Uint8List.fromList(utf8.encode(jsonEncode(anchorPayload)));
 
       final success = await _writeQueue.enqueue(
         peerId: peerId,

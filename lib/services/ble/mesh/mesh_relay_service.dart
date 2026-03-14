@@ -102,6 +102,41 @@ class MeshRelayService {
 
   // ==================== Message Relay ====================
 
+  /// Originate a locally-created message into the mesh toward [destinationUserId].
+  ///
+  /// Called by the facade when a direct BLE connection to the peer isn't
+  /// available but the peer may be reachable through an intermediate node.
+  /// Returns true if the message was forwarded to at least one connected peer.
+  bool originateMessage(Uint8List data, String destinationUserId) {
+    if (!_enabled) return false;
+    if (_connectionManager.activeConnectionCount == 0) return false;
+
+    // Directed routing first
+    final bestRelay = findBestRelayPeer(destinationUserId, '');
+    if (bestRelay != null) {
+      _writeRelayData(data, bestRelay);
+      Logger.info(
+        'MeshRelay: Originated message via directed relay for $destinationUserId',
+        'BLE',
+      );
+      return true;
+    }
+
+    // Flood to all connected peers
+    int relayCount = 0;
+    for (final peerId in _connectionManager.connectedPeerIds) {
+      if (!_connectionManager.canSendTo(peerId)) continue;
+      _writeRelayData(data, peerId);
+      relayCount++;
+    }
+
+    Logger.info(
+      'MeshRelay: Originated message, flooded to $relayCount peers',
+      'BLE',
+    );
+    return relayCount > 0;
+  }
+
   /// Relay a message toward its destination via connected peers.
   ///
   /// Uses directed routing (neighbor table) when possible, falls back to
