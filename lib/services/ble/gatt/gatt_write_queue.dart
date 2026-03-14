@@ -241,7 +241,11 @@ class GattWriteQueue {
             request.peripheral,
             request.characteristic,
             value: request.data,
-            type: GATTCharacteristicWriteType.withResponse,
+            // withoutResponse bypasses the CoreBluetooth ATT prepare queue
+            // (CBATTError Code=9 "prepare queue full"). The fff3 characteristic
+            // declares writeWithoutResponse; delivery reliability is handled by
+            // the store-and-forward retry service at a higher level.
+            type: GATTCharacteristicWriteType.withoutResponse,
           );
           if (!request.completer.isCompleted) {
             request.completer.complete(true);

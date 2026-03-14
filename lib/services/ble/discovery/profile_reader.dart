@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:bluetooth_low_energy/bluetooth_low_energy.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/utils/logger.dart';
 import '../connection/connection_manager.dart';
@@ -42,11 +43,16 @@ class ProfileReader {
   ProfileReader({
     required CentralManager central,
     required ConnectionManager connectionManager,
+    SharedPreferences? prefs,
   })  : _central = central,
-        _connectionManager = connectionManager;
+        _connectionManager = connectionManager,
+        _prefs = prefs;
 
   final CentralManager _central;
   final ConnectionManager _connectionManager;
+  final SharedPreferences? _prefs;
+
+  static const _prefsKey = 'thumbnail_received_sizes';
 
   // ==================== Throttling ====================
 
@@ -66,6 +72,35 @@ class ProfileReader {
 
   /// Per-peer thumbnail checksums for dedup.
   final Map<String, int> _peerThumbnailChecksums = {};
+
+  /// Per-peer size of the thumbnail we successfully received.
+  /// Persisted to SharedPreferences so the skip-check survives app restarts.
+  final Map<String, int> _peerThumbnailReceivedSizes = {};
+
+  /// Load previously persisted thumbnail sizes from SharedPreferences.
+  /// Call once after construction (e.g. from BleFacade.initialize).
+  void loadPersistedSizes() {
+    final prefs = _prefs;
+    if (prefs == null) return;
+    final raw = prefs.getString(_prefsKey);
+    if (raw == null) return;
+    try {
+      final map = jsonDecode(raw) as Map<String, dynamic>;
+      for (final entry in map.entries) {
+        _peerThumbnailReceivedSizes[entry.key] = entry.value as int;
+      }
+      Logger.debug(
+        'ProfileReader: Loaded ${map.length} persisted thumbnail sizes',
+        'BLE',
+      );
+    } catch (_) {}
+  }
+
+  void _persistSizes() {
+    final prefs = _prefs;
+    if (prefs == null) return;
+    prefs.setString(_prefsKey, jsonEncode(_peerThumbnailReceivedSizes));
+  }
 
   // ==================== Full-Photo Assembly (fff4) ====================
 
@@ -136,9 +171,16 @@ class ProfileReader {
       );
     }
 
-    // Subscribe to thumbnail char notifications AFTER the profile read
+    // Subscribe to thumbnail char notifications AFTER the profile read.
+    // Skip if we already have the thumbnail and the server reports the same size
+    // (peer hasn't changed their photo). This avoids pushing 60-70KB over BLE
+    // on every 30s re-read cycle.
+    final expectedSize = _thumbnailExpectedSizes[peerId];
+    final alreadyHave = expectedSize != null &&
+        _peerThumbnailReceivedSizes[peerId] == expectedSize;
+
     final thumbnailChar = conn.thumbnailChar;
-    if (thumbnailChar != null) {
+    if (thumbnailChar != null && !alreadyHave) {
       try {
         // Clear any stale buffer so we accumulate a fresh delivery.
         _thumbnailBuffers.remove(peerId);
@@ -166,6 +208,11 @@ class ProfileReader {
           'BLE',
         );
       }
+    } else if (alreadyHave) {
+      Logger.debug(
+        'ProfileReader: Thumbnail already cached for $peerId, skipping re-fetch',
+        'BLE',
+      );
     } else {
       Logger.warning(
         'ProfileReader: No thumbnail char found for $peerId',
@@ -277,7 +324,10 @@ class ProfileReader {
     _lastProfileReadTime.remove(peerId);
     _thumbnailBuffers.remove(peerId);
     _thumbnailExpectedSizes.remove(peerId);
-    _peerThumbnailChecksums.remove(peerId);
+    // _peerThumbnailChecksums and _peerThumbnailReceivedSizes are intentionally
+    // kept across disconnects. If the peer reconnects with the same peerId and
+    // an unchanged thumbnail_size, we skip the re-fetch. If they changed their
+    // photo the size will differ and alreadyHave will be false.
     _peerPhotoSizes.remove(peerId);
     _fullPhotoBuffers.remove(peerId);
     _fullPhotoExpectedSizes.remove(peerId);
@@ -290,6 +340,7 @@ class ProfileReader {
     _thumbnailBuffers.clear();
     _thumbnailExpectedSizes.clear();
     _peerThumbnailChecksums.clear();
+    _peerThumbnailReceivedSizes.clear();
     _peerPhotoSizes.clear();
     _fullPhotoBuffers.clear();
     _fullPhotoExpectedSizes.clear();
@@ -411,6 +462,8 @@ class ProfileReader {
       return;
     }
     _peerThumbnailChecksums[peerId] = newChecksum;
+    _peerThumbnailReceivedSizes[peerId] = thumbnailBytes.length;
+    _persistSizes();
     onThumbnailAssembled?.call(peerId, thumbnailBytes);
   }
 

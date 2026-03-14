@@ -6,6 +6,7 @@ import 'dart:typed_data';
 
 import 'package:bluetooth_low_energy/bluetooth_low_energy.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/utils/logger.dart';
 import 'ble_config.dart';
 import 'ble_models.dart';
@@ -151,10 +152,13 @@ class BleFacade implements BleServiceInterface {
       _scanner.onPeerNeedsProfile = _onScannerPeerNeedsProfile;
 
       // ProfileReader: handles GATT profile reads, thumbnail/photo assembly
+      final prefs = await SharedPreferences.getInstance();
       _profileReader = ProfileReader(
         central: _central,
         connectionManager: _connectionManager,
+        prefs: prefs,
       );
+      _profileReader.loadPersistedSizes();
       _profileReader.onProfileRead = _onProfileReadResult;
       _profileReader.onThumbnailAssembled = _onThumbnailAssembled;
       _profileReader.onPhotosAssembled = _onPhotosAssembled;
@@ -710,20 +714,43 @@ class BleFacade implements BleServiceInterface {
     final photoCount = json['photo_count'] as int?;
     final position = json['pos'] as int?;
     final interests = json['int'] as String?;
+    final newName = json['name'] as String? ?? existingPeer.name;
+    final newAge = json['age'] as int? ?? existingPeer.age;
+    final newBio = json['bio'] as String?;
+    final newPosition = position ?? existingPeer.position;
+    final newInterests = interests ?? existingPeer.interests;
+    final newPhotoCount = photoCount ?? existingPeer.fullPhotoCount;
+
+    // Skip emit if nothing changed — profile is re-read every 30s but rarely changes.
+    final unchanged = newName == existingPeer.name &&
+        newAge == existingPeer.age &&
+        newBio == existingPeer.bio &&
+        newPosition == existingPeer.position &&
+        newInterests == existingPeer.interests &&
+        newPhotoCount == existingPeer.fullPhotoCount;
+
+    if (unchanged) {
+      Logger.debug(
+        'BleService: Profile unchanged for "${existingPeer.name}", skipping emit',
+        'BLE',
+      );
+      return;
+    }
+
     final updatedPeer = DiscoveredPeer(
       peerId: peerId,
-      name: json['name'] as String? ?? existingPeer.name,
-      age: json['age'] as int? ?? existingPeer.age,
-      bio: json['bio'] as String?,
-      position: position ?? existingPeer.position,
-      interests: interests ?? existingPeer.interests,
+      name: newName,
+      age: newAge,
+      bio: newBio,
+      position: newPosition,
+      interests: newInterests,
       thumbnailBytes: existingPeer.thumbnailBytes,
       photoThumbnails: existingPeer.photoThumbnails,
       rssi: existingPeer.rssi,
       timestamp: DateTime.now(),
       isRelayed: existingPeer.isRelayed,
       hopCount: existingPeer.hopCount,
-      fullPhotoCount: photoCount ?? existingPeer.fullPhotoCount,
+      fullPhotoCount: newPhotoCount,
     );
 
     _emitPeer(updatedPeer);

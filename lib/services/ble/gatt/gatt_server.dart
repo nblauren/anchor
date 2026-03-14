@@ -300,6 +300,10 @@ class GattServer {
 
     if (!_peripheralPoweredOn) return;
 
+    // Cancel any in-flight retry polling — state change event is authoritative.
+    _peripheralRetryTimer?.cancel();
+    _peripheralRetryTimer = null;
+
     if (_startCalled && !_isReady) {
       // start() was called but GATT setup failed because peripheral wasn't
       // ready. Retry now that it's powered on.
