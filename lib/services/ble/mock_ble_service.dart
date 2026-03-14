@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:math';
-import 'dart:typed_data';
-
+import 'package:flutter/services.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../core/utils/logger.dart';
@@ -40,6 +39,36 @@ class MockBleService implements BleServiceInterface {
   final Map<String, Timer> _peerTimeoutTimers = {};
   Timer? _mockDiscoveryTimer;
   Timer? _peerLostTimer;
+
+  // Cached avatar bytes, loaded on first discovery
+  final List<Uint8List?> _avatarCache = List.filled(10, null);
+  bool _avatarsLoaded = false;
+
+  static const _mockAvatarPaths = [
+    'assets/mock_avatar/uifaces-human-avatar.jpg',
+    'assets/mock_avatar/uifaces-human-avatar-2.jpg',
+    'assets/mock_avatar/uifaces-human-avatar-3.jpg',
+    'assets/mock_avatar/uifaces-human-avatar-4.jpg',
+    'assets/mock_avatar/uifaces-human-avatar-5.jpg',
+    'assets/mock_avatar/uifaces-human-avatar-6.jpg',
+    'assets/mock_avatar/uifaces-human-avatar-7.jpg',
+    'assets/mock_avatar/uifaces-human-avatar-8.jpg',
+    'assets/mock_avatar/uifaces-human-avatar-9.jpg',
+    'assets/mock_avatar/uifaces-human-avatar-10.jpg',
+  ];
+
+  Future<void> _loadAvatarsIfNeeded() async {
+    if (_avatarsLoaded) return;
+    for (var i = 0; i < _mockAvatarPaths.length; i++) {
+      try {
+        final data = await rootBundle.load(_mockAvatarPaths[i]);
+        _avatarCache[i] = data.buffer.asUint8List();
+      } catch (_) {
+        _avatarCache[i] = null;
+      }
+    }
+    _avatarsLoaded = true;
+  }
 
   // Mock peer data
   static const _mockNames = [
@@ -213,18 +242,20 @@ class MockBleService implements BleServiceInterface {
     var peersDiscovered = 0;
     final totalPeers = 5 + _random.nextInt(6); // 5-10 peers
 
-    _mockDiscoveryTimer = Timer.periodic(
-      Duration(milliseconds: 800 + _random.nextInt(1500)),
-      (timer) {
-        if (!_isScanning || peersDiscovered >= totalPeers) {
-          timer.cancel();
-          return;
-        }
+    _loadAvatarsIfNeeded().then((_) {
+      _mockDiscoveryTimer = Timer.periodic(
+        Duration(milliseconds: 800 + _random.nextInt(1500)),
+        (timer) {
+          if (!_isScanning || peersDiscovered >= totalPeers) {
+            timer.cancel();
+            return;
+          }
 
-        _discoverMockPeer(peersDiscovered);
-        peersDiscovered++;
-      },
-    );
+          _discoverMockPeer(peersDiscovered);
+          peersDiscovered++;
+        },
+      );
+    });
 
     // Periodically update RSSI for visible peers
     _peerLostTimer = Timer.periodic(const Duration(seconds: 5), (_) {
@@ -235,13 +266,14 @@ class MockBleService implements BleServiceInterface {
   void _discoverMockPeer(int index) {
     final peerId = _uuid.v4();
     final nameIndex = index % _mockNames.length;
+    final avatarIndex = nameIndex % _avatarCache.length;
 
     final peer = DiscoveredPeer(
       peerId: peerId,
       name: _mockNames[nameIndex],
       age: 22 + _random.nextInt(15),
       bio: _mockBios[nameIndex],
-      thumbnailBytes: null, // No mock images
+      thumbnailBytes: _avatarCache[avatarIndex],
       rssi: -45 - _random.nextInt(35), // -45 to -80
       timestamp: DateTime.now(),
     );

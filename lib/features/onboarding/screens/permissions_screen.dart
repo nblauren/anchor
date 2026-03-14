@@ -88,6 +88,7 @@ class PermissionsScreen extends StatelessWidget {
 
                   // Skip option (for testing)
                   TextButton(
+                    key: const Key('permissions_skip_btn'),
                     onPressed: onComplete,
                     child: const Text('Skip for now'),
                   ),

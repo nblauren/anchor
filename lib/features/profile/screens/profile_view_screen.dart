@@ -193,6 +193,7 @@ class _ProfileViewScreenState extends State<ProfileViewScreen> {
                 onPressed: () => _showPreviewDialog(state),
               ),
               IconButton(
+                key: const Key('profile_settings_btn'),
                 icon: const Icon(Icons.settings),
                 tooltip: 'Settings',
                 onPressed: () => _openSettings(context),

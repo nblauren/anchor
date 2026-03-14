@@ -392,6 +392,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
       child: Form(
         key: _nameFormKey,
         child: TextFormField(
+          key: const Key('profile_name_field'),
           controller: _nameController,
           decoration: const InputDecoration(
             hintText: 'Enter your name',
@@ -423,6 +424,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
       child: Form(
         key: _ageFormKey,
         child: TextFormField(
+          key: const Key('profile_age_field'),
           controller: _ageController,
           decoration: const InputDecoration(
             hintText: 'Enter your age',
@@ -456,6 +458,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
       showSkip: true,
       isSaving: state.status == ProfileStatus.saving,
       child: TextFormField(
+        key: const Key('profile_bio_field'),
         controller: _bioController,
         decoration: const InputDecoration(
           hintText: 'Write something about yourself...',

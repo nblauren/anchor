@@ -1,0 +1,126 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Flow 05 — Drop Anchor (⚓) feature
+#
+# Covers:   Drop anchor from Discovery grid tile → from Peer detail →
+#           from Chat AppBar → Anchor Drops received list
+# Output:   screenshots/anchor_drop/
+#
+# Prerequisites:
+#   Profile must be set up (run flow 02 first).
+#   Sending a drop requires a live BLE peer. The screenshots below capture
+#   the UI interaction even without an active peer (button tap feedback).
+#
+# Run:
+#   maestro test maestro/flows/05_anchor_drop.yaml \
+#     --output maestro/screenshots
+# ─────────────────────────────────────────────────────────────────────────────
+
+appId: dev.nikkothe.anchor
+
+---
+
+# ── Launch (preserve state) ───────────────────────────────────────────────────
+
+- launchApp
+- waitForAnimationToEnd
+
+# ── Anchor Drops list (entry point from AppBar icon) ─────────────────────────
+
+- tapOn:
+    text: "Discover"
+- waitForAnimationToEnd
+
+# Open Anchor Drops screen via the ⚓ AppBar button
+- tapOn:
+    id: "discovery_anchor_drops_btn"
+    optional: true
+- waitForAnimationToEnd
+
+- takeScreenshot: anchor_drop/01_drops_list_empty
+
+- assertVisible:
+    text: "Anchor Drops"
+- assertVisible:
+    text: "No anchor drops yet"
+    optional: true
+
+# Navigate back to grid
+- back
+- waitForAnimationToEnd
+
+# ── Drop from a peer tile (physical device / debug simulation only) ───────────
+
+# When a peer tile is visible, the ⚓ icon is shown in the bottom-right corner.
+# Tap it to send a drop directly from the grid without opening the detail screen.
+
+- takeScreenshot: anchor_drop/02_discovery_grid
+
+# Long-press grid tile to reveal anchor overlay, or use the direct icon
+# (The ⚓ icon appears as a small overlay on the peer tile)
+- tapOn:
+    id: "peer_tile_anchor_btn"
+    optional: true
+- waitForAnimationToEnd
+- takeScreenshot: anchor_drop/03_drop_sent_from_grid
+
+# ── Drop from Peer detail screen ──────────────────────────────────────────────
+
+# Open first peer tile
+- tapOn:
+    index: 0
+    optional: true
+- waitForAnimationToEnd
+- takeScreenshot: anchor_drop/04_peer_detail
+
+# Tap the Anchor action button (vertical action strip on detail screen)
+- tapOn:
+    text: "Anchor"
+    optional: true
+- waitForAnimationToEnd
+- takeScreenshot: anchor_drop/05_anchor_dropped_state
+
+# Verify the button changes to "Anchored!" after tapping
+- assertVisible:
+    text: "Anchored!"
+    optional: true
+- takeScreenshot: anchor_drop/06_anchored_confirmation
+
+# Navigate back
+- back
+- waitForAnimationToEnd
+
+# ── Drop from Chat AppBar ─────────────────────────────────────────────────────
+
+- tapOn:
+    text: "Messages"
+- waitForAnimationToEnd
+
+# Open first conversation
+- tapOn:
+    index: 0
+    optional: true
+- waitForAnimationToEnd
+- takeScreenshot: anchor_drop/07_chat_screen
+
+# The ⚓ icon in the chat AppBar sends an anchor drop
+- tapOn:
+    id: "chat_anchor_btn"
+    optional: true
+- waitForAnimationToEnd
+- takeScreenshot: anchor_drop/08_drop_sent_from_chat
+
+# Navigate back
+- back
+- waitForAnimationToEnd
+
+# ── Verify Anchor Drops list updated ──────────────────────────────────────────
+
+- tapOn:
+    text: "Discover"
+- waitForAnimationToEnd
+
+- tapOn:
+    id: "discovery_anchor_drops_btn"
+    optional: true
+- waitForAnimationToEnd
+- takeScreenshot: anchor_drop/09_drops_list_final

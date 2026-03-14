@@ -1,0 +1,124 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Flow 04 — Chat list + conversation screen
+#
+# Covers:   Messages tab (empty + list states) → Open conversation →
+#           Send text message → Photo option sheet → Block dialog
+# Output:   screenshots/chat/
+#
+# Prerequisites:
+#   Profile must be set up (run flow 02 first).
+#   For a populated chat list, a real BLE peer exchange must have occurred,
+#   OR use the debug menu to inject a test conversation.
+#
+# Run:
+#   maestro test maestro/flows/04_chat.yaml \
+#     --output maestro/screenshots
+# ─────────────────────────────────────────────────────────────────────────────
+
+appId: dev.nikkothe.anchor
+
+---
+
+# ── Launch (preserve state) ───────────────────────────────────────────────────
+
+- launchApp
+- waitForAnimationToEnd
+
+# ── Messages tab ─────────────────────────────────────────────────────────────
+
+- tapOn:
+    text: "Messages"
+- waitForAnimationToEnd
+
+- assertVisible:
+    text: "Messages"
+- takeScreenshot: chat/01_messages_tab
+
+# Empty state (no conversations yet)
+- assertVisible:
+    text: "No messages yet"
+    optional: true
+- takeScreenshot: chat/02_messages_empty
+
+# ── Open first conversation (if any) ─────────────────────────────────────────
+
+# NOTE: The following steps only run when a conversation exists.
+# They are all marked optional so the flow doesn't fail in CI on a fresh device.
+
+- tapOn:
+    index: 0
+    optional: true
+- waitForAnimationToEnd
+- takeScreenshot: chat/03_conversation_opened
+
+# Verify chat screen UI elements
+- assertVisible:
+    text: "Tap for info"
+    optional: true
+- takeScreenshot: chat/04_chat_appbar
+
+# ── Compose and send a message ───────────────────────────────────────────────
+
+- tapOn:
+    id: "chat_message_input"
+    optional: true
+- tapOn:
+    text: "Type a message..."
+    optional: true
+- inputText: "Hey! 👋"
+- takeScreenshot: chat/05_message_typed
+
+# Send the message
+- tapOn:
+    id: "chat_send_btn"
+    optional: true
+- waitForAnimationToEnd
+- takeScreenshot: chat/06_message_sent
+
+# ── Photo options sheet ──────────────────────────────────────────────────────
+
+- tapOn:
+    id: "chat_photo_btn"
+    optional: true
+- waitForAnimationToEnd
+- takeScreenshot: chat/07_photo_options_sheet
+
+# Verify sheet options
+- assertVisible:
+    text: "Take Photo"
+    optional: true
+- assertVisible:
+    text: "Choose from Gallery"
+    optional: true
+
+# Dismiss sheet without selecting
+- back
+    optional: true
+- waitForAnimationToEnd
+
+# ── More menu → Block dialog ─────────────────────────────────────────────────
+
+# Open the "⋮" more menu in the chat AppBar
+- tapOn:
+    id: "chat_more_menu_btn"
+    optional: true
+- waitForAnimationToEnd
+- takeScreenshot: chat/08_more_menu_open
+
+- tapOn:
+    text: "Block"
+    optional: true
+- waitForAnimationToEnd
+- takeScreenshot: chat/09_block_dialog
+
+# Dismiss dialog without blocking
+- tapOn:
+    text: "Cancel"
+    optional: true
+- waitForAnimationToEnd
+
+# ── Navigate back to list ─────────────────────────────────────────────────────
+
+- back
+- waitForAnimationToEnd
+- takeScreenshot: chat/10_back_to_list

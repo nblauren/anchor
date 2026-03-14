@@ -79,6 +79,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: TextButton(
+                  key: const Key('onboarding_skip_btn'),
                   onPressed: _skip,
                   child: const Text('Skip'),
                 ),
@@ -116,6 +117,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               child: SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
+                  key: const Key('onboarding_next_btn'),
                   onPressed: _nextPage,
                   style: ElevatedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 16),

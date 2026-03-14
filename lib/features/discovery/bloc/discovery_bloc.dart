@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:uuid/uuid.dart';
 
@@ -463,7 +464,7 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
     emit(state.copyWith(status: DiscoveryStatus.loading));
 
     try {
-      final mockPeers = _generateMockPeers();
+      final mockPeers = await _generateMockPeers();
 
       // Save mock peers to database
       for (final mock in mockPeers) {
@@ -645,12 +646,12 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
   }
 
   /// Generate mock peer data for testing
-  List<DiscoveredPeer> _generateMockPeers() {
+  Future<List<DiscoveredPeer>> _generateMockPeers() async {
     const uuid = Uuid();
     final random = Random();
     final now = DateTime.now();
 
-    final names = [
+    const names = [
       'Alex',
       'Jordan',
       'Taylor',
@@ -663,7 +664,7 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
       'Phoenix',
     ];
 
-    final bios = [
+    const bios = [
       'Love hiking and outdoor adventures!',
       'Coffee enthusiast. Dog person.',
       'Traveling the world one city at a time.',
@@ -675,6 +676,31 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
       'Music lover. Concert goer.',
       'Bookworm with a sense of humor.',
     ];
+
+    const avatarPaths = [
+      'assets/mock_avatar/uifaces-human-avatar.jpg',
+      'assets/mock_avatar/uifaces-human-avatar-2.jpg',
+      'assets/mock_avatar/uifaces-human-avatar-3.jpg',
+      'assets/mock_avatar/uifaces-human-avatar-4.jpg',
+      'assets/mock_avatar/uifaces-human-avatar-5.jpg',
+      'assets/mock_avatar/uifaces-human-avatar-6.jpg',
+      'assets/mock_avatar/uifaces-human-avatar-7.jpg',
+      'assets/mock_avatar/uifaces-human-avatar-8.jpg',
+      'assets/mock_avatar/uifaces-human-avatar-9.jpg',
+      'assets/mock_avatar/uifaces-human-avatar-10.jpg',
+    ];
+
+    // Load all avatars in parallel
+    final avatars = await Future.wait(
+      avatarPaths.map((path) async {
+        try {
+          final data = await rootBundle.load(path);
+          return data.buffer.asUint8List();
+        } catch (_) {
+          return null;
+        }
+      }),
+    );
 
     return List.generate(10, (index) {
       // Vary last seen times for testing
@@ -689,7 +715,7 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
         name: names[index],
         age: 22 + random.nextInt(15),
         bio: bios[index],
-        thumbnailData: null, // No mock images
+        thumbnailData: avatars[index],
         lastSeenAt: now.subtract(Duration(minutes: minutesAgo)),
         rssi: -45 - random.nextInt(35), // -45 to -80
         isBlocked: false,

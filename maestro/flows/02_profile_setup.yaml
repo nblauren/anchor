@@ -1,0 +1,209 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Flow 02 — Profile creation (all 7 steps)
+#
+# Covers:   Name → Age → Bio → Position → Interests → Photos → Preview
+# Output:   screenshots/profile/
+#
+# Prerequisites:
+#   iOS simulator:  xcrun simctl addmedia <UDID> /path/to/test_photo.jpg
+#   Android:        adb push /path/to/test_photo.jpg /storage/emulated/0/DCIM/
+#   At least ONE photo must exist in the device gallery before running.
+#
+# Run:
+#   maestro test maestro/flows/02_profile_setup.yaml \
+#     --output maestro/screenshots
+# ─────────────────────────────────────────────────────────────────────────────
+
+appId: dev.nikkothe.anchor
+
+---
+
+# ── Launch + skip onboarding quickly ────────────────────────────────────────
+
+- launchApp:
+    clearState: true
+- waitForAnimationToEnd
+
+# Skip all 4 onboarding pages in one tap (top-right "Skip" button)
+- tapOn:
+    text: "Skip"
+- waitForAnimationToEnd
+
+# Skip BLE permissions
+- tapOn:
+    text: "Skip for now"
+    optional: true
+- waitForAnimationToEnd
+
+# ── Step 1 — Name ─────────────────────────────────────────────────────────
+
+- assertVisible:
+    text: "Create Profile"
+- assertVisible:
+    text: "What's your name?"
+- takeScreenshot: profile/01_name_step
+
+# Use the key added in profile_setup_screen.dart, fall back to hint text
+- tapOn:
+    id: "profile_name_field"
+    optional: true
+- tapOn:
+    text: "Enter your name"
+    optional: true
+- inputText: "Alex"
+- hideKeyboard
+
+- takeScreenshot: profile/02_name_entered
+- tapOn:
+    text: "Continue"
+- waitForAnimationToEnd
+
+# ── Step 2 — Age ──────────────────────────────────────────────────────────
+
+- assertVisible:
+    text: "How old are you?"
+- takeScreenshot: profile/03_age_step
+
+- tapOn:
+    id: "profile_age_field"
+    optional: true
+- tapOn:
+    text: "Enter your age"
+    optional: true
+- inputText: "28"
+- hideKeyboard
+
+- takeScreenshot: profile/04_age_entered
+- tapOn:
+    text: "Continue"
+- waitForAnimationToEnd
+
+# ── Step 3 — Bio ──────────────────────────────────────────────────────────
+
+- assertVisible:
+    text: "Tell us about yourself"
+- takeScreenshot: profile/05_bio_step
+
+- tapOn:
+    id: "profile_bio_field"
+    optional: true
+- tapOn:
+    text: "Write something about yourself..."
+    optional: true
+- inputText: "Here for a good time on the high seas. 🏳️‍🌈"
+- hideKeyboard
+
+- takeScreenshot: profile/06_bio_entered
+- tapOn:
+    text: "Continue"
+- waitForAnimationToEnd
+
+# ── Step 4 — Position ─────────────────────────────────────────────────────
+
+- assertVisible:
+    text: "What's your position?"
+- takeScreenshot: profile/07_position_step
+
+# Select "Versatile" chip
+- tapOn:
+    text: "Versatile"
+- takeScreenshot: profile/08_position_selected
+
+- tapOn:
+    text: "Continue"
+- waitForAnimationToEnd
+
+# ── Step 5 — Interests ────────────────────────────────────────────────────
+
+- assertVisible:
+    text: "What are you into?"
+- takeScreenshot: profile/09_interests_step
+
+- tapOn:
+    text: "Friends/Chat"
+- tapOn:
+    text: "Travel/Adventure"
+- tapOn:
+    text: "Cuddling/Affection"
+
+- takeScreenshot: profile/10_interests_selected
+- tapOn:
+    text: "Continue"
+- waitForAnimationToEnd
+
+# ── Step 6 — Photos ───────────────────────────────────────────────────────
+
+- assertVisible:
+    text: "Add your photos"
+- takeScreenshot: profile/11_photos_step_empty
+
+# Tap the "+" add photo button (PhotoGridWidget)
+# This opens a bottom sheet with camera / gallery options
+- tapOn:
+    text: "Add Photo"
+    optional: true
+# The sheet may render as an icon-only button; try tapping the first cell area
+- tapOn:
+    id: "photo_grid_add_btn"
+    optional: true
+- waitForAnimationToEnd
+
+- takeScreenshot: profile/12_photo_source_sheet
+
+# Choose from Gallery (requires a photo to be pre-seeded in device gallery)
+- tapOn:
+    text: "Choose from Gallery"
+    optional: true
+- waitForAnimationToEnd
+
+# Grant photo library access if prompted
+- tapOn:
+    text: "Allow Access to All Photos"
+    optional: true
+- waitForAnimationToEnd
+- tapOn:
+    text: "Allow"
+    optional: true
+- waitForAnimationToEnd
+
+# Select the first photo in the gallery
+- tapOn:
+    index: 0
+    optional: true
+- waitForAnimationToEnd
+
+- takeScreenshot: profile/13_photo_added
+
+# "Preview Profile" only becomes active when photos are present
+- tapOn:
+    text: "Preview Profile"
+- waitForAnimationToEnd
+
+# ── Step 7 — Preview ──────────────────────────────────────────────────────
+
+- assertVisible:
+    text: "Looking good!"
+- assertVisible:
+    text: "Alex"
+- takeScreenshot: profile/14_preview_step
+
+# Verify profile fields are shown
+- assertVisible:
+    text: "28"
+    optional: true
+- assertVisible:
+    text: "Versatile"
+    optional: true
+
+- takeScreenshot: profile/15_preview_with_details
+
+# Finish setup and enter the app
+- tapOn:
+    text: "Start Discovering"
+- waitForAnimationToEnd
+
+# ── Confirm home screen loads ─────────────────────────────────────────────
+
+- assertVisible:
+    text: "Discover"
+- takeScreenshot: profile/16_home_after_setup

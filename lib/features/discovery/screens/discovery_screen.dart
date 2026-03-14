@@ -153,40 +153,12 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
       builder: (context, state) {
         return Scaffold(
           appBar: AppBar(
+            centerTitle: false,
             title: const Text('Discover'),
             actions: [
-              // Peer count badge
-              if (state.hasPeers)
-                Container(
-                  margin: const EdgeInsets.only(right: 4),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: AppTheme.primaryLight.withValues(alpha: 0.2),
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(
-                        Icons.bluetooth_connected,
-                        size: 14,
-                        color: AppTheme.primaryLight,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        _peerCountLabel(state),
-                        style: const TextStyle(
-                          color: AppTheme.primaryLight,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
               // Anchor drops page
               IconButton(
+                key: const Key('discovery_anchor_drops_btn'),
                 icon: const Icon(Icons.anchor_rounded),
                 tooltip: 'Anchor Drops',
                 onPressed: () {
@@ -196,8 +168,7 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                         providers: [
                           BlocProvider.value(
                               value: context.read<DiscoveryBloc>()),
-                          BlocProvider.value(
-                              value: context.read<ChatBloc>()),
+                          BlocProvider.value(value: context.read<ChatBloc>()),
                         ],
                         child: AnchorDropsScreen(
                           anchorDropRepository:
@@ -210,6 +181,7 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
               ),
               // View mode toggle: Grid / Radar
               IconButton(
+                key: const Key('discovery_view_toggle_btn'),
                 icon: Icon(
                   _viewMode == _ViewMode.grid
                       ? Icons.radar
@@ -229,6 +201,7 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                 Stack(
                   children: [
                     IconButton(
+                      key: const Key('discovery_filter_btn'),
                       icon: const Icon(Icons.tune_rounded),
                       tooltip: 'Filter',
                       onPressed: () => _showFilterSheet(context, state),
@@ -248,12 +221,6 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                       ),
                   ],
                 ),
-              // Debug: Load mock data
-              IconButton(
-                icon: const Icon(Icons.bug_report),
-                tooltip: 'Load mock data',
-                onPressed: _loadMockData,
-              ),
             ],
           ),
           body: _buildBody(state),
@@ -327,8 +294,7 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                         },
                         childCount: state.visiblePeers.length,
                       ),
-                      gridDelegate:
-                          SliverGridDelegateWithFixedCrossAxisCount(
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: crossAxisCount,
                         childAspectRatio: 1,
                         crossAxisSpacing: 12,
@@ -372,7 +338,8 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       child: Row(
         children: [
-          const Icon(Icons.tune_rounded, size: 14, color: AppTheme.primaryLight),
+          const Icon(Icons.tune_rounded,
+              size: 14, color: AppTheme.primaryLight),
           const SizedBox(width: 6),
           Expanded(
             child: Wrap(
@@ -507,13 +474,6 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 24),
-                    // Debug button
-                    OutlinedButton.icon(
-                      onPressed: _loadMockData,
-                      icon: const Icon(Icons.bug_report, size: 18),
-                      label: const Text('Load test data'),
-                    ),
                   ],
                 ),
               ),
@@ -576,8 +536,7 @@ class _RadarBatteryBanner extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       child: Row(
         children: [
-          const Icon(Icons.battery_alert,
-              size: 16, color: AppTheme.warning),
+          const Icon(Icons.battery_alert, size: 16, color: AppTheme.warning),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
@@ -626,8 +585,8 @@ class _FilterChip extends StatelessWidget {
           const SizedBox(width: 4),
           GestureDetector(
             onTap: onRemove,
-            child: const Icon(Icons.close,
-                size: 12, color: AppTheme.primaryLight),
+            child:
+                const Icon(Icons.close, size: 12, color: AppTheme.primaryLight),
           ),
         ],
       ),
@@ -736,8 +695,7 @@ class _FilterSheet extends StatelessWidget {
                     return FilterChip(
                       label: Text(e.value),
                       selected: selected,
-                      onSelected: (_) =>
-                          bloc.add(TogglePositionFilter(e.key)),
+                      onSelected: (_) => bloc.add(TogglePositionFilter(e.key)),
                       selectedColor: AppTheme.primaryLight.withAlpha(51),
                       labelStyle: TextStyle(
                         color: selected
@@ -785,8 +743,7 @@ class _FilterSheet extends StatelessWidget {
                   return FilterChip(
                     label: Text(e.value),
                     selected: selected,
-                    onSelected: (_) =>
-                        bloc.add(ToggleInterestFilter(e.key)),
+                    onSelected: (_) => bloc.add(ToggleInterestFilter(e.key)),
                     selectedColor: AppTheme.primaryLight.withAlpha(51),
                     checkmarkColor: AppTheme.primaryLight,
                     backgroundColor: AppTheme.darkCard,
@@ -798,8 +755,7 @@ class _FilterSheet extends StatelessWidget {
                           selected ? FontWeight.w600 : FontWeight.normal,
                     ),
                     side: BorderSide(
-                      color:
-                          selected ? AppTheme.primaryLight : Colors.white24,
+                      color: selected ? AppTheme.primaryLight : Colors.white24,
                     ),
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(20)),

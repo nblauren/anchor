@@ -1,0 +1,143 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Flow 03 — Discovery grid, radar view, filters, peer detail
+#
+# Covers:   Discovery grid (empty + populated states) → Radar toggle →
+#           Filter sheet → Peer detail screen
+# Output:   screenshots/discovery/
+#
+# Prerequisites:
+#   Profile must be set up. Run flow 02 first, OR run without clearState
+#   so the profile from a previous session persists.
+#   For peer screenshots, run on a physical device with another Anchor user
+#   nearby, OR use the debug menu to simulate peers.
+#
+# Run:
+#   maestro test maestro/flows/03_discovery.yaml \
+#     --output maestro/screenshots
+# ─────────────────────────────────────────────────────────────────────────────
+
+appId: dev.nikkothe.anchor
+
+---
+
+# ── Launch (preserve existing profile state) ─────────────────────────────────
+
+- launchApp
+- waitForAnimationToEnd
+
+# ── Discovery tab (default tab) ──────────────────────────────────────────────
+
+# Ensure we're on Discover tab
+- tapOn:
+    text: "Discover"
+- waitForAnimationToEnd
+
+- takeScreenshot: discovery/01_grid_initial
+
+# ── Empty state ───────────────────────────────────────────────────────────────
+
+# When no peers are nearby, show empty state copy
+- assertVisible:
+    text: "No one nearby"
+    optional: true
+- takeScreenshot: discovery/02_empty_state
+
+# ── Filter sheet ─────────────────────────────────────────────────────────────
+
+# Open filter sheet (funnel icon, grid mode only)
+# Fall back to accessibility label if icon selector is unsupported
+- tapOn:
+    id: "discovery_filter_btn"
+    optional: true
+- waitForAnimationToEnd
+- takeScreenshot: discovery/03_filter_sheet
+
+# Tap a position filter chip
+- tapOn:
+    text: "Versatile"
+    optional: true
+- tapOn:
+    text: "Top"
+    optional: true
+- takeScreenshot: discovery/04_filter_chip_selected
+
+# Tap an interest chip
+- tapOn:
+    text: "Travel/Adventure"
+    optional: true
+- takeScreenshot: discovery/05_filter_interest_selected
+
+# Confirm / close filter sheet
+- tapOn:
+    text: "Done"
+    optional: true
+- waitForAnimationToEnd
+- takeScreenshot: discovery/06_filter_active_strip
+
+# Clear filters
+- tapOn:
+    text: "Clear all"
+    optional: true
+- waitForAnimationToEnd
+
+# ── Radar / grid toggle ──────────────────────────────────────────────────────
+
+# Toggle to radar view (radar icon in AppBar)
+- tapOn:
+    id: "discovery_view_toggle_btn"
+    optional: true
+- waitForAnimationToEnd
+- takeScreenshot: discovery/07_radar_view
+
+# Toggle back to grid view
+- tapOn:
+    id: "discovery_view_toggle_btn"
+    optional: true
+- waitForAnimationToEnd
+- takeScreenshot: discovery/08_grid_view_restored
+
+# ── Anchor Drops screen ───────────────────────────────────────────────────────
+
+# Tap the anchor icon in AppBar to open Anchor Drops list
+- tapOn:
+    id: "discovery_anchor_drops_btn"
+    optional: true
+- waitForAnimationToEnd
+
+- takeScreenshot: discovery/09_anchor_drops_screen
+
+# Empty state when no drops received yet
+- assertVisible:
+    text: "No anchor drops yet"
+    optional: true
+- takeScreenshot: discovery/10_anchor_drops_empty
+
+# Navigate back
+- back
+- waitForAnimationToEnd
+
+# ── Peer detail (physical device / debug simulation only) ─────────────────────
+
+# NOTE: The steps below only execute when at least one peer tile is visible.
+# On a simulator with no BLE peers, they will be skipped gracefully.
+
+# Tap the first peer tile in the grid
+- tapOn:
+    index: 0
+    optional: true
+- waitForAnimationToEnd
+- takeScreenshot: discovery/11_peer_detail
+
+# Verify key sections visible on detail screen
+- assertVisible:
+    text: "Message"
+    optional: true
+- assertVisible:
+    text: "Anchor"
+    optional: true
+- takeScreenshot: discovery/12_peer_detail_actions
+
+# Navigate back to grid
+- back
+- waitForAnimationToEnd
+- takeScreenshot: discovery/13_back_to_grid

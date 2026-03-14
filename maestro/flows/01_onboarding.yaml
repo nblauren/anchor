@@ -1,0 +1,106 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Flow 01 — Onboarding intro + BLE permissions
+#
+# Covers:   Splash → 4 onboarding pages → Permissions screen
+# Output:   screenshots/onboarding/
+#
+# Run:
+#   maestro test maestro/flows/01_onboarding.yaml \
+#     --output maestro/screenshots
+# ─────────────────────────────────────────────────────────────────────────────
+
+appId: dev.nikkothe.anchor
+
+---
+
+# ── Launch ────────────────────────────────────────────────────────────────────
+
+- launchApp:
+    clearState: true
+
+# Brief splash while app checks onboarding status
+- waitForAnimationToEnd
+- takeScreenshot: onboarding/01_splash
+
+# ── Page 1: Discover Nearby ────────────────────────────────────────────────
+
+- assertVisible:
+    text: "Discover Nearby"
+- takeScreenshot: onboarding/02_discover_nearby
+
+- tapOn:
+    text: "Next"
+- waitForAnimationToEnd
+
+# ── Page 2: Chat Offline ──────────────────────────────────────────────────
+
+- assertVisible:
+    text: "Chat Offline"
+- takeScreenshot: onboarding/03_chat_offline
+
+- tapOn:
+    text: "Next"
+- waitForAnimationToEnd
+
+# ── Page 3: Stay Private ──────────────────────────────────────────────────
+
+- assertVisible:
+    text: "Stay Private"
+- takeScreenshot: onboarding/04_stay_private
+
+- tapOn:
+    text: "Next"
+- waitForAnimationToEnd
+
+# ── Page 4: Keep Anchor Open ─────────────────────────────────────────────
+
+- assertVisible:
+    text: "Keep Anchor Open"
+- takeScreenshot: onboarding/05_keep_anchor_open
+
+# Last page shows "Get Started" instead of "Next"
+- tapOn:
+    text: "Get Started"
+- waitForAnimationToEnd
+
+# ── Permissions screen ────────────────────────────────────────────────────
+
+# Default state shows "Enable Bluetooth" or "Grant Permissions"
+- takeScreenshot: onboarding/06_permissions_screen
+
+# Attempt to request BLE permissions (triggers OS dialog)
+- tapOn:
+    text: "Grant Permissions"
+    optional: true
+- waitForAnimationToEnd
+
+# Handle iOS system Bluetooth permission dialog
+- tapOn:
+    text: "Allow"
+    optional: true
+- waitForAnimationToEnd
+
+# Handle iOS "Allow While Using App" variant
+- tapOn:
+    text: "Allow While Using App"
+    optional: true
+- waitForAnimationToEnd
+
+# Handle Android permission dialogs
+- tapOn:
+    text: "While using the app"
+    optional: true
+- waitForAnimationToEnd
+
+- takeScreenshot: onboarding/07_permissions_after_grant
+
+# Skip BLE setup (valid for CI/emulator runs where BLE is unavailable)
+- tapOn:
+    text: "Skip for now"
+    optional: true
+- waitForAnimationToEnd
+
+# ── Confirm we've exited onboarding ──────────────────────────────────────
+
+# Either lands on profile setup ("Create Profile") or home if profile exists
+- takeScreenshot: onboarding/08_post_onboarding

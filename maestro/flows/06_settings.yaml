@@ -1,0 +1,132 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Flow 06 — Settings screen
+#
+# Covers:   Profile tab → Settings icon → Battery Saver toggle →
+#           Mesh Relay toggle → Visible to Others toggle →
+#           Blocked Users (empty) → Debug Menu → Back to Profile
+# Output:   screenshots/settings/
+#
+# Prerequisites:
+#   Profile must be set up (run flow 02 first).
+#
+# Run:
+#   maestro test maestro/flows/06_settings.yaml \
+#     --output maestro/screenshots
+# ─────────────────────────────────────────────────────────────────────────────
+
+appId: dev.nikkothe.anchor
+
+---
+
+# ── Launch (preserve state) ───────────────────────────────────────────────────
+
+- launchApp
+- waitForAnimationToEnd
+
+# ── Profile tab ───────────────────────────────────────────────────────────────
+
+- tapOn:
+    text: "Profile"
+- waitForAnimationToEnd
+- takeScreenshot: settings/01_profile_tab
+
+# ── Open Settings via AppBar icon ─────────────────────────────────────────────
+
+# The Settings icon (⚙) is in the ProfileViewScreen AppBar
+- tapOn:
+    id: "profile_settings_btn"
+    optional: true
+- waitForAnimationToEnd
+- takeScreenshot: settings/02_settings_screen
+
+# Verify major sections visible
+- assertVisible:
+    text: "Battery Saver Mode"
+- assertVisible:
+    text: "Visible to Others"
+- assertVisible:
+    text: "Mesh Relay"
+- takeScreenshot: settings/03_settings_sections
+
+# ── Discovery toggles ─────────────────────────────────────────────────────────
+
+# Toggle Battery Saver Mode ON
+- tapOn:
+    text: "Battery Saver Mode"
+- waitForAnimationToEnd
+- takeScreenshot: settings/04_battery_saver_on
+
+# Toggle Battery Saver Mode OFF (restore original state)
+- tapOn:
+    text: "Battery Saver Mode"
+- waitForAnimationToEnd
+- takeScreenshot: settings/05_battery_saver_off
+
+# Toggle Visible to Others OFF
+- tapOn:
+    text: "Visible to Others"
+- waitForAnimationToEnd
+- takeScreenshot: settings/06_invisible_mode
+
+# Restore Visible to Others ON
+- tapOn:
+    text: "Visible to Others"
+- waitForAnimationToEnd
+
+# Toggle Mesh Relay OFF
+- tapOn:
+    text: "Mesh Relay"
+- waitForAnimationToEnd
+- takeScreenshot: settings/07_mesh_relay_off
+
+# Restore Mesh Relay ON
+- tapOn:
+    text: "Mesh Relay"
+- waitForAnimationToEnd
+
+# ── Blocked Users ─────────────────────────────────────────────────────────────
+
+- tapOn:
+    text: "Blocked Users"
+- waitForAnimationToEnd
+- takeScreenshot: settings/08_blocked_users
+
+# Navigate back to settings
+- back
+- waitForAnimationToEnd
+
+# ── Debug Menu ────────────────────────────────────────────────────────────────
+
+- tapOn:
+    text: "Debug Menu"
+- waitForAnimationToEnd
+- takeScreenshot: settings/09_debug_menu
+
+# Navigate back
+- back
+- waitForAnimationToEnd
+
+# ── App version / About ───────────────────────────────────────────────────────
+
+- assertVisible:
+    text: "App Version"
+- assertVisible:
+    text: "Connect. Offline. Together."
+- takeScreenshot: settings/10_settings_footer
+
+# ── Edit Profile ──────────────────────────────────────────────────────────────
+
+- tapOn:
+    text: "Edit Profile"
+- waitForAnimationToEnd
+- takeScreenshot: settings/11_edit_profile
+
+# Verify edit mode renders
+- assertVisible:
+    text: "Edit Profile"
+
+# Navigate back without saving
+- back
+    optional: true
+- waitForAnimationToEnd
+- takeScreenshot: settings/12_back_to_settings

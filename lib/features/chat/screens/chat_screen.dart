@@ -312,6 +312,7 @@ class _ChatScreenState extends State<ChatScreen> {
               // Drop Anchor button
               if (!state.isBlocked)
                 IconButton(
+                  key: const Key('chat_anchor_btn'),
                   onPressed: _anchorDropped ? null : _dropAnchor,
                   icon: Icon(
                     Icons.anchor,
@@ -322,6 +323,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   tooltip: _anchorDropped ? 'Anchor dropped!' : 'Drop anchor',
                 ),
               PopupMenuButton<String>(
+                key: const Key('chat_more_menu_btn'),
                 icon: const Icon(Icons.more_vert),
                 onSelected: (value) {
                   if (value == 'block') {
@@ -537,6 +539,7 @@ class _ChatScreenState extends State<ChatScreen> {
         children: [
           // Photo button
           IconButton(
+            key: const Key('chat_photo_btn'),
             onPressed: _showPhotoOptions,
             icon: const Icon(Icons.photo),
             color: AppTheme.textSecondary,
@@ -545,6 +548,7 @@ class _ChatScreenState extends State<ChatScreen> {
           // Text input
           Expanded(
             child: TextField(
+              key: const Key('chat_message_input'),
               controller: _messageController,
               focusNode: _focusNode,
               decoration: InputDecoration(
@@ -573,6 +577,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
           // Send button
           IconButton(
+            key: const Key('chat_send_btn'),
             onPressed: _sendMessage,
             icon: const Icon(Icons.send),
             color: AppTheme.primaryLight,
