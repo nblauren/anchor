@@ -5,7 +5,7 @@ import 'ble_models.dart';
 /// Abstract BLE service interface for offline peer-to-peer communication.
 ///
 /// Implemented by:
-///   - [FlutterBluePlusBleService] — production, uses the `bluetooth_low_energy`
+///   - [BleFacade] — production, uses the `bluetooth_low_energy`
 ///     package (central + peripheral in one API, supports both iOS and Android).
 ///   - [MockBleService] — test double for unit/widget tests without hardware.
 ///

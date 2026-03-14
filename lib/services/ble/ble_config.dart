@@ -1,6 +1,6 @@
 /// Runtime configuration for the Anchor BLE service.
 ///
-/// Shared between [FlutterBluePlusBleService] (production, uses
+/// Shared between [BleFacade] (production, uses
 /// `bluetooth_low_energy`) and [MockBleService] (tests).
 ///
 /// Use [BleConfig.development] in unit/widget tests and

@@ -314,19 +314,21 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         return;
       }
 
-      // Peer not reachable — wait for the triggered scan to find them,
-      // then retry (up to maxRetries).
+      // Peer not reachable — schedule a retry WITHOUT blocking the queue.
+      // This lets other queued sends proceed immediately.
       if (attempt < maxRetries) {
         Logger.info(
           'ChatBloc: Send attempt $attempt failed for ${peerId.substring(0, 8)}, '
-              'retrying in ${attempt * 3}s...',
+              'will retry in ${attempt * 3}s...',
           'Chat',
         );
-        await Future<void>.delayed(Duration(seconds: attempt * 3));
-        if (!isClosed) {
-          await _sendTextInBackground(message, peerId, attempt: attempt + 1);
-          return;
-        }
+        Future<void>.delayed(Duration(seconds: attempt * 3), () {
+          if (!isClosed) {
+            _enqueueSend(
+                () => _sendTextInBackground(message, peerId, attempt: attempt + 1));
+          }
+        });
+        return;
       }
 
       add(MessageStatusUpdated(
@@ -417,23 +419,23 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         ),
       ));
 
-      // 4. Send lightweight notification (no thumbnail) — retry up to 3 times.
-      var previewSent = false;
-      for (var attempt = 1; attempt <= 3; attempt++) {
-        previewSent = await _transportManager.sendPhotoPreview(
-          peerId: peerId,
+      // 4. Send lightweight notification (no thumbnail).
+      final previewSent = await _transportManager.sendPhotoPreview(
+        peerId: peerId,
+        messageId: message.id,
+        photoId: photoId,
+        thumbnailBytes: Uint8List(0),
+        originalSize: blePhotoBytes.length,
+      );
+
+      if (!previewSent && !isClosed) {
+        // Schedule retry without blocking the queue
+        add(MessageStatusUpdated(
           messageId: message.id,
-          photoId: photoId,
-          thumbnailBytes: Uint8List(0),
-          originalSize: blePhotoBytes.length,
-        );
-        if (previewSent || isClosed) break;
-        Logger.info(
-          'ChatBloc: Photo preview send attempt $attempt failed, '
-              'retrying in ${attempt * 3}s...',
-          'Chat',
-        );
-        await Future<void>.delayed(Duration(seconds: attempt * 3));
+          status: MessageStatus.failed,
+        ));
+        add(const LoadConversations());
+        return;
       }
 
       add(MessageStatusUpdated(
@@ -1034,23 +1036,13 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         ),
       ));
 
-      var success = false;
-      for (var attempt = 1; attempt <= 3; attempt++) {
-        success = await _transportManager.sendPhotoPreview(
-          peerId: peerId,
-          messageId: message.id,
-          photoId: photoId,
-          thumbnailBytes: Uint8List(0),
-          originalSize: bleBytes.length,
-        );
-        if (success || isClosed) break;
-        Logger.info(
-          'ChatBloc: Photo retry attempt $attempt failed, '
-              'retrying in ${attempt * 3}s...',
-          'Chat',
-        );
-        await Future<void>.delayed(Duration(seconds: attempt * 3));
-      }
+      final success = await _transportManager.sendPhotoPreview(
+        peerId: peerId,
+        messageId: message.id,
+        photoId: photoId,
+        thumbnailBytes: Uint8List(0),
+        originalSize: bleBytes.length,
+      );
 
       add(MessageStatusUpdated(
         messageId: message.id,

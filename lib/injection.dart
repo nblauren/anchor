@@ -46,8 +46,8 @@ Future<void> initializeDependencies({
       Logger.info('Using MockBleService for testing', 'DI');
       return MockBleService();
     } else {
-      Logger.info('Using FlutterBluePlusBleService for production', 'DI');
-      return FlutterBluePlusBleService(config: config);
+      Logger.info('Using BleFacade for production', 'DI');
+      return BleFacade(config: config);
     }
   });
 
@@ -70,7 +70,8 @@ Future<void> initializeDependencies({
   getIt.registerLazySingleton<NsfwDetectionService>(() => NsfwDetectorFlutterService());
 
   // High-speed transfer (Wi-Fi Direct via Nearby Connections / Multipeer)
-  // Kept for reference/rollback — no longer actively used by new code path.
+  // Android: Nearby Connections (Wi-Fi Direct)
+  // iOS: Multipeer Connectivity (via flutter_nearby_connections_plus)
   getIt.registerLazySingleton<HighSpeedTransferService>(() {
     if (config.useMockService) {
       Logger.info('Using MockHighSpeedTransferService for testing', 'DI');
