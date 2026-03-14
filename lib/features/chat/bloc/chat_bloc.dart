@@ -14,6 +14,7 @@ import '../../../data/repositories/peer_repository.dart';
 import '../../../services/ble/ble.dart' as ble;
 import '../../../services/image_service.dart';
 import '../../../services/nearby/nearby.dart';
+import '../../../services/store_and_forward_service.dart';
 import '../../../services/transport/transport.dart';
 import 'chat_event.dart';
 import 'chat_state.dart';
@@ -27,6 +28,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     required NotificationService notificationService,
     required String ownUserId,
     HighSpeedTransferService? highSpeedTransferService,
+    StoreAndForwardService? storeAndForwardService,
   })  : _chatRepository = chatRepository,
         _peerRepository = peerRepository,
         _imageService = imageService,
@@ -34,6 +36,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         _notificationService = notificationService,
         _ownUserId = ownUserId,
         _highSpeedService = highSpeedTransferService,
+        _storeAndForwardService = storeAndForwardService,
         super(const ChatState()) {
     on<LoadConversations>(_onLoadConversations);
     on<OpenConversation>(_onOpenConversation);
@@ -127,6 +130,26 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         (payload) => add(NearbyPayloadCompleted(payload)),
       );
     }
+
+    // Subscribe to background delivery updates from StoreAndForwardService
+    // so the open conversation UI refreshes without requiring a reload.
+    final storeForward = _storeAndForwardService;
+    if (storeForward != null) {
+      // Re-initialize in case the service deferred init (profile was created
+      // after the first app startup call).
+      storeForward.initialize();
+
+      _storeForwardSubscription = storeForward.messageStatusStream.listen(
+        (update) {
+          if (!isClosed) {
+            add(MessageStatusUpdated(
+              messageId: update.messageId,
+              status: update.status,
+            ));
+          }
+        },
+      );
+    }
   }
 
   final ChatRepository _chatRepository;
@@ -136,6 +159,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   final NotificationService _notificationService;
   final String _ownUserId;
   final HighSpeedTransferService? _highSpeedService;
+  final StoreAndForwardService? _storeAndForwardService;
 
   // Transport manager subscriptions
   StreamSubscription<ble.ReceivedMessage>? _messageSubscription;
@@ -153,6 +177,9 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   // Nearby / Wi-Fi Direct subscriptions
   StreamSubscription<NearbyTransferProgress>? _nearbyProgressSubscription;
   StreamSubscription<NearbyPayloadReceived>? _nearbyPayloadSubscription;
+
+  // Store-and-forward delivery update subscription
+  StreamSubscription<MessageDeliveryUpdate>? _storeForwardSubscription;
 
   // Metadata from BLE signal for pending Wi-Fi Direct preview transfers.
   // Keyed by photoId (without 'preview-' prefix).
@@ -1000,6 +1027,8 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
             photoPath: msg.photoPath,
             status: event.status,
             createdAt: msg.createdAt,
+            retryCount: msg.retryCount,
+            lastAttemptAt: msg.lastAttemptAt,
           );
         }
         return msg;
@@ -1040,6 +1069,8 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
             photoPath: msg.photoPath,
             status: MessageStatus.pending,
             createdAt: msg.createdAt,
+            retryCount: msg.retryCount,
+            lastAttemptAt: msg.lastAttemptAt,
           );
         }
         return msg;
@@ -1738,6 +1769,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     _nearbyProgressSubscription?.cancel();
     _nearbyPayloadSubscription?.cancel();
     _reactionSubscription?.cancel();
+    _storeForwardSubscription?.cancel();
     for (final timer in _photoDownloadTimers.values) {
       timer.cancel();
     }

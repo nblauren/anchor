@@ -1721,6 +1721,20 @@ class $MessagesTable extends Messages
   late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
       'created_at', aliasedName, false,
       type: DriftSqlType.dateTime, requiredDuringInsert: true);
+  static const VerificationMeta _retryCountMeta =
+      const VerificationMeta('retryCount');
+  @override
+  late final GeneratedColumn<int> retryCount = GeneratedColumn<int>(
+      'retry_count', aliasedName, false,
+      type: DriftSqlType.int,
+      requiredDuringInsert: false,
+      defaultValue: const Constant(0));
+  static const VerificationMeta _lastAttemptAtMeta =
+      const VerificationMeta('lastAttemptAt');
+  @override
+  late final GeneratedColumn<DateTime> lastAttemptAt =
+      GeneratedColumn<DateTime>('last_attempt_at', aliasedName, true,
+          type: DriftSqlType.dateTime, requiredDuringInsert: false);
   @override
   List<GeneratedColumn> get $columns => [
         id,
@@ -1730,7 +1744,9 @@ class $MessagesTable extends Messages
         textContent,
         photoPath,
         status,
-        createdAt
+        createdAt,
+        retryCount,
+        lastAttemptAt
       ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -1779,6 +1795,18 @@ class $MessagesTable extends Messages
     } else if (isInserting) {
       context.missing(_createdAtMeta);
     }
+    if (data.containsKey('retry_count')) {
+      context.handle(
+          _retryCountMeta,
+          retryCount.isAcceptableOrUnknown(
+              data['retry_count']!, _retryCountMeta));
+    }
+    if (data.containsKey('last_attempt_at')) {
+      context.handle(
+          _lastAttemptAtMeta,
+          lastAttemptAt.isAcceptableOrUnknown(
+              data['last_attempt_at']!, _lastAttemptAtMeta));
+    }
     return context;
   }
 
@@ -1806,6 +1834,10 @@ class $MessagesTable extends Messages
           .read(DriftSqlType.string, data['${effectivePrefix}status'])!),
       createdAt: attachedDatabase.typeMapping
           .read(DriftSqlType.dateTime, data['${effectivePrefix}created_at'])!,
+      retryCount: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}retry_count'])!,
+      lastAttemptAt: attachedDatabase.typeMapping.read(
+          DriftSqlType.dateTime, data['${effectivePrefix}last_attempt_at']),
     );
   }
 
@@ -1830,6 +1862,12 @@ class MessageEntry extends DataClass implements Insertable<MessageEntry> {
   final String? photoPath;
   final MessageStatus status;
   final DateTime createdAt;
+
+  /// Cross-session retry counter (incremented by StoreAndForwardService).
+  final int retryCount;
+
+  /// Timestamp of the last cross-session delivery attempt. null = never retried.
+  final DateTime? lastAttemptAt;
   const MessageEntry(
       {required this.id,
       required this.conversationId,
@@ -1838,7 +1876,9 @@ class MessageEntry extends DataClass implements Insertable<MessageEntry> {
       this.textContent,
       this.photoPath,
       required this.status,
-      required this.createdAt});
+      required this.createdAt,
+      required this.retryCount,
+      this.lastAttemptAt});
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
@@ -1860,6 +1900,10 @@ class MessageEntry extends DataClass implements Insertable<MessageEntry> {
           Variable<String>($MessagesTable.$converterstatus.toSql(status));
     }
     map['created_at'] = Variable<DateTime>(createdAt);
+    map['retry_count'] = Variable<int>(retryCount);
+    if (!nullToAbsent || lastAttemptAt != null) {
+      map['last_attempt_at'] = Variable<DateTime>(lastAttemptAt);
+    }
     return map;
   }
 
@@ -1877,6 +1921,10 @@ class MessageEntry extends DataClass implements Insertable<MessageEntry> {
           : Value(photoPath),
       status: Value(status),
       createdAt: Value(createdAt),
+      retryCount: Value(retryCount),
+      lastAttemptAt: lastAttemptAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(lastAttemptAt),
     );
   }
 
@@ -1894,6 +1942,8 @@ class MessageEntry extends DataClass implements Insertable<MessageEntry> {
       status: $MessagesTable.$converterstatus
           .fromJson(serializer.fromJson<String>(json['status'])),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+      retryCount: serializer.fromJson<int>(json['retryCount']),
+      lastAttemptAt: serializer.fromJson<DateTime?>(json['lastAttemptAt']),
     );
   }
   @override
@@ -1910,6 +1960,8 @@ class MessageEntry extends DataClass implements Insertable<MessageEntry> {
       'status': serializer
           .toJson<String>($MessagesTable.$converterstatus.toJson(status)),
       'createdAt': serializer.toJson<DateTime>(createdAt),
+      'retryCount': serializer.toJson<int>(retryCount),
+      'lastAttemptAt': serializer.toJson<DateTime?>(lastAttemptAt),
     };
   }
 
@@ -1921,7 +1973,9 @@ class MessageEntry extends DataClass implements Insertable<MessageEntry> {
           Value<String?> textContent = const Value.absent(),
           Value<String?> photoPath = const Value.absent(),
           MessageStatus? status,
-          DateTime? createdAt}) =>
+          DateTime? createdAt,
+          int? retryCount,
+          Value<DateTime?> lastAttemptAt = const Value.absent()}) =>
       MessageEntry(
         id: id ?? this.id,
         conversationId: conversationId ?? this.conversationId,
@@ -1931,6 +1985,9 @@ class MessageEntry extends DataClass implements Insertable<MessageEntry> {
         photoPath: photoPath.present ? photoPath.value : this.photoPath,
         status: status ?? this.status,
         createdAt: createdAt ?? this.createdAt,
+        retryCount: retryCount ?? this.retryCount,
+        lastAttemptAt:
+            lastAttemptAt.present ? lastAttemptAt.value : this.lastAttemptAt,
       );
   MessageEntry copyWithCompanion(MessagesCompanion data) {
     return MessageEntry(
@@ -1946,6 +2003,11 @@ class MessageEntry extends DataClass implements Insertable<MessageEntry> {
       photoPath: data.photoPath.present ? data.photoPath.value : this.photoPath,
       status: data.status.present ? data.status.value : this.status,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      retryCount:
+          data.retryCount.present ? data.retryCount.value : this.retryCount,
+      lastAttemptAt: data.lastAttemptAt.present
+          ? data.lastAttemptAt.value
+          : this.lastAttemptAt,
     );
   }
 
@@ -1959,14 +2021,16 @@ class MessageEntry extends DataClass implements Insertable<MessageEntry> {
           ..write('textContent: $textContent, ')
           ..write('photoPath: $photoPath, ')
           ..write('status: $status, ')
-          ..write('createdAt: $createdAt')
+          ..write('createdAt: $createdAt, ')
+          ..write('retryCount: $retryCount, ')
+          ..write('lastAttemptAt: $lastAttemptAt')
           ..write(')'))
         .toString();
   }
 
   @override
   int get hashCode => Object.hash(id, conversationId, senderId, contentType,
-      textContent, photoPath, status, createdAt);
+      textContent, photoPath, status, createdAt, retryCount, lastAttemptAt);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -1978,7 +2042,9 @@ class MessageEntry extends DataClass implements Insertable<MessageEntry> {
           other.textContent == this.textContent &&
           other.photoPath == this.photoPath &&
           other.status == this.status &&
-          other.createdAt == this.createdAt);
+          other.createdAt == this.createdAt &&
+          other.retryCount == this.retryCount &&
+          other.lastAttemptAt == this.lastAttemptAt);
 }
 
 class MessagesCompanion extends UpdateCompanion<MessageEntry> {
@@ -1990,6 +2056,8 @@ class MessagesCompanion extends UpdateCompanion<MessageEntry> {
   final Value<String?> photoPath;
   final Value<MessageStatus> status;
   final Value<DateTime> createdAt;
+  final Value<int> retryCount;
+  final Value<DateTime?> lastAttemptAt;
   final Value<int> rowid;
   const MessagesCompanion({
     this.id = const Value.absent(),
@@ -2000,6 +2068,8 @@ class MessagesCompanion extends UpdateCompanion<MessageEntry> {
     this.photoPath = const Value.absent(),
     this.status = const Value.absent(),
     this.createdAt = const Value.absent(),
+    this.retryCount = const Value.absent(),
+    this.lastAttemptAt = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   MessagesCompanion.insert({
@@ -2011,6 +2081,8 @@ class MessagesCompanion extends UpdateCompanion<MessageEntry> {
     this.photoPath = const Value.absent(),
     required MessageStatus status,
     required DateTime createdAt,
+    this.retryCount = const Value.absent(),
+    this.lastAttemptAt = const Value.absent(),
     this.rowid = const Value.absent(),
   })  : id = Value(id),
         conversationId = Value(conversationId),
@@ -2027,6 +2099,8 @@ class MessagesCompanion extends UpdateCompanion<MessageEntry> {
     Expression<String>? photoPath,
     Expression<String>? status,
     Expression<DateTime>? createdAt,
+    Expression<int>? retryCount,
+    Expression<DateTime>? lastAttemptAt,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -2038,6 +2112,8 @@ class MessagesCompanion extends UpdateCompanion<MessageEntry> {
       if (photoPath != null) 'photo_path': photoPath,
       if (status != null) 'status': status,
       if (createdAt != null) 'created_at': createdAt,
+      if (retryCount != null) 'retry_count': retryCount,
+      if (lastAttemptAt != null) 'last_attempt_at': lastAttemptAt,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -2051,6 +2127,8 @@ class MessagesCompanion extends UpdateCompanion<MessageEntry> {
       Value<String?>? photoPath,
       Value<MessageStatus>? status,
       Value<DateTime>? createdAt,
+      Value<int>? retryCount,
+      Value<DateTime?>? lastAttemptAt,
       Value<int>? rowid}) {
     return MessagesCompanion(
       id: id ?? this.id,
@@ -2061,6 +2139,8 @@ class MessagesCompanion extends UpdateCompanion<MessageEntry> {
       photoPath: photoPath ?? this.photoPath,
       status: status ?? this.status,
       createdAt: createdAt ?? this.createdAt,
+      retryCount: retryCount ?? this.retryCount,
+      lastAttemptAt: lastAttemptAt ?? this.lastAttemptAt,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -2094,6 +2174,12 @@ class MessagesCompanion extends UpdateCompanion<MessageEntry> {
     if (createdAt.present) {
       map['created_at'] = Variable<DateTime>(createdAt.value);
     }
+    if (retryCount.present) {
+      map['retry_count'] = Variable<int>(retryCount.value);
+    }
+    if (lastAttemptAt.present) {
+      map['last_attempt_at'] = Variable<DateTime>(lastAttemptAt.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -2111,6 +2197,8 @@ class MessagesCompanion extends UpdateCompanion<MessageEntry> {
           ..write('photoPath: $photoPath, ')
           ..write('status: $status, ')
           ..write('createdAt: $createdAt, ')
+          ..write('retryCount: $retryCount, ')
+          ..write('lastAttemptAt: $lastAttemptAt, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -4257,6 +4345,8 @@ typedef $$MessagesTableCreateCompanionBuilder = MessagesCompanion Function({
   Value<String?> photoPath,
   required MessageStatus status,
   required DateTime createdAt,
+  Value<int> retryCount,
+  Value<DateTime?> lastAttemptAt,
   Value<int> rowid,
 });
 typedef $$MessagesTableUpdateCompanionBuilder = MessagesCompanion Function({
@@ -4268,6 +4358,8 @@ typedef $$MessagesTableUpdateCompanionBuilder = MessagesCompanion Function({
   Value<String?> photoPath,
   Value<MessageStatus> status,
   Value<DateTime> createdAt,
+  Value<int> retryCount,
+  Value<DateTime?> lastAttemptAt,
   Value<int> rowid,
 });
 
@@ -4341,6 +4433,12 @@ class $$MessagesTableFilterComposer
   ColumnFilters<DateTime> get createdAt => $composableBuilder(
       column: $table.createdAt, builder: (column) => ColumnFilters(column));
 
+  ColumnFilters<int> get retryCount => $composableBuilder(
+      column: $table.retryCount, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<DateTime> get lastAttemptAt => $composableBuilder(
+      column: $table.lastAttemptAt, builder: (column) => ColumnFilters(column));
+
   $$ConversationsTableFilterComposer get conversationId {
     final $$ConversationsTableFilterComposer composer = $composerBuilder(
         composer: this,
@@ -4413,6 +4511,13 @@ class $$MessagesTableOrderingComposer
   ColumnOrderings<DateTime> get createdAt => $composableBuilder(
       column: $table.createdAt, builder: (column) => ColumnOrderings(column));
 
+  ColumnOrderings<int> get retryCount => $composableBuilder(
+      column: $table.retryCount, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<DateTime> get lastAttemptAt => $composableBuilder(
+      column: $table.lastAttemptAt,
+      builder: (column) => ColumnOrderings(column));
+
   $$ConversationsTableOrderingComposer get conversationId {
     final $$ConversationsTableOrderingComposer composer = $composerBuilder(
         composer: this,
@@ -4464,6 +4569,12 @@ class $$MessagesTableAnnotationComposer
 
   GeneratedColumn<DateTime> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<int> get retryCount => $composableBuilder(
+      column: $table.retryCount, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get lastAttemptAt => $composableBuilder(
+      column: $table.lastAttemptAt, builder: (column) => column);
 
   $$ConversationsTableAnnotationComposer get conversationId {
     final $$ConversationsTableAnnotationComposer composer = $composerBuilder(
@@ -4538,6 +4649,8 @@ class $$MessagesTableTableManager extends RootTableManager<
             Value<String?> photoPath = const Value.absent(),
             Value<MessageStatus> status = const Value.absent(),
             Value<DateTime> createdAt = const Value.absent(),
+            Value<int> retryCount = const Value.absent(),
+            Value<DateTime?> lastAttemptAt = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
               MessagesCompanion(
@@ -4549,6 +4662,8 @@ class $$MessagesTableTableManager extends RootTableManager<
             photoPath: photoPath,
             status: status,
             createdAt: createdAt,
+            retryCount: retryCount,
+            lastAttemptAt: lastAttemptAt,
             rowid: rowid,
           ),
           createCompanionCallback: ({
@@ -4560,6 +4675,8 @@ class $$MessagesTableTableManager extends RootTableManager<
             Value<String?> photoPath = const Value.absent(),
             required MessageStatus status,
             required DateTime createdAt,
+            Value<int> retryCount = const Value.absent(),
+            Value<DateTime?> lastAttemptAt = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
               MessagesCompanion.insert(
@@ -4571,6 +4688,8 @@ class $$MessagesTableTableManager extends RootTableManager<
             photoPath: photoPath,
             status: status,
             createdAt: createdAt,
+            retryCount: retryCount,
+            lastAttemptAt: lastAttemptAt,
             rowid: rowid,
           ),
           withReferenceMapper: (p0) => p0

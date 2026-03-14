@@ -1,6 +1,7 @@
 import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../core/constants/app_constants.dart';
 import '../local_database/database.dart';
 
 /// Repository for managing conversations and messages
@@ -180,6 +181,8 @@ class ChatRepository {
       photoPath: null,
       status: MessageStatus.pending,
       createdAt: now,
+      retryCount: 0,
+      lastAttemptAt: null,
     );
   }
 
@@ -216,6 +219,8 @@ class ChatRepository {
       photoPath: photoPath,
       status: MessageStatus.pending,
       createdAt: now,
+      retryCount: 0,
+      lastAttemptAt: null,
     );
   }
 
@@ -255,6 +260,8 @@ class ChatRepository {
       photoPath: photoPath,
       status: MessageStatus.delivered,
       createdAt: now,
+      retryCount: 0,
+      lastAttemptAt: null,
     );
   }
 
@@ -295,6 +302,8 @@ class ChatRepository {
       photoPath: thumbnailPath,
       status: MessageStatus.delivered,
       createdAt: now,
+      retryCount: 0,
+      lastAttemptAt: null,
     );
   }
 
@@ -459,6 +468,61 @@ class ChatRepository {
               t.textContent.like('%$photoId%'))
           ..limit(1))
         .getSingleOrNull();
+  }
+
+  // ==================== Store-and-Forward ====================
+
+  /// Returns pending or failed outgoing text messages for a conversation that
+  /// are still within the retry window and haven't exceeded the retry cap.
+  /// Used by [StoreAndForwardService] to retry delivery on peer rediscovery.
+  Future<List<MessageEntry>> getPendingOutgoingMessages({
+    required String ownUserId,
+    required String conversationId,
+  }) async {
+    final cutoff = DateTime.now()
+        .subtract(const Duration(hours: AppConstants.messageRetryWindowHours));
+
+    return (_db.select(_db.messages)
+          ..where((t) =>
+              t.conversationId.equals(conversationId) &
+              t.senderId.equals(ownUserId) &
+              (t.status.equalsValue(MessageStatus.pending) |
+                  t.status.equalsValue(MessageStatus.failed)) &
+              t.contentType.equalsValue(MessageContentType.text) &
+              t.createdAt.isBiggerThanValue(cutoff) &
+              t.retryCount.isSmallerThanValue(
+                  AppConstants.messageMaxCrossSessionRetries))
+          ..orderBy([(t) => OrderingTerm.asc(t.createdAt)]))
+        .get();
+  }
+
+  /// Updates retry tracking columns without touching message status.
+  Future<void> updateRetryMetadata(
+    String messageId, {
+    required int retryCount,
+    required DateTime lastAttemptAt,
+  }) async {
+    await (_db.update(_db.messages)..where((t) => t.id.equals(messageId)))
+        .write(MessagesCompanion(
+      retryCount: Value(retryCount),
+      lastAttemptAt: Value(lastAttemptAt),
+    ));
+  }
+
+  /// Marks all pending/failed outgoing messages older than [window] as failed.
+  /// Called at startup to clear stale state from previous sessions.
+  Future<void> expireStaleOutgoingMessages(
+    String ownUserId,
+    Duration window,
+  ) async {
+    final cutoff = DateTime.now().subtract(window);
+    await (_db.update(_db.messages)
+          ..where((t) =>
+              t.senderId.equals(ownUserId) &
+              (t.status.equalsValue(MessageStatus.pending) |
+                  t.status.equalsValue(MessageStatus.failed)) &
+              t.createdAt.isSmallerThanValue(cutoff)))
+        .write(const MessagesCompanion(status: Value(MessageStatus.failed)));
   }
 
   // ==================== Reactions ====================

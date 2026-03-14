@@ -11,6 +11,7 @@ import 'services/audio_service.dart';
 import 'services/nearby/nearby.dart';
 import 'services/notification_service.dart';
 import 'services/nsfw_detection_service.dart';
+import 'services/store_and_forward_service.dart';
 import 'services/transport/transport.dart';
 import 'services/wifi_aware/wifi_aware.dart';
 
@@ -99,6 +100,19 @@ Future<void> initializeDependencies({
     bleService: getIt<BleServiceInterface>(),
   ));
 
+  // Store-and-forward service (singleton — retries pending messages on peer rediscovery)
+  getIt.registerLazySingleton<StoreAndForwardService>(
+    () => StoreAndForwardService(
+      chatRepository: getIt<DatabaseService>().chatRepository,
+      peerRepository: getIt<DatabaseService>().peerRepository,
+      profileRepository: getIt<DatabaseService>().profileRepository,
+      transportManager: getIt<TransportManager>(),
+    ),
+  );
+
+  // Initialize store-and-forward (no-op if no profile yet — safe to call early)
+  await getIt<StoreAndForwardService>().initialize();
+
   // Blocs (factories - new instance each time)
   getIt.registerFactory<ProfileBloc>(
     () => ProfileBloc(
@@ -129,6 +143,7 @@ Future<void> initializeDependencies({
       notificationService: getIt<NotificationService>(),
       ownUserId: ownUserId,
       highSpeedTransferService: getIt<HighSpeedTransferService>(),
+      storeAndForwardService: getIt<StoreAndForwardService>(),
     ),
   );
 
@@ -149,6 +164,7 @@ Future<void> initializeDependencies({
 
 /// Dispose all dependencies
 Future<void> disposeDependencies() async {
+  await getIt<StoreAndForwardService>().dispose();
   await getIt<TransportManager>().dispose();
   await getIt<HighSpeedTransferService>().dispose();
   await getIt<DatabaseService>().close();

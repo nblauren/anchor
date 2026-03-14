@@ -33,4 +33,8 @@ class AppConstants {
   static const int maxImageHeight = 1920;
   static const int imageQuality = 80;
   static const int thumbnailSize = 200;
+
+  // Store-and-forward message retry
+  static const int messageRetryWindowHours = 24;
+  static const int messageMaxCrossSessionRetries = 20;
 }

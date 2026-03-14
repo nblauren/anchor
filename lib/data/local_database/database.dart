@@ -116,6 +116,10 @@ class Messages extends Table {
   TextColumn get photoPath => text().nullable()();
   TextColumn get status => textEnum<MessageStatus>()();
   DateTimeColumn get createdAt => dateTime()();
+  /// Cross-session retry counter (incremented by StoreAndForwardService).
+  IntColumn get retryCount => integer().withDefault(const Constant(0))();
+  /// Timestamp of the last cross-session delivery attempt. null = never retried.
+  DateTimeColumn get lastAttemptAt => dateTime().nullable()();
 
   @override
   Set<Column> get primaryKey => {id};
@@ -176,7 +180,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 6;
+  int get schemaVersion => 7;
 
   @override
   MigrationStrategy get migration {
@@ -210,6 +214,11 @@ class AppDatabase extends _$AppDatabase {
         if (from < 6) {
           // Migration from v5 to v6: add message_reactions table
           await m.createTable(messageReactions);
+        }
+        if (from < 7) {
+          // Migration from v6 to v7: add store-and-forward retry columns
+          await m.addColumn(messages, messages.retryCount);
+          await m.addColumn(messages, messages.lastAttemptAt);
         }
       },
       beforeOpen: (details) async {
