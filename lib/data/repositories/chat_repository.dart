@@ -480,6 +480,11 @@ class ChatRepository {
 
   /// Persist the stable [photoId] into a sent photo message's [textContent]
   /// so it survives session restarts and can be recovered in [findMessageByPhotoId].
+  Future<void> updateMessagePhotoPath(String messageId, String photoPath) async {
+    await (_db.update(_db.messages)..where((t) => t.id.equals(messageId)))
+        .write(MessagesCompanion(photoPath: Value(photoPath)));
+  }
+
   Future<void> updateMessagePhotoId(String messageId, String photoId) async {
     await (_db.update(_db.messages)..where((t) => t.id.equals(messageId)))
         .write(MessagesCompanion(textContent: Value('{"photo_id":"$photoId"}')));

@@ -471,6 +471,10 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       final blePhotoBytes =
           await _imageService.compressForBleTransfer(absolutePath);
 
+      // Persist the compressed relative path so the photo survives app restarts.
+      // The original photoPath may be a picker temp file that gets deleted.
+      await _chatRepository.updateMessagePhotoPath(message.id, compressedPath);
+
       // 2. Generate a stable UUID that links preview ↔ full-transfer.
       const uuidGen = Uuid();
       final photoId = uuidGen.v4();
