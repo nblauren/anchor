@@ -225,18 +225,23 @@ class ChatRepository {
   }
 
   /// Receive a message (from BLE)
+  ///
+  /// Pass the sender's [id] (from the BLE payload's `messageId`) so that
+  /// reactions sent by either side can reference the same stable ID.
+  /// Uses insert-or-ignore so duplicate deliveries are silently dropped.
   Future<MessageEntry> receiveMessage({
     required String conversationId,
     required String senderId,
     required MessageContentType contentType,
     String? textContent,
     String? photoPath,
+    String? id,
   }) async {
-    final id = _uuid.v4();
+    final msgId = id ?? _uuid.v4();
     final now = DateTime.now();
 
     final entry = MessagesCompanion.insert(
-      id: id,
+      id: msgId,
       conversationId: conversationId,
       senderId: senderId,
       contentType: contentType,
@@ -246,13 +251,16 @@ class ChatRepository {
       createdAt: now,
     );
 
-    await _db.into(_db.messages).insert(entry);
+    await _db.into(_db.messages).insert(
+          entry,
+          mode: InsertMode.insertOrIgnore,
+        );
 
     // Update conversation timestamp
     await touchConversation(conversationId);
 
     return MessageEntry(
-      id: id,
+      id: msgId,
       conversationId: conversationId,
       senderId: senderId,
       contentType: contentType,
@@ -275,12 +283,13 @@ class ChatRepository {
     required String senderId,
     required String textContent,
     String? thumbnailPath,
+    String? id,
   }) async {
-    final id = _uuid.v4();
+    final msgId = id ?? _uuid.v4();
     final now = DateTime.now();
 
     final entry = MessagesCompanion.insert(
-      id: id,
+      id: msgId,
       conversationId: conversationId,
       senderId: senderId,
       contentType: MessageContentType.photoPreview,
@@ -290,11 +299,14 @@ class ChatRepository {
       createdAt: now,
     );
 
-    await _db.into(_db.messages).insert(entry);
+    await _db.into(_db.messages).insert(
+          entry,
+          mode: InsertMode.insertOrIgnore,
+        );
     await touchConversation(conversationId);
 
     return MessageEntry(
-      id: id,
+      id: msgId,
       conversationId: conversationId,
       senderId: senderId,
       contentType: MessageContentType.photoPreview,

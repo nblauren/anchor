@@ -552,6 +552,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       });
 
       final message = await _chatRepository.receivePhotoPreview(
+        id: preview.messageId,
         conversationId: conversation.id,
         senderId: preview.fromPeerId,
         textContent: metadata,
@@ -903,8 +904,10 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
             : 'Photo received',
       );
 
-      // Save received message to database
+      // Save received message to database, preserving the sender's messageId
+      // so both sides share the same stable ID for reaction targeting.
       final message = await _chatRepository.receiveMessage(
+        id: bleMsg.messageId,
         conversationId: conversation.id,
         senderId: bleMsg.fromPeerId,
         contentType: bleMsg.type == ble.MessageType.text
