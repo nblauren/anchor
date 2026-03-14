@@ -207,10 +207,15 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
       final entries = await _peerRepository.getAllPeers(includeBlocked: false);
       final peers = entries.map(DiscoveredPeer.fromEntry).toList();
 
+      // Restore anchor drop badges from DB (persists across restarts).
+      final sentDropPeerIds =
+          await _anchorDropRepository.getSentPeerIdsSince(hours: 24);
+
       emit(state.copyWith(
         status: DiscoveryStatus.loaded,
         peers: peers,
         lastRefreshed: DateTime.now(),
+        droppedAnchorPeerIds: sentDropPeerIds,
       ));
     } catch (e) {
       Logger.error('Failed to load peers', e, null, 'DiscoveryBloc');

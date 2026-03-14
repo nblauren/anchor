@@ -65,6 +65,20 @@ class AnchorDropRepository {
         .get();
   }
 
+  /// Returns peer IDs that we sent an anchor drop to within the last [hours].
+  /// Used to restore the ⚓ badge on the discovery grid after app restart.
+  Future<Set<String>> getSentPeerIdsSince({int hours = 24}) async {
+    final cutoff = DateTime.now().subtract(Duration(hours: hours));
+    final rows = await (_db.select(_db.anchorDrops)
+          ..where(
+            (t) =>
+                t.direction.equals(AnchorDropDirection.sent.name) &
+                t.droppedAt.isBiggerOrEqualValue(cutoff),
+          ))
+        .get();
+    return rows.map((r) => r.peerId).toSet();
+  }
+
   /// Returns received anchor drops, newest first, deduplicated by peerId
   /// (keeps the most recent drop per peer).
   Future<List<AnchorDropEntry>> getReceivedDrops({int limit = 50}) async {
