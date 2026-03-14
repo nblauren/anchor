@@ -530,7 +530,8 @@ class _ChatScreenState extends State<ChatScreen> {
                                                 );
                                           }
                                         },
-                                  onLongPress: state.isBlocked
+                                  onLongPress: state.isBlocked ||
+                                          message.senderId == ownUserId
                                       ? null
                                       : () => _showEmojiPicker(
                                             context,
