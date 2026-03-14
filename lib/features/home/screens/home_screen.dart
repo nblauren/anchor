@@ -27,10 +27,16 @@ class _HomeScreenState extends State<HomeScreen> {
       builder: (context, profileState) {
         final ownUserId = profileState.profileId ?? '';
 
+        // Don't create ChatBloc until we have a real userId — avoids a second
+        // initialization when the profile loads and the key would change from
+        // '' to the actual UUID.
+        if (ownUserId.isEmpty) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+
         return BlocProvider<ChatBloc>(
-          // ValueKey ensures the bloc is recreated when ownUserId changes
-          // (e.g., from '' to the real UUID after a profile-load error or
-          // the brief ProfileStatus.saving window on first profile creation).
           key: ValueKey(ownUserId),
           create: (context) => getIt<ChatBloc>(param1: ownUserId),
           child: Scaffold(
