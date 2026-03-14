@@ -307,39 +307,39 @@ class MessageBubbleWidget extends StatelessWidget {
   Widget _buildStatusIcon() {
     switch (message.status) {
       case MessageStatus.pending:
-        return SizedBox(
-          width: 14,
-          height: 14,
+        return const SizedBox(
+          width: 16,
+          height: 16,
           child: CircularProgressIndicator(
             strokeWidth: 1.5,
-            color: Colors.white.withValues(alpha: 0.6),
+            color: Colors.white,
           ),
         );
       case MessageStatus.sent:
-        return Icon(
+        return const Icon(
           Icons.done,
-          size: 14,
-          color: Colors.white.withValues(alpha: 0.6),
+          size: 16,
+          color: Colors.white,
         );
       case MessageStatus.delivered:
         return const Icon(
           Icons.done_all,
-          size: 14,
-          color: Colors.lightBlueAccent,
+          size: 16,
+          color: Colors.white,
         );
       case MessageStatus.read:
         return const Icon(
           Icons.done_all,
-          size: 14,
-          color: Colors.lightBlueAccent,
+          size: 16,
+          color: Color(0xFF4FC3F7), // light blue — distinct from delivered white
         );
       case MessageStatus.failed:
         return GestureDetector(
           onTap: onRetry,
           child: const Icon(
             Icons.error_outline,
-            size: 14,
-            color: Colors.redAccent,
+            size: 16,
+            color: Colors.white,
           ),
         );
     }
