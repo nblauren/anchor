@@ -371,6 +371,20 @@ class ChatRepository {
         .write(const MessagesCompanion(status: Value(MessageStatus.read)));
   }
 
+  /// Mark all [sent] outgoing messages in a conversation as [read].
+  /// Called when a read receipt arrives from the peer.
+  Future<void> markSentMessagesRead(
+    String conversationId,
+    String ownUserId,
+  ) async {
+    await (_db.update(_db.messages)
+          ..where((t) =>
+              t.conversationId.equals(conversationId) &
+              t.senderId.equals(ownUserId) &
+              t.status.equalsValue(MessageStatus.sent)))
+        .write(const MessagesCompanion(status: Value(MessageStatus.read)));
+  }
+
   /// Watch messages for a conversation
   Stream<List<MessageEntry>> watchMessages(String conversationId) {
     return (_db.select(_db.messages)

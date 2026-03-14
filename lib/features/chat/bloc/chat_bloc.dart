@@ -243,6 +243,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
 
       // Mark any unread messages as read immediately on open
       await _chatRepository.markConversationRead(conversationEntry.id);
+      _sendReadReceipt(event.peerId);
 
       final isBlocked = await _peerRepository.isPeerBlocked(event.peerId);
 
@@ -340,6 +341,19 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         errorMessage: 'Failed to send message',
       ));
     }
+  }
+
+  /// Fire-and-forget: notifies [peerId] that we've read their messages.
+  /// Runs outside the send queue so it never delays outgoing text messages.
+  void _sendReadReceipt(String peerId) {
+    _transportManager.sendMessage(
+      peerId,
+      ble.MessagePayload(
+        messageId: const Uuid().v4(),
+        type: ble.MessageType.read,
+        content: '',
+      ),
+    ).ignore();
   }
 
   /// Background helper: sends a text message via BLE without blocking the
@@ -843,6 +857,38 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         return;
       }
 
+      // Handle read receipt — peer opened our conversation and read our messages.
+      if (bleMsg.type == ble.MessageType.read) {
+        final conversation =
+            await _chatRepository.getConversationByPeerId(bleMsg.fromPeerId);
+        if (conversation != null) {
+          await _chatRepository.markSentMessagesRead(
+              conversation.id, _ownUserId);
+          if (state.currentConversation?.peerId == bleMsg.fromPeerId) {
+            final updatedMessages = state.messages.map((msg) {
+              if (msg.senderId == _ownUserId &&
+                  msg.status == MessageStatus.sent) {
+                return MessageEntry(
+                  id: msg.id,
+                  conversationId: msg.conversationId,
+                  senderId: msg.senderId,
+                  contentType: msg.contentType,
+                  textContent: msg.textContent,
+                  photoPath: msg.photoPath,
+                  status: MessageStatus.read,
+                  createdAt: msg.createdAt,
+                  retryCount: msg.retryCount,
+                  lastAttemptAt: msg.lastAttemptAt,
+                );
+              }
+              return msg;
+            }).toList();
+            emit(state.copyWith(messages: updatedMessages));
+          }
+        }
+        return;
+      }
+
       // Get or create conversation with this peer
       final conversation =
           await _chatRepository.getOrCreateConversation(bleMsg.fromPeerId);
@@ -1144,6 +1190,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     try {
       // Mark any newly arrived messages as read (e.g. received while chat is open)
       await _chatRepository.markConversationRead(state.currentConversation!.id);
+      _sendReadReceipt(state.currentConversation!.peerId);
     } catch (e) {
       Logger.error('Failed to mark messages as read', e, null, 'ChatBloc');
     }
