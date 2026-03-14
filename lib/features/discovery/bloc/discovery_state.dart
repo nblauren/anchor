@@ -218,16 +218,26 @@ class DiscoveryState extends Equatable {
   /// Applies local position + interest filters when set.
   List<DiscoveredPeer> get visiblePeers {
     final seen = <String>{};
-    return peers
+    final filtered = peers
         .where((p) => !p.isBlocked && seen.add(p.peerId))
         .where(_passesFilters)
-        .toList()
-      ..sort((a, b) {
-        // Online peers always sort before offline peers
-        if (a.isOnline != b.isOnline) return a.isOnline ? -1 : 1;
-        return b.lastSeenAt.compareTo(a.lastSeenAt);
-      });
+        .toList();
+
+    // Online first, offline second.
+    // Within online: sort by RSSI distance bucket (closer = first).
+    // Buckets are 10 dBm wide so small RSSI fluctuations between scan
+    // cycles don't cause tiles to shuffle. Within the same bucket,
+    // list insertion order is preserved (stable sort).
+    final online = filtered.where((p) => p.isOnline).toList();
+    online.sort((a, b) => _rssiBucket(b.rssi).compareTo(_rssiBucket(a.rssi)));
+    final offline = filtered.where((p) => !p.isOnline).toList();
+    return [...online, ...offline];
   }
+
+  /// Coarse RSSI bucket: groups peers into 10 dBm bands so minor
+  /// signal fluctuations don't reshuffle the grid.
+  /// Returns a higher value for stronger (closer) signals.
+  static int _rssiBucket(int? rssi) => (rssi ?? -100) ~/ 10;
 
   bool _passesFilters(DiscoveredPeer p) {
     if (filterPositionIds.isNotEmpty && p.position != null &&
