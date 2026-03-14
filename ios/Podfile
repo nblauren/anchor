@@ -42,6 +42,20 @@ post_install do |installer|
     target.build_configurations.each do |config|
       config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '16.0'
     end
+
+    # wifi_aware_p2p links DeviceDiscoveryUI.framework and WiFiAware.framework
+    # which only exist on iOS 26+ and are absent on macOS. This triggers
+    # ITMS-90863 on App Store submission (Apple Silicon Macs run iOS apps).
+    # Weak-link them so the binary validates on macOS and gracefully degrades
+    # at runtime. Wi-Fi Aware is disabled on iOS in TransportManager anyway.
+    if target.name == 'wifi_aware_p2p'
+      target.build_configurations.each do |config|
+        ldflags = config.build_settings['OTHER_LDFLAGS'] || '$(inherited)'
+        ldflags = ldflags.gsub('-framework "DeviceDiscoveryUI"', '-weak_framework "DeviceDiscoveryUI"')
+        ldflags = ldflags.gsub('-framework "WiFiAware"', '-weak_framework "WiFiAware"')
+        config.build_settings['OTHER_LDFLAGS'] = ldflags
+      end
+    end
   end
 
   # Add a build phase to fix App.framework missing MinimumOSVersion

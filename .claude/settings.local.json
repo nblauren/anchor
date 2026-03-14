@@ -21,7 +21,9 @@
       "Bash(xcodebuild -version 2>&1 && xcrun --sdk iphoneos --show-sdk-version 2>&1)",
       "Bash(flutter devices:*)",
       "Bash(flutter build:*)",
-      "Bash(flutter test:*)"
+      "Bash(flutter test:*)",
+      "Bash(dart analyze:*)",
+      "Bash(git status:*)"
     ]
   }
 }
