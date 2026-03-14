@@ -73,6 +73,8 @@ class TransportManager {
       StreamController<ble.ReceivedPhoto>.broadcast();
   final _anchorDropReceivedController =
       StreamController<ble.AnchorDropReceived>.broadcast();
+  final _reactionReceivedController =
+      StreamController<ble.ReactionReceived>.broadcast();
   final _peerIdChangedController =
       StreamController<ble.PeerIdChanged>.broadcast();
   final _activeTransportController =
@@ -214,6 +216,7 @@ class TransportManager {
     await _photoProgressController.close();
     await _photoReceivedController.close();
     await _anchorDropReceivedController.close();
+    await _reactionReceivedController.close();
     await _activeTransportController.close();
   }
 
@@ -241,6 +244,9 @@ class TransportManager {
 
   Stream<ble.AnchorDropReceived> get anchorDropReceivedStream =>
       _anchorDropReceivedController.stream;
+
+  Stream<ble.ReactionReceived> get reactionReceivedStream =>
+      _reactionReceivedController.stream;
 
   Stream<ble.PeerIdChanged> get peerIdChangedStream =>
       _peerIdChangedController.stream;
@@ -361,6 +367,32 @@ class TransportManager {
     return _bleService.sendDropAnchor(peerId);
   }
 
+  Future<bool> sendReaction({
+    required String peerId,
+    required String messageId,
+    required String emoji,
+    required String action,
+  }) async {
+    final transport = _peerTransport[peerId] ?? _activeTransport;
+
+    if (transport == TransportType.wifiAware) {
+      final success = await _wifiAwareService.sendReaction(
+        peerId: peerId,
+        messageId: messageId,
+        emoji: emoji,
+        action: action,
+      );
+      if (success) return true;
+    }
+
+    return _bleService.sendReaction(
+      peerId: peerId,
+      messageId: messageId,
+      emoji: emoji,
+      action: action,
+    );
+  }
+
   // ==================== BLE-Specific (still needed) ====================
 
   ble.BleStatus get bleStatus => _bleService.status;
@@ -439,6 +471,9 @@ class TransportManager {
       _wifiAwareService.anchorDropReceivedStream.listen(
         _anchorDropReceivedController.add,
       ),
+      _wifiAwareService.reactionReceivedStream.listen(
+        _reactionReceivedController.add,
+      ),
     ]);
 
     // Also subscribe to BLE for peers not reachable via Wi-Fi Aware.
@@ -474,6 +509,9 @@ class TransportManager {
       ),
       _bleService.anchorDropReceivedStream.listen(
         _anchorDropReceivedController.add,
+      ),
+      _bleService.reactionReceivedStream.listen(
+        _reactionReceivedController.add,
       ),
       _bleService.peerIdChangedStream.listen((change) {
         final transport = _peerTransport.remove(change.oldPeerId);
@@ -512,6 +550,9 @@ class TransportManager {
       ),
       _bleService.anchorDropReceivedStream.listen(
         _anchorDropReceivedController.add,
+      ),
+      _bleService.reactionReceivedStream.listen(
+        _reactionReceivedController.add,
       ),
       _bleService.peerIdChangedStream.listen((change) {
         // Update transport mapping for the new peerId

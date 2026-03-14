@@ -9,6 +9,25 @@ import '../../../data/local_database/database.dart';
 import '../../../services/image_service.dart';
 import '../bloc/chat_state.dart';
 
+/// Groups reactions by emoji and returns a sorted list of (emoji, count, isMine) tuples.
+List<({String emoji, int count, bool isMine})> groupReactions(
+  List<ReactionEntry> reactions,
+  String ownUserId,
+) {
+  final Map<String, List<ReactionEntry>> byEmoji = {};
+  for (final r in reactions) {
+    byEmoji.putIfAbsent(r.emoji, () => []).add(r);
+  }
+  return byEmoji.entries
+      .map((e) => (
+            emoji: e.key,
+            count: e.value.length,
+            isMine: e.value.any((r) => r.senderId == ownUserId),
+          ))
+      .toList()
+    ..sort((a, b) => b.count.compareTo(a.count));
+}
+
 /// Widget displaying a single chat message bubble.
 ///
 /// Handles three content types:
@@ -21,15 +40,20 @@ class MessageBubbleWidget extends StatelessWidget {
     super.key,
     required this.message,
     required this.isSentByMe,
+    required this.ownUserId,
     this.onRetry,
     this.isRelayedPeer = false,
     this.transferInfo,
     this.onRequestFullPhoto,
     this.onCancelTransfer,
+    this.reactions = const [],
+    this.onReact,
+    this.onLongPress,
   });
 
   final MessageEntry message;
   final bool isSentByMe;
+  final String ownUserId;
   final VoidCallback? onRetry;
   /// When true and message is sent by us, show a relay indicator.
   final bool isRelayedPeer;
@@ -40,82 +64,137 @@ class MessageBubbleWidget extends StatelessWidget {
   final void Function(String photoId)? onRequestFullPhoto;
   /// Called when the user taps the cancel button during an active transfer.
   final VoidCallback? onCancelTransfer;
+  /// Reactions for this message.
+  final List<ReactionEntry> reactions;
+  /// Called when a reaction chip is tapped. Receives the emoji.
+  final void Function(String emoji)? onReact;
+  /// Called on long-press to open the emoji picker.
+  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
     final contentType = message.contentType;
+    final grouped = groupReactions(reactions, ownUserId);
 
     return Align(
       alignment: isSentByMe ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: EdgeInsets.only(
-          top: 4,
-          bottom: 4,
-          left: isSentByMe ? 48 : 0,
-          right: isSentByMe ? 0 : 48,
-        ),
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.75,
-        ),
-        decoration: BoxDecoration(
-          color: isSentByMe ? AppTheme.primaryColor : AppTheme.darkCard,
-          borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(16),
-            topRight: const Radius.circular(16),
-            bottomLeft: isSentByMe
-                ? const Radius.circular(16)
-                : const Radius.circular(4),
-            bottomRight: isSentByMe
-                ? const Radius.circular(4)
-                : const Radius.circular(16),
-          ),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            if (contentType == MessageContentType.photo)
-              _buildPhotoContent(context)
-            else if (contentType == MessageContentType.photoPreview)
-              _buildPhotoPreviewContent(context)
-            else
-              _buildTextContent(),
-
-            // Timestamp and status row
-            Padding(
-              padding: EdgeInsets.only(
-                left: 12,
-                right: 12,
-                bottom: 8,
-                top: contentType != MessageContentType.text ? 8 : 0,
+      child: Column(
+        crossAxisAlignment:
+            isSentByMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        children: [
+          GestureDetector(
+            onLongPress: onLongPress,
+            child: Container(
+              margin: EdgeInsets.only(
+                top: 4,
+                bottom: grouped.isEmpty ? 4 : 2,
+                left: isSentByMe ? 48 : 0,
+                right: isSentByMe ? 0 : 48,
               ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
+              constraints: BoxConstraints(
+                maxWidth: MediaQuery.of(context).size.width * 0.75,
+              ),
+              decoration: BoxDecoration(
+                color: isSentByMe ? AppTheme.primaryColor : AppTheme.darkCard,
+                borderRadius: BorderRadius.only(
+                  topLeft: const Radius.circular(16),
+                  topRight: const Radius.circular(16),
+                  bottomLeft: isSentByMe
+                      ? const Radius.circular(16)
+                      : const Radius.circular(4),
+                  bottomRight: isSentByMe
+                      ? const Radius.circular(4)
+                      : const Radius.circular(16),
+                ),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  Text(
-                    _formatTime(message.createdAt),
-                    style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.6),
-                      fontSize: 11,
+                  if (contentType == MessageContentType.photo)
+                    _buildPhotoContent(context)
+                  else if (contentType == MessageContentType.photoPreview)
+                    _buildPhotoPreviewContent(context)
+                  else
+                    _buildTextContent(),
+
+                  // Timestamp and status row
+                  Padding(
+                    padding: EdgeInsets.only(
+                      left: 12,
+                      right: 12,
+                      bottom: 8,
+                      top: contentType != MessageContentType.text ? 8 : 0,
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          _formatTime(message.createdAt),
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.6),
+                            fontSize: 11,
+                          ),
+                        ),
+                        if (isSentByMe && isRelayedPeer) ...[
+                          const SizedBox(width: 4),
+                          const Icon(
+                            Icons.hub_outlined,
+                            size: 11,
+                            color: Colors.white38,
+                          ),
+                        ],
+                        if (isSentByMe) ...[
+                          const SizedBox(width: 4),
+                          _buildStatusIcon(),
+                        ],
+                      ],
                     ),
                   ),
-                  if (isSentByMe && isRelayedPeer) ...[
-                    const SizedBox(width: 4),
-                    const Icon(
-                      Icons.hub_outlined,
-                      size: 11,
-                      color: Colors.white38,
-                    ),
-                  ],
-                  if (isSentByMe) ...[
-                    const SizedBox(width: 4),
-                    _buildStatusIcon(),
-                  ],
                 ],
               ),
             ),
-          ],
-        ),
+          ),
+
+          // Reaction chips
+          if (grouped.isNotEmpty)
+            Padding(
+              padding: EdgeInsets.only(
+                left: isSentByMe ? 48 : 4,
+                right: isSentByMe ? 4 : 48,
+                bottom: 4,
+              ),
+              child: Wrap(
+                spacing: 4,
+                children: grouped.map((g) {
+                  return GestureDetector(
+                    onTap: () => onReact?.call(g.emoji),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: g.isMine
+                            ? AppTheme.primaryColor.withValues(alpha: 0.35)
+                            : AppTheme.darkCard,
+                        borderRadius: BorderRadius.circular(12),
+                        border: g.isMine
+                            ? Border.all(
+                                color: AppTheme.primaryColor.withValues(
+                                    alpha: 0.7),
+                                width: 1,
+                              )
+                            : null,
+                      ),
+                      child: Text(
+                        g.count > 1 ? '${g.emoji} ${g.count}' : g.emoji,
+                        style: const TextStyle(fontSize: 13),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+        ],
       ),
     );
   }

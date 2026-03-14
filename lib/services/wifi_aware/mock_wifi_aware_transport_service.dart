@@ -31,6 +31,8 @@ class MockWifiAwareTransportService implements WifiAwareTransportService {
       StreamController<ble.ReceivedPhotoRequest>.broadcast();
   final _anchorDropReceivedController =
       StreamController<ble.AnchorDropReceived>.broadcast();
+  final _reactionReceivedController =
+      StreamController<ble.ReactionReceived>.broadcast();
   final _availabilityController = StreamController<bool>.broadcast();
 
   @override
@@ -58,6 +60,7 @@ class MockWifiAwareTransportService implements WifiAwareTransportService {
     await _photoPreviewReceivedController.close();
     await _photoRequestReceivedController.close();
     await _anchorDropReceivedController.close();
+    await _reactionReceivedController.close();
     await _availabilityController.close();
     _initialized = false;
   }
@@ -138,6 +141,18 @@ class MockWifiAwareTransportService implements WifiAwareTransportService {
   @override
   Stream<ble.AnchorDropReceived> get anchorDropReceivedStream =>
       _anchorDropReceivedController.stream;
+
+  @override
+  Future<bool> sendReaction({
+    required String peerId,
+    required String messageId,
+    required String emoji,
+    required String action,
+  }) async => false;
+
+  @override
+  Stream<ble.ReactionReceived> get reactionReceivedStream =>
+      _reactionReceivedController.stream;
 
   @override
   Future<bool> hasPairedDevices() async => simulateSupported;

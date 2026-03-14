@@ -460,6 +460,71 @@ class ChatRepository {
           ..limit(1))
         .getSingleOrNull();
   }
+
+  // ==================== Reactions ====================
+
+  /// Add (or ignore if duplicate) an emoji reaction on a message.
+  Future<void> addReaction({
+    required String messageId,
+    required String senderId,
+    required String emoji,
+  }) async {
+    // Check for existing same reaction (same sender + emoji + message)
+    final existing = await (_db.select(_db.messageReactions)
+          ..where((t) =>
+              t.messageId.equals(messageId) &
+              t.senderId.equals(senderId) &
+              t.emoji.equals(emoji)))
+        .getSingleOrNull();
+
+    if (existing != null) return; // already reacted — no-op
+
+    final id = _uuid.v4();
+    await _db.into(_db.messageReactions).insert(
+          MessageReactionsCompanion.insert(
+            id: id,
+            messageId: messageId,
+            senderId: senderId,
+            emoji: emoji,
+            createdAt: DateTime.now(),
+          ),
+        );
+  }
+
+  /// Remove an emoji reaction from a message.
+  Future<void> removeReaction({
+    required String messageId,
+    required String senderId,
+    required String emoji,
+  }) async {
+    await (_db.delete(_db.messageReactions)
+          ..where((t) =>
+              t.messageId.equals(messageId) &
+              t.senderId.equals(senderId) &
+              t.emoji.equals(emoji)))
+        .go();
+  }
+
+  /// Return all reactions for messages in a conversation, grouped by messageId.
+  Future<Map<String, List<ReactionEntry>>> getReactionsForConversation(
+    String conversationId,
+  ) async {
+    final query = _db.select(_db.messageReactions).join([
+      innerJoin(
+        _db.messages,
+        _db.messages.id.equalsExp(_db.messageReactions.messageId),
+      ),
+    ])
+      ..where(_db.messages.conversationId.equals(conversationId));
+
+    final rows = await query.get();
+    final Map<String, List<ReactionEntry>> result = {};
+    for (final row in rows) {
+      final reaction = row.readTable(_db.messageReactions);
+      result.putIfAbsent(reaction.messageId, () => []).add(reaction);
+    }
+    return result;
+  }
 }
 
 /// Helper class for conversation with peer details

@@ -2626,6 +2626,317 @@ class BlockedUsersCompanion extends UpdateCompanion<BlockedUserEntry> {
   }
 }
 
+class $MessageReactionsTable extends MessageReactions
+    with TableInfo<$MessageReactionsTable, ReactionEntry> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $MessageReactionsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+      'id', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _messageIdMeta =
+      const VerificationMeta('messageId');
+  @override
+  late final GeneratedColumn<String> messageId = GeneratedColumn<String>(
+      'message_id', aliasedName, false,
+      type: DriftSqlType.string,
+      requiredDuringInsert: true,
+      defaultConstraints:
+          GeneratedColumn.constraintIsAlways('REFERENCES messages (id)'));
+  static const VerificationMeta _senderIdMeta =
+      const VerificationMeta('senderId');
+  @override
+  late final GeneratedColumn<String> senderId = GeneratedColumn<String>(
+      'sender_id', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _emojiMeta = const VerificationMeta('emoji');
+  @override
+  late final GeneratedColumn<String> emoji = GeneratedColumn<String>(
+      'emoji', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _createdAtMeta =
+      const VerificationMeta('createdAt');
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+      'created_at', aliasedName, false,
+      type: DriftSqlType.dateTime, requiredDuringInsert: true);
+  @override
+  List<GeneratedColumn> get $columns =>
+      [id, messageId, senderId, emoji, createdAt];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'message_reactions';
+  @override
+  VerificationContext validateIntegrity(Insertable<ReactionEntry> instance,
+      {bool isInserting = false}) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('message_id')) {
+      context.handle(_messageIdMeta,
+          messageId.isAcceptableOrUnknown(data['message_id']!, _messageIdMeta));
+    } else if (isInserting) {
+      context.missing(_messageIdMeta);
+    }
+    if (data.containsKey('sender_id')) {
+      context.handle(_senderIdMeta,
+          senderId.isAcceptableOrUnknown(data['sender_id']!, _senderIdMeta));
+    } else if (isInserting) {
+      context.missing(_senderIdMeta);
+    }
+    if (data.containsKey('emoji')) {
+      context.handle(
+          _emojiMeta, emoji.isAcceptableOrUnknown(data['emoji']!, _emojiMeta));
+    } else if (isInserting) {
+      context.missing(_emojiMeta);
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(_createdAtMeta,
+          createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta));
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  ReactionEntry map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return ReactionEntry(
+      id: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}id'])!,
+      messageId: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}message_id'])!,
+      senderId: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}sender_id'])!,
+      emoji: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}emoji'])!,
+      createdAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.dateTime, data['${effectivePrefix}created_at'])!,
+    );
+  }
+
+  @override
+  $MessageReactionsTable createAlias(String alias) {
+    return $MessageReactionsTable(attachedDatabase, alias);
+  }
+}
+
+class ReactionEntry extends DataClass implements Insertable<ReactionEntry> {
+  final String id;
+  final String messageId;
+  final String senderId;
+  final String emoji;
+  final DateTime createdAt;
+  const ReactionEntry(
+      {required this.id,
+      required this.messageId,
+      required this.senderId,
+      required this.emoji,
+      required this.createdAt});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['message_id'] = Variable<String>(messageId);
+    map['sender_id'] = Variable<String>(senderId);
+    map['emoji'] = Variable<String>(emoji);
+    map['created_at'] = Variable<DateTime>(createdAt);
+    return map;
+  }
+
+  MessageReactionsCompanion toCompanion(bool nullToAbsent) {
+    return MessageReactionsCompanion(
+      id: Value(id),
+      messageId: Value(messageId),
+      senderId: Value(senderId),
+      emoji: Value(emoji),
+      createdAt: Value(createdAt),
+    );
+  }
+
+  factory ReactionEntry.fromJson(Map<String, dynamic> json,
+      {ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return ReactionEntry(
+      id: serializer.fromJson<String>(json['id']),
+      messageId: serializer.fromJson<String>(json['messageId']),
+      senderId: serializer.fromJson<String>(json['senderId']),
+      emoji: serializer.fromJson<String>(json['emoji']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'messageId': serializer.toJson<String>(messageId),
+      'senderId': serializer.toJson<String>(senderId),
+      'emoji': serializer.toJson<String>(emoji),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+    };
+  }
+
+  ReactionEntry copyWith(
+          {String? id,
+          String? messageId,
+          String? senderId,
+          String? emoji,
+          DateTime? createdAt}) =>
+      ReactionEntry(
+        id: id ?? this.id,
+        messageId: messageId ?? this.messageId,
+        senderId: senderId ?? this.senderId,
+        emoji: emoji ?? this.emoji,
+        createdAt: createdAt ?? this.createdAt,
+      );
+  ReactionEntry copyWithCompanion(MessageReactionsCompanion data) {
+    return ReactionEntry(
+      id: data.id.present ? data.id.value : this.id,
+      messageId: data.messageId.present ? data.messageId.value : this.messageId,
+      senderId: data.senderId.present ? data.senderId.value : this.senderId,
+      emoji: data.emoji.present ? data.emoji.value : this.emoji,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ReactionEntry(')
+          ..write('id: $id, ')
+          ..write('messageId: $messageId, ')
+          ..write('senderId: $senderId, ')
+          ..write('emoji: $emoji, ')
+          ..write('createdAt: $createdAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(id, messageId, senderId, emoji, createdAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is ReactionEntry &&
+          other.id == this.id &&
+          other.messageId == this.messageId &&
+          other.senderId == this.senderId &&
+          other.emoji == this.emoji &&
+          other.createdAt == this.createdAt);
+}
+
+class MessageReactionsCompanion extends UpdateCompanion<ReactionEntry> {
+  final Value<String> id;
+  final Value<String> messageId;
+  final Value<String> senderId;
+  final Value<String> emoji;
+  final Value<DateTime> createdAt;
+  final Value<int> rowid;
+  const MessageReactionsCompanion({
+    this.id = const Value.absent(),
+    this.messageId = const Value.absent(),
+    this.senderId = const Value.absent(),
+    this.emoji = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  MessageReactionsCompanion.insert({
+    required String id,
+    required String messageId,
+    required String senderId,
+    required String emoji,
+    required DateTime createdAt,
+    this.rowid = const Value.absent(),
+  })  : id = Value(id),
+        messageId = Value(messageId),
+        senderId = Value(senderId),
+        emoji = Value(emoji),
+        createdAt = Value(createdAt);
+  static Insertable<ReactionEntry> custom({
+    Expression<String>? id,
+    Expression<String>? messageId,
+    Expression<String>? senderId,
+    Expression<String>? emoji,
+    Expression<DateTime>? createdAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (messageId != null) 'message_id': messageId,
+      if (senderId != null) 'sender_id': senderId,
+      if (emoji != null) 'emoji': emoji,
+      if (createdAt != null) 'created_at': createdAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  MessageReactionsCompanion copyWith(
+      {Value<String>? id,
+      Value<String>? messageId,
+      Value<String>? senderId,
+      Value<String>? emoji,
+      Value<DateTime>? createdAt,
+      Value<int>? rowid}) {
+    return MessageReactionsCompanion(
+      id: id ?? this.id,
+      messageId: messageId ?? this.messageId,
+      senderId: senderId ?? this.senderId,
+      emoji: emoji ?? this.emoji,
+      createdAt: createdAt ?? this.createdAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (messageId.present) {
+      map['message_id'] = Variable<String>(messageId.value);
+    }
+    if (senderId.present) {
+      map['sender_id'] = Variable<String>(senderId.value);
+    }
+    if (emoji.present) {
+      map['emoji'] = Variable<String>(emoji.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('MessageReactionsCompanion(')
+          ..write('id: $id, ')
+          ..write('messageId: $messageId, ')
+          ..write('senderId: $senderId, ')
+          ..write('emoji: $emoji, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -2637,6 +2948,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $MessagesTable messages = $MessagesTable(this);
   late final $AnchorDropsTable anchorDrops = $AnchorDropsTable(this);
   late final $BlockedUsersTable blockedUsers = $BlockedUsersTable(this);
+  late final $MessageReactionsTable messageReactions =
+      $MessageReactionsTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -2648,7 +2961,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
         conversations,
         messages,
         anchorDrops,
-        blockedUsers
+        blockedUsers,
+        messageReactions
       ];
 }
 
@@ -3974,6 +4288,23 @@ final class $$MessagesTableReferences
     return ProcessedTableManager(
         manager.$state.copyWith(prefetchedData: [item]));
   }
+
+  static MultiTypedResultKey<$MessageReactionsTable, List<ReactionEntry>>
+      _messageReactionsRefsTable(_$AppDatabase db) =>
+          MultiTypedResultKey.fromTable(db.messageReactions,
+              aliasName: $_aliasNameGenerator(
+                  db.messages.id, db.messageReactions.messageId));
+
+  $$MessageReactionsTableProcessedTableManager get messageReactionsRefs {
+    final manager =
+        $$MessageReactionsTableTableManager($_db, $_db.messageReactions)
+            .filter((f) => f.messageId.id($_item.id));
+
+    final cache =
+        $_typedResult.readTableOrNull(_messageReactionsRefsTable($_db));
+    return ProcessedTableManager(
+        manager.$state.copyWith(prefetchedData: cache));
+  }
 }
 
 class $$MessagesTableFilterComposer
@@ -4028,6 +4359,27 @@ class $$MessagesTableFilterComposer
                   $removeJoinBuilderFromRootComposer,
             ));
     return composer;
+  }
+
+  Expression<bool> messageReactionsRefs(
+      Expression<bool> Function($$MessageReactionsTableFilterComposer f) f) {
+    final $$MessageReactionsTableFilterComposer composer = $composerBuilder(
+        composer: this,
+        getCurrentColumn: (t) => t.id,
+        referencedTable: $db.messageReactions,
+        getReferencedColumn: (t) => t.messageId,
+        builder: (joinBuilder,
+                {$addJoinBuilderToRootComposer,
+                $removeJoinBuilderFromRootComposer}) =>
+            $$MessageReactionsTableFilterComposer(
+              $db: $db,
+              $table: $db.messageReactions,
+              $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+              joinBuilder: joinBuilder,
+              $removeJoinBuilderFromRootComposer:
+                  $removeJoinBuilderFromRootComposer,
+            ));
+    return f(composer);
   }
 }
 
@@ -4132,6 +4484,27 @@ class $$MessagesTableAnnotationComposer
             ));
     return composer;
   }
+
+  Expression<T> messageReactionsRefs<T extends Object>(
+      Expression<T> Function($$MessageReactionsTableAnnotationComposer a) f) {
+    final $$MessageReactionsTableAnnotationComposer composer = $composerBuilder(
+        composer: this,
+        getCurrentColumn: (t) => t.id,
+        referencedTable: $db.messageReactions,
+        getReferencedColumn: (t) => t.messageId,
+        builder: (joinBuilder,
+                {$addJoinBuilderToRootComposer,
+                $removeJoinBuilderFromRootComposer}) =>
+            $$MessageReactionsTableAnnotationComposer(
+              $db: $db,
+              $table: $db.messageReactions,
+              $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+              joinBuilder: joinBuilder,
+              $removeJoinBuilderFromRootComposer:
+                  $removeJoinBuilderFromRootComposer,
+            ));
+    return f(composer);
+  }
 }
 
 class $$MessagesTableTableManager extends RootTableManager<
@@ -4145,7 +4518,7 @@ class $$MessagesTableTableManager extends RootTableManager<
     $$MessagesTableUpdateCompanionBuilder,
     (MessageEntry, $$MessagesTableReferences),
     MessageEntry,
-    PrefetchHooks Function({bool conversationId})> {
+    PrefetchHooks Function({bool conversationId, bool messageReactionsRefs})> {
   $$MessagesTableTableManager(_$AppDatabase db, $MessagesTable table)
       : super(TableManagerState(
           db: db,
@@ -4204,10 +4577,13 @@ class $$MessagesTableTableManager extends RootTableManager<
               .map((e) =>
                   (e.readTable(table), $$MessagesTableReferences(db, table, e)))
               .toList(),
-          prefetchHooksCallback: ({conversationId = false}) {
+          prefetchHooksCallback: (
+              {conversationId = false, messageReactionsRefs = false}) {
             return PrefetchHooks(
               db: db,
-              explicitlyWatchedTables: [],
+              explicitlyWatchedTables: [
+                if (messageReactionsRefs) db.messageReactions
+              ],
               addJoins: <
                   T extends TableManagerState<
                       dynamic,
@@ -4235,7 +4611,20 @@ class $$MessagesTableTableManager extends RootTableManager<
                 return state;
               },
               getPrefetchedDataCallback: (items) async {
-                return [];
+                return [
+                  if (messageReactionsRefs)
+                    await $_getPrefetchedData(
+                        currentTable: table,
+                        referencedTable: $$MessagesTableReferences
+                            ._messageReactionsRefsTable(db),
+                        managerFromTypedResult: (p0) =>
+                            $$MessagesTableReferences(db, table, p0)
+                                .messageReactionsRefs,
+                        referencedItemsForCurrentItem:
+                            (item, referencedItems) => referencedItems
+                                .where((e) => e.messageId == item.id),
+                        typedResults: items)
+                ];
               },
             );
           },
@@ -4253,7 +4642,7 @@ typedef $$MessagesTableProcessedTableManager = ProcessedTableManager<
     $$MessagesTableUpdateCompanionBuilder,
     (MessageEntry, $$MessagesTableReferences),
     MessageEntry,
-    PrefetchHooks Function({bool conversationId})>;
+    PrefetchHooks Function({bool conversationId, bool messageReactionsRefs})>;
 typedef $$AnchorDropsTableCreateCompanionBuilder = AnchorDropsCompanion
     Function({
   required String id,
@@ -4558,6 +4947,283 @@ typedef $$BlockedUsersTableProcessedTableManager = ProcessedTableManager<
     ),
     BlockedUserEntry,
     PrefetchHooks Function()>;
+typedef $$MessageReactionsTableCreateCompanionBuilder
+    = MessageReactionsCompanion Function({
+  required String id,
+  required String messageId,
+  required String senderId,
+  required String emoji,
+  required DateTime createdAt,
+  Value<int> rowid,
+});
+typedef $$MessageReactionsTableUpdateCompanionBuilder
+    = MessageReactionsCompanion Function({
+  Value<String> id,
+  Value<String> messageId,
+  Value<String> senderId,
+  Value<String> emoji,
+  Value<DateTime> createdAt,
+  Value<int> rowid,
+});
+
+final class $$MessageReactionsTableReferences extends BaseReferences<
+    _$AppDatabase, $MessageReactionsTable, ReactionEntry> {
+  $$MessageReactionsTableReferences(
+      super.$_db, super.$_table, super.$_typedResult);
+
+  static $MessagesTable _messageIdTable(_$AppDatabase db) =>
+      db.messages.createAlias(
+          $_aliasNameGenerator(db.messageReactions.messageId, db.messages.id));
+
+  $$MessagesTableProcessedTableManager? get messageId {
+    if ($_item.messageId == null) return null;
+    final manager = $$MessagesTableTableManager($_db, $_db.messages)
+        .filter((f) => f.id($_item.messageId!));
+    final item = $_typedResult.readTableOrNull(_messageIdTable($_db));
+    if (item == null) return manager;
+    return ProcessedTableManager(
+        manager.$state.copyWith(prefetchedData: [item]));
+  }
+}
+
+class $$MessageReactionsTableFilterComposer
+    extends Composer<_$AppDatabase, $MessageReactionsTable> {
+  $$MessageReactionsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+      column: $table.id, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get senderId => $composableBuilder(
+      column: $table.senderId, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get emoji => $composableBuilder(
+      column: $table.emoji, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+      column: $table.createdAt, builder: (column) => ColumnFilters(column));
+
+  $$MessagesTableFilterComposer get messageId {
+    final $$MessagesTableFilterComposer composer = $composerBuilder(
+        composer: this,
+        getCurrentColumn: (t) => t.messageId,
+        referencedTable: $db.messages,
+        getReferencedColumn: (t) => t.id,
+        builder: (joinBuilder,
+                {$addJoinBuilderToRootComposer,
+                $removeJoinBuilderFromRootComposer}) =>
+            $$MessagesTableFilterComposer(
+              $db: $db,
+              $table: $db.messages,
+              $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+              joinBuilder: joinBuilder,
+              $removeJoinBuilderFromRootComposer:
+                  $removeJoinBuilderFromRootComposer,
+            ));
+    return composer;
+  }
+}
+
+class $$MessageReactionsTableOrderingComposer
+    extends Composer<_$AppDatabase, $MessageReactionsTable> {
+  $$MessageReactionsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+      column: $table.id, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get senderId => $composableBuilder(
+      column: $table.senderId, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get emoji => $composableBuilder(
+      column: $table.emoji, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+      column: $table.createdAt, builder: (column) => ColumnOrderings(column));
+
+  $$MessagesTableOrderingComposer get messageId {
+    final $$MessagesTableOrderingComposer composer = $composerBuilder(
+        composer: this,
+        getCurrentColumn: (t) => t.messageId,
+        referencedTable: $db.messages,
+        getReferencedColumn: (t) => t.id,
+        builder: (joinBuilder,
+                {$addJoinBuilderToRootComposer,
+                $removeJoinBuilderFromRootComposer}) =>
+            $$MessagesTableOrderingComposer(
+              $db: $db,
+              $table: $db.messages,
+              $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+              joinBuilder: joinBuilder,
+              $removeJoinBuilderFromRootComposer:
+                  $removeJoinBuilderFromRootComposer,
+            ));
+    return composer;
+  }
+}
+
+class $$MessageReactionsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $MessageReactionsTable> {
+  $$MessageReactionsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get senderId =>
+      $composableBuilder(column: $table.senderId, builder: (column) => column);
+
+  GeneratedColumn<String> get emoji =>
+      $composableBuilder(column: $table.emoji, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  $$MessagesTableAnnotationComposer get messageId {
+    final $$MessagesTableAnnotationComposer composer = $composerBuilder(
+        composer: this,
+        getCurrentColumn: (t) => t.messageId,
+        referencedTable: $db.messages,
+        getReferencedColumn: (t) => t.id,
+        builder: (joinBuilder,
+                {$addJoinBuilderToRootComposer,
+                $removeJoinBuilderFromRootComposer}) =>
+            $$MessagesTableAnnotationComposer(
+              $db: $db,
+              $table: $db.messages,
+              $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+              joinBuilder: joinBuilder,
+              $removeJoinBuilderFromRootComposer:
+                  $removeJoinBuilderFromRootComposer,
+            ));
+    return composer;
+  }
+}
+
+class $$MessageReactionsTableTableManager extends RootTableManager<
+    _$AppDatabase,
+    $MessageReactionsTable,
+    ReactionEntry,
+    $$MessageReactionsTableFilterComposer,
+    $$MessageReactionsTableOrderingComposer,
+    $$MessageReactionsTableAnnotationComposer,
+    $$MessageReactionsTableCreateCompanionBuilder,
+    $$MessageReactionsTableUpdateCompanionBuilder,
+    (ReactionEntry, $$MessageReactionsTableReferences),
+    ReactionEntry,
+    PrefetchHooks Function({bool messageId})> {
+  $$MessageReactionsTableTableManager(
+      _$AppDatabase db, $MessageReactionsTable table)
+      : super(TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$MessageReactionsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$MessageReactionsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$MessageReactionsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback: ({
+            Value<String> id = const Value.absent(),
+            Value<String> messageId = const Value.absent(),
+            Value<String> senderId = const Value.absent(),
+            Value<String> emoji = const Value.absent(),
+            Value<DateTime> createdAt = const Value.absent(),
+            Value<int> rowid = const Value.absent(),
+          }) =>
+              MessageReactionsCompanion(
+            id: id,
+            messageId: messageId,
+            senderId: senderId,
+            emoji: emoji,
+            createdAt: createdAt,
+            rowid: rowid,
+          ),
+          createCompanionCallback: ({
+            required String id,
+            required String messageId,
+            required String senderId,
+            required String emoji,
+            required DateTime createdAt,
+            Value<int> rowid = const Value.absent(),
+          }) =>
+              MessageReactionsCompanion.insert(
+            id: id,
+            messageId: messageId,
+            senderId: senderId,
+            emoji: emoji,
+            createdAt: createdAt,
+            rowid: rowid,
+          ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (
+                    e.readTable(table),
+                    $$MessageReactionsTableReferences(db, table, e)
+                  ))
+              .toList(),
+          prefetchHooksCallback: ({messageId = false}) {
+            return PrefetchHooks(
+              db: db,
+              explicitlyWatchedTables: [],
+              addJoins: <
+                  T extends TableManagerState<
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic>>(state) {
+                if (messageId) {
+                  state = state.withJoin(
+                    currentTable: table,
+                    currentColumn: table.messageId,
+                    referencedTable:
+                        $$MessageReactionsTableReferences._messageIdTable(db),
+                    referencedColumn: $$MessageReactionsTableReferences
+                        ._messageIdTable(db)
+                        .id,
+                  ) as T;
+                }
+
+                return state;
+              },
+              getPrefetchedDataCallback: (items) async {
+                return [];
+              },
+            );
+          },
+        ));
+}
+
+typedef $$MessageReactionsTableProcessedTableManager = ProcessedTableManager<
+    _$AppDatabase,
+    $MessageReactionsTable,
+    ReactionEntry,
+    $$MessageReactionsTableFilterComposer,
+    $$MessageReactionsTableOrderingComposer,
+    $$MessageReactionsTableAnnotationComposer,
+    $$MessageReactionsTableCreateCompanionBuilder,
+    $$MessageReactionsTableUpdateCompanionBuilder,
+    (ReactionEntry, $$MessageReactionsTableReferences),
+    ReactionEntry,
+    PrefetchHooks Function({bool messageId})>;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -4576,4 +5242,6 @@ class $AppDatabaseManager {
       $$AnchorDropsTableTableManager(_db, _db.anchorDrops);
   $$BlockedUsersTableTableManager get blockedUsers =>
       $$BlockedUsersTableTableManager(_db, _db.blockedUsers);
+  $$MessageReactionsTableTableManager get messageReactions =>
+      $$MessageReactionsTableTableManager(_db, _db.messageReactions);
 }

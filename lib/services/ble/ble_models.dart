@@ -432,6 +432,32 @@ class ReceivedPhotoRequest extends Equatable {
   List<Object?> get props => [fromPeerId, messageId, photoId, timestamp];
 }
 
+/// Received emoji reaction from a peer.
+class ReactionReceived extends Equatable {
+  const ReactionReceived({
+    required this.fromPeerId,
+    required this.messageId,
+    required this.emoji,
+    required this.action,
+    required this.timestamp,
+  });
+
+  final String fromPeerId;
+
+  /// DB message UUID this reaction targets.
+  final String messageId;
+
+  final String emoji;
+
+  /// Either "add" or "remove".
+  final String action;
+
+  final DateTime timestamp;
+
+  @override
+  List<Object?> get props => [fromPeerId, messageId, emoji, action, timestamp];
+}
+
 /// Emitted when a known userId appears under a new BLE peripheral UUID
 /// (MAC rotation). Consumers should migrate data from oldPeerId to newPeerId.
 class PeerIdChanged extends Equatable {

@@ -294,3 +294,46 @@ class ChatPeerIdMigrated extends ChatEvent {
   @override
   List<Object?> get props => [oldPeerId, newPeerId];
 }
+
+// ── Emoji Reactions ───────────────────────────────────────────────────────────
+
+/// Send an emoji reaction for a message.
+class SendReaction extends ChatEvent {
+  const SendReaction({
+    required this.messageId,
+    required this.peerId,
+    required this.emoji,
+  });
+
+  final String messageId;
+  final String peerId;
+  final String emoji;
+
+  @override
+  List<Object?> get props => [messageId, peerId, emoji];
+}
+
+/// Remove an emoji reaction from a message.
+class RemoveReaction extends ChatEvent {
+  const RemoveReaction({
+    required this.messageId,
+    required this.peerId,
+    required this.emoji,
+  });
+
+  final String messageId;
+  final String peerId;
+  final String emoji;
+
+  @override
+  List<Object?> get props => [messageId, peerId, emoji];
+}
+
+/// Incoming emoji reaction received from a peer via BLE.
+class BleReactionReceived extends ChatEvent {
+  const BleReactionReceived(this.reaction);
+  final ble.ReactionReceived reaction;
+
+  @override
+  List<Object?> get props => [reaction];
+}

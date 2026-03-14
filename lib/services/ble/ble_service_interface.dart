@@ -173,6 +173,21 @@ abstract class BleServiceInterface {
   /// Stream of received anchor drop signals from peers
   Stream<AnchorDropReceived> get anchorDropReceivedStream;
 
+  // ==================== Reactions ====================
+
+  /// Send an emoji reaction for a specific message to a peer.
+  /// [action] is either "add" or "remove".
+  /// Returns true if the signal was sent successfully.
+  Future<bool> sendReaction({
+    required String peerId,
+    required String messageId,
+    required String emoji,
+    required String action,
+  });
+
+  /// Stream of received emoji reactions from peers.
+  Stream<ReactionReceived> get reactionReceivedStream;
+
   // ==================== Mesh ====================
 
   /// Enable or disable mesh relay (message forwarding between devices)

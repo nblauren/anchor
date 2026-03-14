@@ -56,6 +56,8 @@ class WifiAwareTransportServiceImpl implements WifiAwareTransportService {
       StreamController<ble.ReceivedPhotoRequest>.broadcast();
   final _anchorDropReceivedController =
       StreamController<ble.AnchorDropReceived>.broadcast();
+  final _reactionReceivedController =
+      StreamController<ble.ReactionReceived>.broadcast();
   final _availabilityController = StreamController<bool>.broadcast();
 
   // Subscriptions
@@ -162,6 +164,7 @@ class WifiAwareTransportServiceImpl implements WifiAwareTransportService {
     await _photoPreviewReceivedController.close();
     await _photoRequestReceivedController.close();
     await _anchorDropReceivedController.close();
+    await _reactionReceivedController.close();
     await _availabilityController.close();
   }
 
@@ -456,6 +459,46 @@ class WifiAwareTransportServiceImpl implements WifiAwareTransportService {
   Stream<ble.AnchorDropReceived> get anchorDropReceivedStream =>
       _anchorDropReceivedController.stream;
 
+  // ==================== Reactions ====================
+
+  @override
+  Future<bool> sendReaction({
+    required String peerId,
+    required String messageId,
+    required String emoji,
+    required String action,
+  }) async {
+    final session = _session;
+    if (session == null) return false;
+
+    try {
+      final json = jsonEncode({
+        'type': 'reaction',
+        'sender_id': _ownUserId ?? '',
+        'message_id': messageId,
+        'emoji': emoji,
+        'action': action,
+        'timestamp': DateTime.now().toIso8601String(),
+      });
+      final bytes = Uint8List.fromList(utf8.encode(json));
+      await session.sendMessage(peerId, bytes);
+      _lastActivity[peerId] = DateTime.now();
+      return true;
+    } catch (e) {
+      Logger.error(
+        'WifiAwareTransport: failed to send reaction',
+        e,
+        null,
+        'WifiAware',
+      );
+      return false;
+    }
+  }
+
+  @override
+  Stream<ble.ReactionReceived> get reactionReceivedStream =>
+      _reactionReceivedController.stream;
+
   // ==================== Pairing ====================
 
   @override
@@ -554,6 +597,20 @@ class WifiAwareTransportServiceImpl implements WifiAwareTransportService {
           fromPeerId: fromPeerId,
           timestamp: timestamp,
         ));
+
+      case 'reaction':
+        final msgId = json['message_id'] as String?;
+        final emoji = json['emoji'] as String?;
+        final action = json['action'] as String?;
+        if (msgId != null && emoji != null && action != null) {
+          _reactionReceivedController.add(ble.ReactionReceived(
+            fromPeerId: fromPeerId,
+            messageId: msgId,
+            emoji: emoji,
+            action: action,
+            timestamp: timestamp,
+          ));
+        }
 
       case 'photoPreview':
         _photoPreviewReceivedController.add(ble.ReceivedPhotoPreview(

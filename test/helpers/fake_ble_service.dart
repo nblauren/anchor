@@ -33,6 +33,7 @@ class FakeBleService implements BleServiceInterface {
   final _photoProgressController = StreamController<PhotoTransferProgress>.broadcast();
   final _photoReceivedController = StreamController<ReceivedPhoto>.broadcast();
   final _anchorDropReceivedController = StreamController<AnchorDropReceived>.broadcast();
+  final _reactionReceivedController = StreamController<ReactionReceived>.broadcast();
   final _photoPreviewReceivedController = StreamController<ReceivedPhotoPreview>.broadcast();
   final _photoRequestReceivedController = StreamController<ReceivedPhotoRequest>.broadcast();
 
@@ -112,6 +113,7 @@ class FakeBleService implements BleServiceInterface {
     await _photoProgressController.close();
     await _photoReceivedController.close();
     await _anchorDropReceivedController.close();
+    await _reactionReceivedController.close();
     await _photoPreviewReceivedController.close();
     await _photoRequestReceivedController.close();
   }
@@ -254,6 +256,18 @@ class FakeBleService implements BleServiceInterface {
   @override
   Stream<AnchorDropReceived> get anchorDropReceivedStream =>
       _anchorDropReceivedController.stream;
+
+  @override
+  Future<bool> sendReaction({
+    required String peerId,
+    required String messageId,
+    required String emoji,
+    required String action,
+  }) async => true;
+
+  @override
+  Stream<ReactionReceived> get reactionReceivedStream =>
+      _reactionReceivedController.stream;
 
   @override
   Future<void> setMeshRelayMode(bool enabled) async => _meshEnabled = enabled;

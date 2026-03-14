@@ -144,6 +144,19 @@ class BlockedUsers extends Table {
   Set<Column> get primaryKey => {peerId};
 }
 
+/// Emoji reactions on messages
+@DataClassName('ReactionEntry')
+class MessageReactions extends Table {
+  TextColumn get id => text()();
+  TextColumn get messageId => text().references(Messages, #id)();
+  TextColumn get senderId => text()();
+  TextColumn get emoji => text()();
+  DateTimeColumn get createdAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
 // ==================== Database ====================
 
 @DriftDatabase(tables: [
@@ -154,6 +167,7 @@ class BlockedUsers extends Table {
   Messages,
   AnchorDrops,
   BlockedUsers,
+  MessageReactions,
 ])
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
@@ -162,7 +176,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 5;
+  int get schemaVersion => 6;
 
   @override
   MigrationStrategy get migration {
@@ -192,6 +206,10 @@ class AppDatabase extends _$AppDatabase {
         if (from < 5) {
           // Migration from v4 to v5: add userId to discovered_peers for MAC rotation dedup
           await m.addColumn(discoveredPeers, discoveredPeers.userId);
+        }
+        if (from < 6) {
+          // Migration from v5 to v6: add message_reactions table
+          await m.createTable(messageReactions);
         }
       },
       beforeOpen: (details) async {

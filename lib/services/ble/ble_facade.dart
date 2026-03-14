@@ -75,6 +75,8 @@ class BleFacade implements BleServiceInterface {
   final _photoReceivedController = StreamController<ReceivedPhoto>.broadcast();
   final _anchorDropReceivedController =
       StreamController<AnchorDropReceived>.broadcast();
+  final _reactionReceivedController =
+      StreamController<ReactionReceived>.broadcast();
   final _photoPreviewReceivedController =
       StreamController<ReceivedPhotoPreview>.broadcast();
   final _photoRequestReceivedController =
@@ -275,6 +277,7 @@ class BleFacade implements BleServiceInterface {
     await _photoProgressController.close();
     await _photoReceivedController.close();
     await _anchorDropReceivedController.close();
+    await _reactionReceivedController.close();
 
     _photoTransfer.clear();
     _isInitialized = false;
@@ -363,6 +366,8 @@ class BleFacade implements BleServiceInterface {
         _meshRelay.handleNeighborList(json);
       } else if (type == 'drop_anchor') {
         _handleDropAnchor(fromPeerId);
+      } else if (type == 'reaction') {
+        _handleReaction(json, fromPeerId);
       } else {
         _handleReceivedMessage(json, fromPeerId);
       }
@@ -1053,6 +1058,104 @@ class BleFacade implements BleServiceInterface {
     _anchorDropReceivedController.add(drop);
     Logger.info(
       'BleService: Anchor drop received from '
+          '${fromPeerId.substring(0, min(8, fromPeerId.length))}',
+      'BLE',
+    );
+  }
+
+  // ==================== Reactions ====================
+
+  @override
+  Future<bool> sendReaction({
+    required String peerId,
+    required String messageId,
+    required String emoji,
+    required String action,
+  }) async {
+    _ensureInitialized();
+
+    Logger.info(
+      'BleService: Sending reaction $emoji ($action) to '
+          '${peerId.substring(0, min(8, peerId.length))}',
+      'BLE',
+    );
+
+    try {
+      var conn = _connectionManager.getConnection(peerId);
+
+      if (conn == null || !conn.canSendMessages) {
+        final peripheral = _connectionManager.getPeripheral(peerId);
+        if (peripheral != null) {
+          conn = await _connectionManager.connect(peerId, peripheral);
+        }
+      }
+
+      final ownUserId = _gattServer.ownUserId;
+      final payload = <String, dynamic>{
+        'type': 'reaction',
+        'sender_id': ownUserId,
+        'message_id': messageId,
+        'emoji': emoji,
+        'action': action,
+        'timestamp': DateTime.now().toIso8601String(),
+      };
+      final data = Uint8List.fromList(utf8.encode(jsonEncode(payload)));
+
+      if (conn == null || !conn.canSendMessages) {
+        Logger.info(
+          'BleService: Cannot send reaction — peer not reachable: $peerId',
+          'BLE',
+        );
+        return false;
+      }
+
+      final success = await _writeQueue.enqueue(
+        peerId: peerId,
+        peripheral: conn.peripheral,
+        characteristic: conn.messagingChar!,
+        data: data,
+        priority: WritePriority.userMessage,
+      );
+
+      if (success) {
+        Logger.info('BleService: Reaction sent successfully', 'BLE');
+      }
+      return success;
+    } catch (e) {
+      Logger.error('BleService: Reaction send failed', e, null, 'BLE');
+      return false;
+    }
+  }
+
+  @override
+  Stream<ReactionReceived> get reactionReceivedStream =>
+      _reactionReceivedController.stream;
+
+  void _handleReaction(Map<String, dynamic> json, String fromPeerId) {
+    final messageId = json['message_id'] as String?;
+    final emoji = json['emoji'] as String?;
+    final action = json['action'] as String?;
+    final timestampStr = json['timestamp'] as String?;
+
+    if (messageId == null || emoji == null || action == null) {
+      Logger.warning('BleService: Malformed reaction payload', 'BLE');
+      return;
+    }
+
+    final timestamp = timestampStr != null
+        ? DateTime.tryParse(timestampStr) ?? DateTime.now()
+        : DateTime.now();
+
+    final reaction = ReactionReceived(
+      fromPeerId: fromPeerId,
+      messageId: messageId,
+      emoji: emoji,
+      action: action,
+      timestamp: timestamp,
+    );
+    _reactionReceivedController.add(reaction);
+    Logger.info(
+      'BleService: Reaction $emoji ($action) received from '
           '${fromPeerId.substring(0, min(8, fromPeerId.length))}',
       'BLE',
     );

@@ -12,6 +12,8 @@ import '../bloc/chat_event.dart';
 import '../bloc/chat_state.dart';
 import '../widgets/message_bubble_widget.dart';
 
+const _kReactionEmojis = ['❤️', '👍', '😂', '😮', '😢', '🔥'];
+
 /// Screen for individual chat conversation
 class ChatScreen extends StatefulWidget {
   const ChatScreen({
@@ -243,6 +245,63 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  void _showEmojiPicker(BuildContext context, String messageId, String peerId) {
+    final ownUserId = context.read<ChatBloc>().ownUserId;
+    final currentReactions =
+        context.read<ChatBloc>().state.reactions[messageId] ?? [];
+
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppTheme.darkCard,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: _kReactionEmojis.map((emoji) {
+              final alreadyReacted = currentReactions
+                  .any((r) => r.senderId == ownUserId && r.emoji == emoji);
+              return GestureDetector(
+                onTap: () {
+                  Navigator.pop(ctx);
+                  if (alreadyReacted) {
+                    context.read<ChatBloc>().add(RemoveReaction(
+                          messageId: messageId,
+                          peerId: peerId,
+                          emoji: emoji,
+                        ));
+                  } else {
+                    context.read<ChatBloc>().add(SendReaction(
+                          messageId: messageId,
+                          peerId: peerId,
+                          emoji: emoji,
+                        ));
+                  }
+                },
+                child: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: alreadyReacted
+                      ? BoxDecoration(
+                          color: AppTheme.primaryColor.withValues(alpha: 0.25),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: AppTheme.primaryColor.withValues(alpha: 0.5),
+                          ),
+                        )
+                      : null,
+                  child: Text(emoji, style: const TextStyle(fontSize: 28)),
+                ),
+              );
+            }).toList(),
+          ),
+        ),
+      ),
+    );
+  }
+
   void _requestFullPhoto(String messageId, String photoId, String peerId) {
     context.read<ChatBloc>().add(RequestFullPhoto(
           messageId: messageId,
@@ -422,6 +481,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                 MessageBubbleWidget(
                                   message: message,
                                   isSentByMe: isSentByMe,
+                                  ownUserId: ownUserId,
                                   onRetry: () => _retryMessage(message.id),
                                   isRelayedPeer: widget.isRelayedPeer,
                                   transferInfo:
@@ -440,6 +500,43 @@ class _ChatScreenState extends State<ChatScreen> {
                                                 CancelPhotoTransfer(message.id),
                                               )
                                           : null,
+                                  reactions: state.reactions[message.id] ?? [],
+                                  onReact: state.isBlocked
+                                      ? null
+                                      : (emoji) {
+                                          final peerId = state
+                                              .currentConversation!.peerId;
+                                          final ownReacted =
+                                              (state.reactions[message.id] ??
+                                                      [])
+                                                  .any((r) =>
+                                                      r.senderId == ownUserId &&
+                                                      r.emoji == emoji);
+                                          if (ownReacted) {
+                                            context.read<ChatBloc>().add(
+                                                  RemoveReaction(
+                                                    messageId: message.id,
+                                                    peerId: peerId,
+                                                    emoji: emoji,
+                                                  ),
+                                                );
+                                          } else {
+                                            context.read<ChatBloc>().add(
+                                                  SendReaction(
+                                                    messageId: message.id,
+                                                    peerId: peerId,
+                                                    emoji: emoji,
+                                                  ),
+                                                );
+                                          }
+                                        },
+                                  onLongPress: state.isBlocked
+                                      ? null
+                                      : () => _showEmojiPicker(
+                                            context,
+                                            message.id,
+                                            state.currentConversation!.peerId,
+                                          ),
                                 ),
                               ],
                             );

@@ -66,6 +66,10 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     // Peer loss + MAC rotation
     on<ChatPeerLost>(_onChatPeerLost);
     on<ChatPeerIdMigrated>(_onChatPeerIdMigrated);
+    // Reactions
+    on<SendReaction>(_onSendReaction);
+    on<RemoveReaction>(_onRemoveReaction);
+    on<BleReactionReceived>(_onBleReactionReceived);
 
     // Subscribe to transport manager streams (Wi-Fi Aware or BLE — unified)
     _messageSubscription = _transportManager.messageReceivedStream.listen(
@@ -99,6 +103,10 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
 
     _peerLostSubscription = _transportManager.peerLostStream.listen(
       (peerId) => add(ChatPeerLost(peerId)),
+    );
+
+    _reactionSubscription = _transportManager.reactionReceivedStream.listen(
+      (reaction) => add(BleReactionReceived(reaction)),
     );
 
     // Initialize Nearby / Wi-Fi Direct and subscribe to streams.
@@ -137,6 +145,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   StreamSubscription<ble.ReceivedPhotoRequest>? _photoRequestSubscription;
   StreamSubscription<ble.PeerIdChanged>? _peerIdChangedSubscription;
   StreamSubscription<String>? _peerLostSubscription;
+  StreamSubscription<ble.ReactionReceived>? _reactionSubscription;
 
   // Photo download timeout timers (keyed by messageId)
   final Map<String, Timer> _photoDownloadTimers = {};
@@ -210,6 +219,16 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
 
       final isBlocked = await _peerRepository.isPeerBlocked(event.peerId);
 
+      // Load reactions for this conversation
+      Map<String, List<ReactionEntry>> loadedReactions = {};
+      try {
+        loadedReactions = await _chatRepository.getReactionsForConversation(
+          conversationEntry.id,
+        );
+      } catch (e) {
+        Logger.warning('ChatBloc: Failed to load reactions', 'ChatBloc');
+      }
+
       emit(state.copyWith(
         status: ChatStatus.loaded,
         currentConversation: CurrentConversation(
@@ -220,6 +239,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         messages: [],
         hasMoreMessages: true,
         isBlocked: isBlocked,
+        reactions: loadedReactions,
       ));
 
       // Load messages
@@ -1543,6 +1563,168 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     );
   }
 
+  // ==================== Reactions ====================
+
+  Future<void> _onSendReaction(
+    SendReaction event,
+    Emitter<ChatState> emit,
+  ) async {
+    if (state.isBlocked) return;
+
+    // Optimistically update state
+    final updatedReactions = Map<String, List<ReactionEntry>>.from(
+      state.reactions.map((k, v) => MapEntry(k, List<ReactionEntry>.from(v))),
+    );
+    final messageReactions =
+        updatedReactions.putIfAbsent(event.messageId, () => []);
+    final alreadyReacted = messageReactions.any(
+      (r) => r.senderId == _ownUserId && r.emoji == event.emoji,
+    );
+    if (alreadyReacted) return; // already reacted — no-op
+
+    final fakeEntry = ReactionEntry(
+      id: 'local-${event.messageId}-${event.emoji}',
+      messageId: event.messageId,
+      senderId: _ownUserId,
+      emoji: event.emoji,
+      createdAt: DateTime.now(),
+    );
+    messageReactions.add(fakeEntry);
+    emit(state.copyWith(reactions: updatedReactions));
+
+    // Persist to DB
+    try {
+      await _chatRepository.addReaction(
+        messageId: event.messageId,
+        senderId: _ownUserId,
+        emoji: event.emoji,
+      );
+    } catch (e) {
+      Logger.error('ChatBloc: Failed to save reaction', e, null, 'ChatBloc');
+    }
+
+    // Send via BLE (fire-and-forget)
+    _transportManager
+        .sendReaction(
+          peerId: event.peerId,
+          messageId: event.messageId,
+          emoji: event.emoji,
+          action: 'add',
+        )
+        .catchError((Object e) {
+          Logger.error('ChatBloc: BLE reaction send failed', e, null, 'ChatBloc');
+          return false;
+        });
+  }
+
+  Future<void> _onRemoveReaction(
+    RemoveReaction event,
+    Emitter<ChatState> emit,
+  ) async {
+    // Optimistically update state
+    final updatedReactions = Map<String, List<ReactionEntry>>.from(
+      state.reactions.map((k, v) => MapEntry(k, List<ReactionEntry>.from(v))),
+    );
+    updatedReactions[event.messageId]?.removeWhere(
+      (r) => r.senderId == _ownUserId && r.emoji == event.emoji,
+    );
+    emit(state.copyWith(reactions: updatedReactions));
+
+    // Persist to DB
+    try {
+      await _chatRepository.removeReaction(
+        messageId: event.messageId,
+        senderId: _ownUserId,
+        emoji: event.emoji,
+      );
+    } catch (e) {
+      Logger.error('ChatBloc: Failed to remove reaction', e, null, 'ChatBloc');
+    }
+
+    // Send via BLE (fire-and-forget)
+    _transportManager
+        .sendReaction(
+          peerId: event.peerId,
+          messageId: event.messageId,
+          emoji: event.emoji,
+          action: 'remove',
+        )
+        .catchError((Object e) {
+          Logger.error('ChatBloc: BLE reaction send failed', e, null, 'ChatBloc');
+          return false;
+        });
+  }
+
+  Future<void> _onBleReactionReceived(
+    BleReactionReceived event,
+    Emitter<ChatState> emit,
+  ) async {
+    final reaction = event.reaction;
+
+    // Ignore reactions from blocked peers
+    try {
+      final isBlocked =
+          await _peerRepository.isPeerBlocked(reaction.fromPeerId);
+      if (isBlocked) return;
+    } catch (_) {}
+
+    final messageId = reaction.messageId;
+    final isAdd = reaction.action == 'add';
+
+    // Update DB
+    try {
+      if (isAdd) {
+        await _chatRepository.addReaction(
+          messageId: messageId,
+          senderId: reaction.fromPeerId,
+          emoji: reaction.emoji,
+        );
+      } else {
+        await _chatRepository.removeReaction(
+          messageId: messageId,
+          senderId: reaction.fromPeerId,
+          emoji: reaction.emoji,
+        );
+      }
+    } catch (e) {
+      Logger.error('ChatBloc: Failed to persist received reaction', e, null, 'ChatBloc');
+    }
+
+    // Update state
+    final updatedReactions = Map<String, List<ReactionEntry>>.from(
+      state.reactions.map((k, v) => MapEntry(k, List<ReactionEntry>.from(v))),
+    );
+
+    if (isAdd) {
+      final msgReactions =
+          updatedReactions.putIfAbsent(messageId, () => []);
+      final alreadyExists = msgReactions.any(
+        (r) => r.senderId == reaction.fromPeerId && r.emoji == reaction.emoji,
+      );
+      if (!alreadyExists) {
+        msgReactions.add(ReactionEntry(
+          id: 'remote-$messageId-${reaction.fromPeerId}-${reaction.emoji}',
+          messageId: messageId,
+          senderId: reaction.fromPeerId,
+          emoji: reaction.emoji,
+          createdAt: reaction.timestamp,
+        ));
+      }
+    } else {
+      updatedReactions[messageId]?.removeWhere(
+        (r) =>
+            r.senderId == reaction.fromPeerId && r.emoji == reaction.emoji,
+      );
+    }
+
+    emit(state.copyWith(reactions: updatedReactions));
+    Logger.info(
+      'ChatBloc: Reaction ${reaction.emoji} (${reaction.action}) '
+          'from ${reaction.fromPeerId.substring(0, 8)}',
+      'ChatBloc',
+    );
+  }
+
   @override
   Future<void> close() {
     _echoTimer?.cancel();
@@ -1555,6 +1737,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     _peerLostSubscription?.cancel();
     _nearbyProgressSubscription?.cancel();
     _nearbyPayloadSubscription?.cancel();
+    _reactionSubscription?.cancel();
     for (final timer in _photoDownloadTimers.values) {
       timer.cancel();
     }

@@ -109,6 +109,20 @@ abstract class WifiAwareTransportService {
   /// Stream of received anchor drop signals.
   Stream<ble.AnchorDropReceived> get anchorDropReceivedStream;
 
+  // ==================== Reactions ====================
+
+  /// Send an emoji reaction for a specific message to a peer.
+  /// [action] is either "add" or "remove".
+  Future<bool> sendReaction({
+    required String peerId,
+    required String messageId,
+    required String emoji,
+    required String action,
+  });
+
+  /// Stream of received emoji reactions.
+  Stream<ble.ReactionReceived> get reactionReceivedStream;
+
   // ==================== Pairing ====================
 
   /// Whether there are any paired Wi-Fi Aware devices (iOS only).

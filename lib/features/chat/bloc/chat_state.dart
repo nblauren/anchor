@@ -4,6 +4,9 @@ import '../../../data/local_database/database.dart';
 import '../../../data/repositories/chat_repository.dart';
 import '../../../services/transport/transport_enums.dart';
 
+/// Preset emoji set for reactions.
+const kReactionEmojis = ['❤️', '👍', '😂', '😮', '😢', '🔥'];
+
 enum ChatStatus {
   initial,
   loading,
@@ -95,6 +98,7 @@ class ChatState extends Equatable {
     this.photoTransfers = const {},
     this.isBlocked = false,
     this.pendingOutgoingPhotos = const {},
+    this.reactions = const {},
   });
 
   final ChatStatus status;
@@ -108,6 +112,9 @@ class ChatState extends Equatable {
   /// Outgoing photos awaiting a [photo_request] from the receiver.
   /// Keyed by [photoId].
   final Map<String, PendingOutgoingPhoto> pendingOutgoingPhotos;
+  /// Emoji reactions keyed by messageId. Each list contains one entry per
+  /// (senderId, emoji) pair that has been added.
+  final Map<String, List<ReactionEntry>> reactions;
 
   /// Total unread count across all conversations
   int get totalUnreadCount =>
@@ -129,6 +136,7 @@ class ChatState extends Equatable {
     Map<String, PhotoTransferInfo>? photoTransfers,
     bool? isBlocked,
     Map<String, PendingOutgoingPhoto>? pendingOutgoingPhotos,
+    Map<String, List<ReactionEntry>>? reactions,
     bool clearCurrentConversation = false,
   }) {
     return ChatState(
@@ -143,6 +151,7 @@ class ChatState extends Equatable {
       isBlocked: isBlocked ?? this.isBlocked,
       pendingOutgoingPhotos:
           pendingOutgoingPhotos ?? this.pendingOutgoingPhotos,
+      reactions: reactions ?? this.reactions,
     );
   }
 
@@ -157,5 +166,6 @@ class ChatState extends Equatable {
         photoTransfers,
         isBlocked,
         pendingOutgoingPhotos,
+        reactions,
       ];
 }

@@ -29,6 +29,7 @@ class MockBleService implements BleServiceInterface {
   final _photoProgressController = StreamController<PhotoTransferProgress>.broadcast();
   final _photoReceivedController = StreamController<ReceivedPhoto>.broadcast();
   final _anchorDropReceivedController = StreamController<AnchorDropReceived>.broadcast();
+  final _reactionReceivedController = StreamController<ReactionReceived>.broadcast();
   final _photoPreviewReceivedController =
       StreamController<ReceivedPhotoPreview>.broadcast();
   final _photoRequestReceivedController =
@@ -142,6 +143,7 @@ class MockBleService implements BleServiceInterface {
     await _photoProgressController.close();
     await _photoReceivedController.close();
     await _anchorDropReceivedController.close();
+    await _reactionReceivedController.close();
   }
 
   // ==================== Status ====================
@@ -403,6 +405,27 @@ class MockBleService implements BleServiceInterface {
   @override
   Stream<AnchorDropReceived> get anchorDropReceivedStream =>
       _anchorDropReceivedController.stream;
+
+  // ==================== Reactions ====================
+
+  @override
+  Future<bool> sendReaction({
+    required String peerId,
+    required String messageId,
+    required String emoji,
+    required String action,
+  }) async {
+    Logger.info(
+      'MockBleService: Sending reaction $emoji ($action) to ${peerId.substring(0, 8)}',
+      'BLE',
+    );
+    await Future.delayed(Duration(milliseconds: 100 + _random.nextInt(100)));
+    return _visiblePeers.containsKey(peerId);
+  }
+
+  @override
+  Stream<ReactionReceived> get reactionReceivedStream =>
+      _reactionReceivedController.stream;
 
   // ==================== Photo Transfer ====================
 
