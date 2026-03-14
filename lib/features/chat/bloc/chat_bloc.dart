@@ -169,6 +169,12 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   ) async {
     emit(state.copyWith(status: ChatStatus.loading));
 
+    // One-time repair: fix any messages whose senderId was saved as '' because
+    // ChatBloc was constructed before the profile UUID was ready.
+    if (_ownUserId.isNotEmpty) {
+      await _chatRepository.fixEmptySenderIds(_ownUserId);
+    }
+
     try {
       final conversations = await _chatRepository.getAllConversations();
       emit(state.copyWith(
@@ -408,7 +414,11 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       const uuidGen = Uuid();
       final photoId = uuidGen.v4();
 
-      // 3. Register pending outgoing photo via event so the bloc can respond
+      // 3. Persist photoId in the message row so it can be recovered after a
+      //    session restart (pendingOutgoingPhotos is in-memory only).
+      await _chatRepository.updateMessagePhotoId(message.id, photoId);
+
+      // Register pending outgoing photo via event so the bloc can respond
       //    to a future photo_request from the receiver.
       add(RegisterPendingOutgoingPhoto(
         photo: PendingOutgoingPhoto(
@@ -582,14 +592,30 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   ) async {
     try {
       final request = event.request;
-      final pending = state.pendingOutgoingPhotos[request.photoId];
+      var pending = state.pendingOutgoingPhotos[request.photoId];
 
       if (pending == null) {
-        Logger.warning(
-          'ChatBloc: photo_request for unknown photoId ${request.photoId}',
+        // pendingOutgoingPhotos is in-memory only — recover from DB after a
+        // session restart or conversation close.
+        final storedMessage =
+            await _chatRepository.findMessageByPhotoId(request.photoId);
+        if (storedMessage == null || storedMessage.photoPath == null) {
+          Logger.warning(
+            'ChatBloc: photo_request for unknown photoId ${request.photoId} — not found in DB',
+            'Chat',
+          );
+          return;
+        }
+        pending = PendingOutgoingPhoto(
+          photoId: request.photoId,
+          localPhotoPath: storedMessage.photoPath!,
+          messageId: storedMessage.id,
+          peerId: request.fromPeerId,
+        );
+        Logger.info(
+          'ChatBloc: Recovered photo ${request.photoId} from DB for re-send',
           'Chat',
         );
-        return;
       }
 
       Logger.info(

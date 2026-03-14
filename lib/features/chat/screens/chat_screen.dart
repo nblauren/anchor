@@ -57,6 +57,18 @@ class _ChatScreenState extends State<ChatScreen> {
       peerName: widget.peerName,
     ));
 
+    // Reflect any anchor already dropped on this peer from the discovery screen.
+    try {
+      final dropped = context
+          .read<DiscoveryBloc>()
+          .state
+          .droppedAnchorPeerIds
+          .contains(widget.peerId);
+      if (dropped) _anchorDropped = true;
+    } catch (_) {
+      // DiscoveryBloc may not be in the tree from all entry points.
+    }
+
     _scrollController.addListener(() {
       if (_scrollController.position.pixels >=
           _scrollController.position.maxScrollExtent - 200) {

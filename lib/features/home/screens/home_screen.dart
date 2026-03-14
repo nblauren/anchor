@@ -28,6 +28,10 @@ class _HomeScreenState extends State<HomeScreen> {
         final ownUserId = profileState.profileId ?? '';
 
         return BlocProvider<ChatBloc>(
+          // ValueKey ensures the bloc is recreated when ownUserId changes
+          // (e.g., from '' to the real UUID after a profile-load error or
+          // the brief ProfileStatus.saving window on first profile creation).
+          key: ValueKey(ownUserId),
           create: (context) => getIt<ChatBloc>(param1: ownUserId),
           child: Scaffold(
             body: IndexedStack(

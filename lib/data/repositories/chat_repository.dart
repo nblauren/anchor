@@ -431,6 +431,35 @@ class ChatRepository {
       ..addColumns([count]);
     return query.getSingle().then((result) => result.read(count) ?? 0);
   }
+
+  /// Fix messages whose [senderId] was stored as an empty string due to
+  /// [ChatBloc] being created before the profile UUID was available.
+  /// Safe to call unconditionally — only rows with [senderId] == '' are touched,
+  /// and those can only ever be locally-sent messages (received messages always
+  /// carry the peer's non-empty BLE device ID as their sender).
+  Future<void> fixEmptySenderIds(String ownUserId) async {
+    if (ownUserId.isEmpty) return;
+    await (_db.update(_db.messages)..where((t) => t.senderId.equals('')))
+        .write(MessagesCompanion(senderId: Value(ownUserId)));
+  }
+
+  /// Persist the stable [photoId] into a sent photo message's [textContent]
+  /// so it survives session restarts and can be recovered in [findMessageByPhotoId].
+  Future<void> updateMessagePhotoId(String messageId, String photoId) async {
+    await (_db.update(_db.messages)..where((t) => t.id.equals(messageId)))
+        .write(MessagesCompanion(textContent: Value('{"photo_id":"$photoId"}')));
+  }
+
+  /// Find a sent photo message by its stored [photoId] (set via [updateMessagePhotoId]).
+  /// Used to recover [PendingOutgoingPhoto] data after session restarts.
+  Future<MessageEntry?> findMessageByPhotoId(String photoId) async {
+    return (_db.select(_db.messages)
+          ..where((t) =>
+              t.contentType.equalsValue(MessageContentType.photo) &
+              t.textContent.like('%$photoId%'))
+          ..limit(1))
+        .getSingleOrNull();
+  }
 }
 
 /// Helper class for conversation with peer details
