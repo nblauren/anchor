@@ -329,12 +329,13 @@ class PeerGridTile extends StatelessWidget {
     );
   }
 
-  /// Human-readable distance label based on RSSI or relay status.
+  /// Human-readable status label: online with signal info, or offline with
+  /// last-seen timestamp.
   String get _distanceBadge {
-    if (!peer.isOnline) return 'Offline';
+    if (!peer.isOnline) return peer.lastSeenText;
     if (peer.isRelayed) return 'Via mesh';
     final rssi = peer.rssi;
-    if (rssi == null) return peer.isRecent ? 'Nearby' : peer.lastSeenText;
+    if (rssi == null) return 'Online';
     if (rssi >= -55) return 'Close';
     if (rssi >= -70) return 'Nearby';
     return 'In range';
@@ -343,9 +344,7 @@ class PeerGridTile extends StatelessWidget {
   Color get _badgeColor {
     if (!peer.isOnline) return Colors.grey;
     if (peer.isRelayed) return const Color(0xFF818CF8); // indigo for relay
-    if (peer.isRecent) return Colors.greenAccent;
-    if (peer.isNearby) return Colors.yellowAccent;
-    return AppTheme.textHint;
+    return Colors.greenAccent;
   }
 
   Widget _buildSignalIndicator() {
