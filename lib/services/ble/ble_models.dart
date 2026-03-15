@@ -219,17 +219,21 @@ class MessagePayload extends Equatable {
     required this.messageId,
     required this.type,
     required this.content,
+    this.replyToId,
   });
 
   final String messageId;
   final MessageType type;
   final String content; // Text content or photo metadata
+  /// If this is a reply, the ID of the message being replied to.
+  final String? replyToId;
 
   Map<String, dynamic> toJson() {
     return {
       'messageId': messageId,
       'type': type.name,
       'content': content,
+      if (replyToId != null) 'reply_to_id': replyToId,
     };
   }
 
@@ -238,11 +242,12 @@ class MessagePayload extends Equatable {
       messageId: json['messageId'] as String,
       type: MessageType.values.byName(json['type'] as String),
       content: json['content'] as String,
+      replyToId: json['reply_to_id'] as String?,
     );
   }
 
   @override
-  List<Object?> get props => [messageId, type, content];
+  List<Object?> get props => [messageId, type, content, replyToId];
 }
 
 /// Received message from a peer
@@ -253,6 +258,7 @@ class ReceivedMessage extends Equatable {
     required this.type,
     required this.content,
     required this.timestamp,
+    this.replyToId,
   });
 
   final String fromPeerId;
@@ -260,9 +266,11 @@ class ReceivedMessage extends Equatable {
   final MessageType type;
   final String content;
   final DateTime timestamp;
+  /// ID of the message being replied to, if any.
+  final String? replyToId;
 
   @override
-  List<Object?> get props => [fromPeerId, messageId, type, content, timestamp];
+  List<Object?> get props => [fromPeerId, messageId, type, content, timestamp, replyToId];
 }
 
 /// Photo transfer status

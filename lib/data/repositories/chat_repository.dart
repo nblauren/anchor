@@ -139,6 +139,13 @@ class ChatRepository {
         .get();
   }
 
+  /// Get a single message by its ID (used for reply quote lookup).
+  Future<MessageEntry?> getMessageById(String messageId) async {
+    return await (_db.select(_db.messages)
+          ..where((t) => t.id.equals(messageId)))
+        .getSingleOrNull();
+  }
+
   /// Get the last message in a conversation
   Future<MessageEntry?> getLastMessage(String conversationId) async {
     return await (_db.select(_db.messages)
@@ -153,6 +160,7 @@ class ChatRepository {
     required String conversationId,
     required String senderId,
     required String text,
+    String? replyToMessageId,
   }) async {
     final id = _uuid.v4();
     final now = DateTime.now();
@@ -165,6 +173,7 @@ class ChatRepository {
       textContent: Value(text),
       status: MessageStatus.pending,
       createdAt: now,
+      replyToMessageId: Value(replyToMessageId),
     );
 
     await _db.into(_db.messages).insert(entry);
@@ -183,6 +192,7 @@ class ChatRepository {
       createdAt: now,
       retryCount: 0,
       lastAttemptAt: null,
+      replyToMessageId: replyToMessageId,
     );
   }
 
@@ -236,6 +246,7 @@ class ChatRepository {
     String? textContent,
     String? photoPath,
     String? id,
+    String? replyToMessageId,
   }) async {
     final msgId = id ?? _uuid.v4();
     final now = DateTime.now();
@@ -249,6 +260,7 @@ class ChatRepository {
       photoPath: Value(photoPath),
       status: MessageStatus.delivered,
       createdAt: now,
+      replyToMessageId: Value(replyToMessageId),
     );
 
     await _db.into(_db.messages).insert(
@@ -270,6 +282,7 @@ class ChatRepository {
       createdAt: now,
       retryCount: 0,
       lastAttemptAt: null,
+      replyToMessageId: replyToMessageId,
     );
   }
 

@@ -99,6 +99,8 @@ class ChatState extends Equatable {
     this.isBlocked = false,
     this.pendingOutgoingPhotos = const {},
     this.reactions = const {},
+    this.replyingToMessage,
+    this.quotedMessages = const {},
   });
 
   final ChatStatus status;
@@ -115,6 +117,11 @@ class ChatState extends Equatable {
   /// Emoji reactions keyed by messageId. Each list contains one entry per
   /// (senderId, emoji) pair that has been added.
   final Map<String, List<ReactionEntry>> reactions;
+  /// The message currently being replied to, shown in the reply bar. null = not replying.
+  final MessageEntry? replyingToMessage;
+  /// Quoted messages keyed by message ID. Used to render reply previews inside bubbles.
+  /// Populated from [Messages.replyToMessageId] when loading messages.
+  final Map<String, MessageEntry> quotedMessages;
 
   /// Total unread count across all conversations
   int get totalUnreadCount =>
@@ -138,6 +145,9 @@ class ChatState extends Equatable {
     Map<String, PendingOutgoingPhoto>? pendingOutgoingPhotos,
     Map<String, List<ReactionEntry>>? reactions,
     bool clearCurrentConversation = false,
+    MessageEntry? replyingToMessage,
+    bool clearReplyingToMessage = false,
+    Map<String, MessageEntry>? quotedMessages,
   }) {
     return ChatState(
       status: status ?? this.status,
@@ -152,6 +162,8 @@ class ChatState extends Equatable {
       pendingOutgoingPhotos:
           pendingOutgoingPhotos ?? this.pendingOutgoingPhotos,
       reactions: reactions ?? this.reactions,
+      replyingToMessage: clearReplyingToMessage ? null : (replyingToMessage ?? this.replyingToMessage),
+      quotedMessages: quotedMessages ?? this.quotedMessages,
     );
   }
 
@@ -167,5 +179,7 @@ class ChatState extends Equatable {
         isBlocked,
         pendingOutgoingPhotos,
         reactions,
+        replyingToMessage,
+        quotedMessages,
       ];
 }

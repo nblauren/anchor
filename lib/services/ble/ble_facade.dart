@@ -435,6 +435,7 @@ class BleFacade implements BleServiceInterface {
         type: MessageType.values[json['message_type'] as int? ?? 0],
         content: json['content'] as String? ?? '',
         timestamp: DateTime.now(),
+        replyToId: json['reply_to_id'] as String?,
       );
       _messageReceivedController.add(message);
       Logger.info(
@@ -1199,6 +1200,9 @@ class BleFacade implements BleServiceInterface {
       'content': payload.content,
       'timestamp': DateTime.now().toIso8601String(),
     };
+    if (payload.replyToId != null) {
+      json['reply_to_id'] = payload.replyToId;
+    }
     if (_meshRelay.enabled) {
       json['origin_id'] = ownUserId;
       json['destination_id'] = destinationUserId ?? '';

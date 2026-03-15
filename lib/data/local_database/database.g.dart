@@ -1735,6 +1735,12 @@ class $MessagesTable extends Messages
   late final GeneratedColumn<DateTime> lastAttemptAt =
       GeneratedColumn<DateTime>('last_attempt_at', aliasedName, true,
           type: DriftSqlType.dateTime, requiredDuringInsert: false);
+  static const VerificationMeta _replyToMessageIdMeta =
+      const VerificationMeta('replyToMessageId');
+  @override
+  late final GeneratedColumn<String> replyToMessageId = GeneratedColumn<String>(
+      'reply_to_message_id', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
   @override
   List<GeneratedColumn> get $columns => [
         id,
@@ -1746,7 +1752,8 @@ class $MessagesTable extends Messages
         status,
         createdAt,
         retryCount,
-        lastAttemptAt
+        lastAttemptAt,
+        replyToMessageId
       ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -1807,6 +1814,12 @@ class $MessagesTable extends Messages
           lastAttemptAt.isAcceptableOrUnknown(
               data['last_attempt_at']!, _lastAttemptAtMeta));
     }
+    if (data.containsKey('reply_to_message_id')) {
+      context.handle(
+          _replyToMessageIdMeta,
+          replyToMessageId.isAcceptableOrUnknown(
+              data['reply_to_message_id']!, _replyToMessageIdMeta));
+    }
     return context;
   }
 
@@ -1838,6 +1851,8 @@ class $MessagesTable extends Messages
           .read(DriftSqlType.int, data['${effectivePrefix}retry_count'])!,
       lastAttemptAt: attachedDatabase.typeMapping.read(
           DriftSqlType.dateTime, data['${effectivePrefix}last_attempt_at']),
+      replyToMessageId: attachedDatabase.typeMapping.read(
+          DriftSqlType.string, data['${effectivePrefix}reply_to_message_id']),
     );
   }
 
@@ -1868,6 +1883,9 @@ class MessageEntry extends DataClass implements Insertable<MessageEntry> {
 
   /// Timestamp of the last cross-session delivery attempt. null = never retried.
   final DateTime? lastAttemptAt;
+
+  /// ID of the message being replied to. null = not a reply.
+  final String? replyToMessageId;
   const MessageEntry(
       {required this.id,
       required this.conversationId,
@@ -1878,7 +1896,8 @@ class MessageEntry extends DataClass implements Insertable<MessageEntry> {
       required this.status,
       required this.createdAt,
       required this.retryCount,
-      this.lastAttemptAt});
+      this.lastAttemptAt,
+      this.replyToMessageId});
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
@@ -1904,6 +1923,9 @@ class MessageEntry extends DataClass implements Insertable<MessageEntry> {
     if (!nullToAbsent || lastAttemptAt != null) {
       map['last_attempt_at'] = Variable<DateTime>(lastAttemptAt);
     }
+    if (!nullToAbsent || replyToMessageId != null) {
+      map['reply_to_message_id'] = Variable<String>(replyToMessageId);
+    }
     return map;
   }
 
@@ -1925,6 +1947,9 @@ class MessageEntry extends DataClass implements Insertable<MessageEntry> {
       lastAttemptAt: lastAttemptAt == null && nullToAbsent
           ? const Value.absent()
           : Value(lastAttemptAt),
+      replyToMessageId: replyToMessageId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(replyToMessageId),
     );
   }
 
@@ -1944,6 +1969,7 @@ class MessageEntry extends DataClass implements Insertable<MessageEntry> {
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       retryCount: serializer.fromJson<int>(json['retryCount']),
       lastAttemptAt: serializer.fromJson<DateTime?>(json['lastAttemptAt']),
+      replyToMessageId: serializer.fromJson<String?>(json['replyToMessageId']),
     );
   }
   @override
@@ -1962,6 +1988,7 @@ class MessageEntry extends DataClass implements Insertable<MessageEntry> {
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'retryCount': serializer.toJson<int>(retryCount),
       'lastAttemptAt': serializer.toJson<DateTime?>(lastAttemptAt),
+      'replyToMessageId': serializer.toJson<String?>(replyToMessageId),
     };
   }
 
@@ -1975,7 +2002,8 @@ class MessageEntry extends DataClass implements Insertable<MessageEntry> {
           MessageStatus? status,
           DateTime? createdAt,
           int? retryCount,
-          Value<DateTime?> lastAttemptAt = const Value.absent()}) =>
+          Value<DateTime?> lastAttemptAt = const Value.absent(),
+          Value<String?> replyToMessageId = const Value.absent()}) =>
       MessageEntry(
         id: id ?? this.id,
         conversationId: conversationId ?? this.conversationId,
@@ -1988,6 +2016,9 @@ class MessageEntry extends DataClass implements Insertable<MessageEntry> {
         retryCount: retryCount ?? this.retryCount,
         lastAttemptAt:
             lastAttemptAt.present ? lastAttemptAt.value : this.lastAttemptAt,
+        replyToMessageId: replyToMessageId.present
+            ? replyToMessageId.value
+            : this.replyToMessageId,
       );
   MessageEntry copyWithCompanion(MessagesCompanion data) {
     return MessageEntry(
@@ -2008,6 +2039,9 @@ class MessageEntry extends DataClass implements Insertable<MessageEntry> {
       lastAttemptAt: data.lastAttemptAt.present
           ? data.lastAttemptAt.value
           : this.lastAttemptAt,
+      replyToMessageId: data.replyToMessageId.present
+          ? data.replyToMessageId.value
+          : this.replyToMessageId,
     );
   }
 
@@ -2023,14 +2057,25 @@ class MessageEntry extends DataClass implements Insertable<MessageEntry> {
           ..write('status: $status, ')
           ..write('createdAt: $createdAt, ')
           ..write('retryCount: $retryCount, ')
-          ..write('lastAttemptAt: $lastAttemptAt')
+          ..write('lastAttemptAt: $lastAttemptAt, ')
+          ..write('replyToMessageId: $replyToMessageId')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(id, conversationId, senderId, contentType,
-      textContent, photoPath, status, createdAt, retryCount, lastAttemptAt);
+  int get hashCode => Object.hash(
+      id,
+      conversationId,
+      senderId,
+      contentType,
+      textContent,
+      photoPath,
+      status,
+      createdAt,
+      retryCount,
+      lastAttemptAt,
+      replyToMessageId);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -2044,7 +2089,8 @@ class MessageEntry extends DataClass implements Insertable<MessageEntry> {
           other.status == this.status &&
           other.createdAt == this.createdAt &&
           other.retryCount == this.retryCount &&
-          other.lastAttemptAt == this.lastAttemptAt);
+          other.lastAttemptAt == this.lastAttemptAt &&
+          other.replyToMessageId == this.replyToMessageId);
 }
 
 class MessagesCompanion extends UpdateCompanion<MessageEntry> {
@@ -2058,6 +2104,7 @@ class MessagesCompanion extends UpdateCompanion<MessageEntry> {
   final Value<DateTime> createdAt;
   final Value<int> retryCount;
   final Value<DateTime?> lastAttemptAt;
+  final Value<String?> replyToMessageId;
   final Value<int> rowid;
   const MessagesCompanion({
     this.id = const Value.absent(),
@@ -2070,6 +2117,7 @@ class MessagesCompanion extends UpdateCompanion<MessageEntry> {
     this.createdAt = const Value.absent(),
     this.retryCount = const Value.absent(),
     this.lastAttemptAt = const Value.absent(),
+    this.replyToMessageId = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   MessagesCompanion.insert({
@@ -2083,6 +2131,7 @@ class MessagesCompanion extends UpdateCompanion<MessageEntry> {
     required DateTime createdAt,
     this.retryCount = const Value.absent(),
     this.lastAttemptAt = const Value.absent(),
+    this.replyToMessageId = const Value.absent(),
     this.rowid = const Value.absent(),
   })  : id = Value(id),
         conversationId = Value(conversationId),
@@ -2101,6 +2150,7 @@ class MessagesCompanion extends UpdateCompanion<MessageEntry> {
     Expression<DateTime>? createdAt,
     Expression<int>? retryCount,
     Expression<DateTime>? lastAttemptAt,
+    Expression<String>? replyToMessageId,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -2114,6 +2164,7 @@ class MessagesCompanion extends UpdateCompanion<MessageEntry> {
       if (createdAt != null) 'created_at': createdAt,
       if (retryCount != null) 'retry_count': retryCount,
       if (lastAttemptAt != null) 'last_attempt_at': lastAttemptAt,
+      if (replyToMessageId != null) 'reply_to_message_id': replyToMessageId,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -2129,6 +2180,7 @@ class MessagesCompanion extends UpdateCompanion<MessageEntry> {
       Value<DateTime>? createdAt,
       Value<int>? retryCount,
       Value<DateTime?>? lastAttemptAt,
+      Value<String?>? replyToMessageId,
       Value<int>? rowid}) {
     return MessagesCompanion(
       id: id ?? this.id,
@@ -2141,6 +2193,7 @@ class MessagesCompanion extends UpdateCompanion<MessageEntry> {
       createdAt: createdAt ?? this.createdAt,
       retryCount: retryCount ?? this.retryCount,
       lastAttemptAt: lastAttemptAt ?? this.lastAttemptAt,
+      replyToMessageId: replyToMessageId ?? this.replyToMessageId,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -2180,6 +2233,9 @@ class MessagesCompanion extends UpdateCompanion<MessageEntry> {
     if (lastAttemptAt.present) {
       map['last_attempt_at'] = Variable<DateTime>(lastAttemptAt.value);
     }
+    if (replyToMessageId.present) {
+      map['reply_to_message_id'] = Variable<String>(replyToMessageId.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -2199,6 +2255,7 @@ class MessagesCompanion extends UpdateCompanion<MessageEntry> {
           ..write('createdAt: $createdAt, ')
           ..write('retryCount: $retryCount, ')
           ..write('lastAttemptAt: $lastAttemptAt, ')
+          ..write('replyToMessageId: $replyToMessageId, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -4347,6 +4404,7 @@ typedef $$MessagesTableCreateCompanionBuilder = MessagesCompanion Function({
   required DateTime createdAt,
   Value<int> retryCount,
   Value<DateTime?> lastAttemptAt,
+  Value<String?> replyToMessageId,
   Value<int> rowid,
 });
 typedef $$MessagesTableUpdateCompanionBuilder = MessagesCompanion Function({
@@ -4360,6 +4418,7 @@ typedef $$MessagesTableUpdateCompanionBuilder = MessagesCompanion Function({
   Value<DateTime> createdAt,
   Value<int> retryCount,
   Value<DateTime?> lastAttemptAt,
+  Value<String?> replyToMessageId,
   Value<int> rowid,
 });
 
@@ -4438,6 +4497,10 @@ class $$MessagesTableFilterComposer
 
   ColumnFilters<DateTime> get lastAttemptAt => $composableBuilder(
       column: $table.lastAttemptAt, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get replyToMessageId => $composableBuilder(
+      column: $table.replyToMessageId,
+      builder: (column) => ColumnFilters(column));
 
   $$ConversationsTableFilterComposer get conversationId {
     final $$ConversationsTableFilterComposer composer = $composerBuilder(
@@ -4518,6 +4581,10 @@ class $$MessagesTableOrderingComposer
       column: $table.lastAttemptAt,
       builder: (column) => ColumnOrderings(column));
 
+  ColumnOrderings<String> get replyToMessageId => $composableBuilder(
+      column: $table.replyToMessageId,
+      builder: (column) => ColumnOrderings(column));
+
   $$ConversationsTableOrderingComposer get conversationId {
     final $$ConversationsTableOrderingComposer composer = $composerBuilder(
         composer: this,
@@ -4575,6 +4642,9 @@ class $$MessagesTableAnnotationComposer
 
   GeneratedColumn<DateTime> get lastAttemptAt => $composableBuilder(
       column: $table.lastAttemptAt, builder: (column) => column);
+
+  GeneratedColumn<String> get replyToMessageId => $composableBuilder(
+      column: $table.replyToMessageId, builder: (column) => column);
 
   $$ConversationsTableAnnotationComposer get conversationId {
     final $$ConversationsTableAnnotationComposer composer = $composerBuilder(
@@ -4651,6 +4721,7 @@ class $$MessagesTableTableManager extends RootTableManager<
             Value<DateTime> createdAt = const Value.absent(),
             Value<int> retryCount = const Value.absent(),
             Value<DateTime?> lastAttemptAt = const Value.absent(),
+            Value<String?> replyToMessageId = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
               MessagesCompanion(
@@ -4664,6 +4735,7 @@ class $$MessagesTableTableManager extends RootTableManager<
             createdAt: createdAt,
             retryCount: retryCount,
             lastAttemptAt: lastAttemptAt,
+            replyToMessageId: replyToMessageId,
             rowid: rowid,
           ),
           createCompanionCallback: ({
@@ -4677,6 +4749,7 @@ class $$MessagesTableTableManager extends RootTableManager<
             required DateTime createdAt,
             Value<int> retryCount = const Value.absent(),
             Value<DateTime?> lastAttemptAt = const Value.absent(),
+            Value<String?> replyToMessageId = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
               MessagesCompanion.insert(
@@ -4690,6 +4763,7 @@ class $$MessagesTableTableManager extends RootTableManager<
             createdAt: createdAt,
             retryCount: retryCount,
             lastAttemptAt: lastAttemptAt,
+            replyToMessageId: replyToMessageId,
             rowid: rowid,
           ),
           withReferenceMapper: (p0) => p0

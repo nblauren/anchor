@@ -56,11 +56,23 @@ class LoadMessages extends ChatEvent {
 
 /// Send a text message
 class SendTextMessage extends ChatEvent {
-  const SendTextMessage(this.text);
+  const SendTextMessage(this.text, {this.replyToMessageId});
   final String text;
+  /// The ID of the message being replied to, if any.
+  final String? replyToMessageId;
 
   @override
-  List<Object?> get props => [text];
+  List<Object?> get props => [text, replyToMessageId];
+}
+
+/// Set the message currently being replied to (shown in reply bar above input).
+/// Pass null to clear the reply.
+class SetReplyingTo extends ChatEvent {
+  const SetReplyingTo(this.message);
+  final MessageEntry? message;
+
+  @override
+  List<Object?> get props => [message];
 }
 
 /// Send a photo message

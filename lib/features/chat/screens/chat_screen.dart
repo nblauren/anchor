@@ -5,6 +5,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../data/local_database/database.dart';
 import '../../discovery/bloc/discovery_bloc.dart';
 import '../../discovery/bloc/discovery_event.dart';
 import '../bloc/chat_bloc.dart';
@@ -141,9 +142,22 @@ class _ChatScreenState extends State<ChatScreen> {
   void _sendMessage() {
     final content = _messageController.text.trim();
     if (content.isNotEmpty) {
-      context.read<ChatBloc>().add(SendTextMessage(content));
+      final replyingTo = context.read<ChatBloc>().state.replyingToMessage;
+      context.read<ChatBloc>().add(
+            SendTextMessage(content, replyToMessageId: replyingTo?.id),
+          );
       _messageController.clear();
+      _focusNode.requestFocus();
     }
+  }
+
+  void _startReply(MessageEntry message) {
+    context.read<ChatBloc>().add(SetReplyingTo(message));
+    _focusNode.requestFocus();
+  }
+
+  void _cancelReply() {
+    context.read<ChatBloc>().add(const SetReplyingTo(null));
   }
 
   void _showPhotoOptions() {
@@ -478,66 +492,87 @@ class _ChatScreenState extends State<ChatScreen> {
                                       ),
                                     ),
                                   ),
-                                MessageBubbleWidget(
-                                  message: message,
-                                  isSentByMe: isSentByMe,
-                                  ownUserId: ownUserId,
-                                  onRetry: () => _retryMessage(message.id),
-                                  isRelayedPeer: widget.isRelayedPeer,
-                                  transferInfo:
-                                      state.getTransferProgress(message.id),
-                                  onRequestFullPhoto: isSentByMe
-                                      ? null
-                                      : (photoId) => _requestFullPhoto(
-                                            message.id,
-                                            photoId,
-                                            state.currentConversation!.peerId,
-                                          ),
-                                  onCancelTransfer:
-                                      state.getTransferProgress(message.id) !=
-                                              null
-                                          ? () => context.read<ChatBloc>().add(
-                                                CancelPhotoTransfer(message.id),
-                                              )
-                                          : null,
-                                  reactions: state.reactions[message.id] ?? [],
-                                  onReact: state.isBlocked
-                                      ? null
-                                      : (emoji) {
-                                          final peerId = state
-                                              .currentConversation!.peerId;
-                                          final ownReacted =
-                                              (state.reactions[message.id] ??
-                                                      [])
-                                                  .any((r) =>
-                                                      r.senderId == ownUserId &&
-                                                      r.emoji == emoji);
-                                          if (ownReacted) {
-                                            context.read<ChatBloc>().add(
-                                                  RemoveReaction(
-                                                    messageId: message.id,
-                                                    peerId: peerId,
-                                                    emoji: emoji,
-                                                  ),
-                                                );
-                                          } else {
-                                            context.read<ChatBloc>().add(
-                                                  SendReaction(
-                                                    messageId: message.id,
-                                                    peerId: peerId,
-                                                    emoji: emoji,
-                                                  ),
-                                                );
-                                          }
-                                        },
-                                  onLongPress: state.isBlocked ||
-                                          message.senderId == ownUserId
-                                      ? null
-                                      : () => _showEmojiPicker(
-                                            context,
-                                            message.id,
-                                            state.currentConversation!.peerId,
-                                          ),
+                                Dismissible(
+                                  key: Key('reply_${message.id}'),
+                                  direction: DismissDirection.startToEnd,
+                                  confirmDismiss: (_) async {
+                                    if (!state.isBlocked) _startReply(message);
+                                    return false;
+                                  },
+                                  background: const Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: Padding(
+                                      padding: EdgeInsets.only(left: 16),
+                                      child: Icon(
+                                        Icons.reply,
+                                        color: AppTheme.primaryLight,
+                                      ),
+                                    ),
+                                  ),
+                                  child: MessageBubbleWidget(
+                                    message: message,
+                                    isSentByMe: isSentByMe,
+                                    ownUserId: ownUserId,
+                                    onRetry: () => _retryMessage(message.id),
+                                    isRelayedPeer: widget.isRelayedPeer,
+                                    transferInfo:
+                                        state.getTransferProgress(message.id),
+                                    onRequestFullPhoto: isSentByMe
+                                        ? null
+                                        : (photoId) => _requestFullPhoto(
+                                              message.id,
+                                              photoId,
+                                              state.currentConversation!.peerId,
+                                            ),
+                                    onCancelTransfer:
+                                        state.getTransferProgress(message.id) !=
+                                                null
+                                            ? () => context.read<ChatBloc>().add(
+                                                  CancelPhotoTransfer(message.id),
+                                                )
+                                            : null,
+                                    reactions: state.reactions[message.id] ?? [],
+                                    onReact: state.isBlocked
+                                        ? null
+                                        : (emoji) {
+                                            final peerId = state
+                                                .currentConversation!.peerId;
+                                            final ownReacted =
+                                                (state.reactions[message.id] ??
+                                                        [])
+                                                    .any((r) =>
+                                                        r.senderId == ownUserId &&
+                                                        r.emoji == emoji);
+                                            if (ownReacted) {
+                                              context.read<ChatBloc>().add(
+                                                    RemoveReaction(
+                                                      messageId: message.id,
+                                                      peerId: peerId,
+                                                      emoji: emoji,
+                                                    ),
+                                                  );
+                                            } else {
+                                              context.read<ChatBloc>().add(
+                                                    SendReaction(
+                                                      messageId: message.id,
+                                                      peerId: peerId,
+                                                      emoji: emoji,
+                                                    ),
+                                                  );
+                                            }
+                                          },
+                                    onLongPress: state.isBlocked ||
+                                            message.senderId == ownUserId
+                                        ? null
+                                        : () => _showEmojiPicker(
+                                              context,
+                                              message.id,
+                                              state.currentConversation!.peerId,
+                                            ),
+                                    quotedMessage: message.replyToMessageId != null
+                                        ? state.quotedMessages[message.replyToMessageId]
+                                        : null,
+                                  ),
                                 ),
                               ],
                             );
@@ -632,65 +667,111 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _buildMessageInput(ChatState state) {
+    final replyingTo = state.replyingToMessage;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (replyingTo != null) _buildReplyBar(replyingTo),
+        Container(
+          padding: EdgeInsets.only(
+            left: 8,
+            right: 8,
+            top: 8,
+            bottom: MediaQuery.of(context).padding.bottom + 8,
+          ),
+          decoration: const BoxDecoration(
+            color: AppTheme.darkSurface,
+            border: Border(
+              top: BorderSide(color: AppTheme.darkCard),
+            ),
+          ),
+          child: Row(
+            children: [
+              // Photo button
+              IconButton(
+                key: const Key('chat_photo_btn'),
+                onPressed: _showPhotoOptions,
+                icon: const Icon(Icons.photo),
+                color: AppTheme.textSecondary,
+              ),
+
+              // Text input
+              Expanded(
+                child: TextField(
+                  key: const Key('chat_message_input'),
+                  controller: _messageController,
+                  focusNode: _focusNode,
+                  decoration: InputDecoration(
+                    hintText: 'Type a message...',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(24),
+                      borderSide: BorderSide.none,
+                    ),
+                    filled: true,
+                    fillColor: AppTheme.darkCard,
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 10,
+                    ),
+                  ),
+                  textCapitalization: TextCapitalization.sentences,
+                  textInputAction: TextInputAction.send,
+                  maxLines: 4,
+                  minLines: 1,
+                  // Use onEditingComplete instead of onSubmitted to prevent
+                  // the default unfocus behavior that closes the keyboard.
+                  onEditingComplete: _sendMessage,
+                ),
+              ),
+              const SizedBox(width: 4),
+
+              // Send button
+              IconButton(
+                key: const Key('chat_send_btn'),
+                onPressed: _sendMessage,
+                icon: const Icon(Icons.send),
+                color: AppTheme.primaryLight,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildReplyBar(MessageEntry replyingTo) {
+    final isPhoto = replyingTo.contentType == MessageContentType.photo ||
+        replyingTo.contentType == MessageContentType.photoPreview;
+    final preview = isPhoto ? '📷 Photo' : (replyingTo.textContent ?? '');
+    final truncated = preview.length > 60 ? '${preview.substring(0, 60)}…' : preview;
+
     return Container(
-      padding: EdgeInsets.only(
-        left: 8,
-        right: 8,
-        top: 8,
-        bottom: MediaQuery.of(context).padding.bottom + 8,
-      ),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: const BoxDecoration(
-        color: AppTheme.darkSurface,
+        color: AppTheme.darkCard,
         border: Border(
-          top: BorderSide(color: AppTheme.darkCard),
+          top: BorderSide(color: AppTheme.darkSurface),
+          left: BorderSide(color: AppTheme.primaryColor, width: 3),
         ),
       ),
       child: Row(
         children: [
-          // Photo button
-          IconButton(
-            key: const Key('chat_photo_btn'),
-            onPressed: _showPhotoOptions,
-            icon: const Icon(Icons.photo),
-            color: AppTheme.textSecondary,
-          ),
-
-          // Text input
+          const Icon(Icons.reply, size: 16, color: AppTheme.primaryLight),
+          const SizedBox(width: 8),
           Expanded(
-            child: TextField(
-              key: const Key('chat_message_input'),
-              controller: _messageController,
-              focusNode: _focusNode,
-              decoration: InputDecoration(
-                hintText: 'Type a message...',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(24),
-                  borderSide: BorderSide.none,
-                ),
-                filled: true,
-                fillColor: AppTheme.darkCard,
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 10,
-                ),
+            child: Text(
+              truncated,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: 13,
               ),
-              textCapitalization: TextCapitalization.sentences,
-              textInputAction: TextInputAction.send,
-              maxLines: 4,
-              minLines: 1,
-              // Use onEditingComplete instead of onSubmitted to prevent
-              // the default unfocus behavior that closes the keyboard.
-              onEditingComplete: _sendMessage,
             ),
           ),
-          const SizedBox(width: 4),
-
-          // Send button
-          IconButton(
-            key: const Key('chat_send_btn'),
-            onPressed: _sendMessage,
-            icon: const Icon(Icons.send),
-            color: AppTheme.primaryLight,
+          GestureDetector(
+            onTap: _cancelReply,
+            child: const Icon(Icons.close, size: 18, color: AppTheme.textHint),
           ),
         ],
       ),

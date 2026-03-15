@@ -49,6 +49,7 @@ class MessageBubbleWidget extends StatelessWidget {
     this.reactions = const [],
     this.onReact,
     this.onLongPress,
+    this.quotedMessage,
   });
 
   final MessageEntry message;
@@ -70,6 +71,8 @@ class MessageBubbleWidget extends StatelessWidget {
   final void Function(String emoji)? onReact;
   /// Called on long-press to open the emoji picker.
   final VoidCallback? onLongPress;
+  /// The message being replied to, if any. Shown as a quote inside the bubble.
+  final MessageEntry? quotedMessage;
 
   @override
   Widget build(BuildContext context) {
@@ -95,7 +98,7 @@ class MessageBubbleWidget extends StatelessWidget {
                 maxWidth: MediaQuery.of(context).size.width * 0.75,
               ),
               decoration: BoxDecoration(
-                color: isSentByMe ? AppTheme.primaryColor : AppTheme.darkCard,
+                color: isSentByMe ? const Color(0xFFA8003E) : AppTheme.darkCard,
                 borderRadius: BorderRadius.only(
                   topLeft: const Radius.circular(16),
                   topRight: const Radius.circular(16),
@@ -111,6 +114,8 @@ class MessageBubbleWidget extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
+                  if (quotedMessage != null)
+                    _buildQuotedMessage(quotedMessage!),
                   if (contentType == MessageContentType.photo)
                     _buildPhotoContent(context)
                   else if (contentType == MessageContentType.photoPreview)
@@ -195,6 +200,44 @@ class MessageBubbleWidget extends StatelessWidget {
               ),
             ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildQuotedMessage(MessageEntry quoted) {
+    final isPhoto = quoted.contentType == MessageContentType.photo ||
+        quoted.contentType == MessageContentType.photoPreview;
+    final preview = isPhoto
+        ? '📷 Photo'
+        : (quoted.textContent ?? '');
+    final previewText = preview.length > 80 ? '${preview.substring(0, 80)}…' : preview;
+
+    final quoteBarColor = isSentByMe
+        ? Colors.white.withValues(alpha: 0.5)
+        : AppTheme.primaryColor;
+    final quoteBgColor = isSentByMe
+        ? Colors.black.withValues(alpha: 0.15)
+        : AppTheme.primaryColor.withValues(alpha: 0.12);
+
+    return Container(
+      margin: const EdgeInsets.only(left: 8, right: 8, top: 8),
+      decoration: BoxDecoration(
+        color: quoteBgColor,
+        borderRadius: BorderRadius.circular(8),
+        border: Border(
+          left: BorderSide(color: quoteBarColor, width: 3),
+        ),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      child: Text(
+        previewText,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          color: Colors.white.withValues(alpha: 0.8),
+          fontSize: 12,
+          height: 1.3,
+        ),
       ),
     );
   }

@@ -73,6 +73,8 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     on<SendReaction>(_onSendReaction);
     on<RemoveReaction>(_onRemoveReaction);
     on<BleReactionReceived>(_onBleReactionReceived);
+    // Reply
+    on<SetReplyingTo>(_onSetReplyingTo);
 
     // Subscribe to transport manager streams (Wi-Fi Aware or BLE — unified)
     _messageSubscription = _transportManager.messageReceivedStream.listen(
@@ -298,10 +300,24 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       final allMessages =
           event.loadMore ? [...state.messages, ...messages] : messages;
 
+      // Build quoted messages map: fetch each unique replyToMessageId once.
+      final newQuotedIds = allMessages
+          .where((m) => m.replyToMessageId != null)
+          .map((m) => m.replyToMessageId!)
+          .toSet()
+          .difference(state.quotedMessages.keys.toSet());
+
+      final newQuoted = Map<String, MessageEntry>.from(state.quotedMessages);
+      await Future.wait(newQuotedIds.map((id) async {
+        final quoted = await _chatRepository.getMessageById(id);
+        if (quoted != null) newQuoted[id] = quoted;
+      }));
+
       emit(state.copyWith(
         status: ChatStatus.loaded,
         messages: allMessages,
         hasMoreMessages: messages.length >= AppConstants.messagePageSize,
+        quotedMessages: newQuoted,
       ));
     } catch (e) {
       Logger.error('Failed to load messages', e, null, 'ChatBloc');
@@ -318,22 +334,33 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
 
     try {
       final peerId = state.currentConversation!.peerId;
+      final replyToId = event.replyToMessageId;
 
       // Save message to database as pending
       final message = await _chatRepository.sendTextMessage(
         conversationId: state.currentConversation!.id,
         senderId: _ownUserId,
         text: event.text.trim(),
+        replyToMessageId: replyToId,
       );
 
-      // Add to messages list immediately — don't block input
+      // Build updated quoted messages map if this is a reply
+      final updatedQuoted = Map<String, MessageEntry>.from(state.quotedMessages);
+      if (replyToId != null) {
+        final existing = state.replyingToMessage;
+        if (existing != null) updatedQuoted[replyToId] = existing;
+      }
+
+      // Add to messages list immediately — clear reply bar
       emit(state.copyWith(
         status: ChatStatus.loaded,
         messages: [message, ...state.messages],
+        quotedMessages: updatedQuoted,
+        clearReplyingToMessage: true,
       ));
 
       // Fire-and-forget: BLE send runs in background
-      _enqueueSend(() => _sendTextInBackground(message, peerId));
+      _enqueueSend(() => _sendTextInBackground(message, peerId, replyToId: replyToId));
     } catch (e) {
       Logger.error('Failed to send message', e, null, 'ChatBloc');
       emit(state.copyWith(
@@ -362,6 +389,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     MessageEntry message,
     String peerId, {
     int attempt = 1,
+    String? replyToId,
   }) async {
     const maxRetries = 3;
     try {
@@ -369,6 +397,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         messageId: message.id,
         type: ble.MessageType.text,
         content: message.textContent ?? '',
+        replyToId: replyToId,
       );
 
       final success = await _transportManager.sendMessage(peerId, payload);
@@ -391,8 +420,12 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         );
         Future<void>.delayed(Duration(seconds: attempt * 3), () {
           if (!isClosed) {
-            _enqueueSend(
-                () => _sendTextInBackground(message, peerId, attempt: attempt + 1));
+            _enqueueSend(() => _sendTextInBackground(
+                  message,
+                  peerId,
+                  attempt: attempt + 1,
+                  replyToId: replyToId,
+                ));
           }
         });
         return;
@@ -919,12 +952,21 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
             : MessageContentType.photo,
         textContent:
             bleMsg.type == ble.MessageType.text ? bleMsg.content : null,
+        replyToMessageId: bleMsg.replyToId,
       );
 
       // If viewing this conversation, add to UI and immediately mark as read
       if (state.currentConversation?.peerId == bleMsg.fromPeerId) {
+        // Fetch quoted message if needed
+        final updatedQuoted = Map<String, MessageEntry>.from(state.quotedMessages);
+        final replyId = bleMsg.replyToId;
+        if (replyId != null && !updatedQuoted.containsKey(replyId)) {
+          final quoted = await _chatRepository.getMessageById(replyId);
+          if (quoted != null) updatedQuoted[replyId] = quoted;
+        }
         emit(state.copyWith(
           messages: [message, ...state.messages],
+          quotedMessages: updatedQuoted,
         ));
         add(const MarkMessagesRead());
       }
@@ -1828,6 +1870,14 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
           messagePreview: preview,
         );
       }
+    }
+  }
+
+  void _onSetReplyingTo(SetReplyingTo event, Emitter<ChatState> emit) {
+    if (event.message == null) {
+      emit(state.copyWith(clearReplyingToMessage: true));
+    } else {
+      emit(state.copyWith(replyingToMessage: event.message));
     }
   }
 

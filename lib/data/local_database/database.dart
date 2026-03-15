@@ -120,6 +120,8 @@ class Messages extends Table {
   IntColumn get retryCount => integer().withDefault(const Constant(0))();
   /// Timestamp of the last cross-session delivery attempt. null = never retried.
   DateTimeColumn get lastAttemptAt => dateTime().nullable()();
+  /// ID of the message being replied to. null = not a reply.
+  TextColumn get replyToMessageId => text().nullable()();
 
   @override
   Set<Column> get primaryKey => {id};
@@ -180,7 +182,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 7;
+  int get schemaVersion => 8;
 
   @override
   MigrationStrategy get migration {
@@ -219,6 +221,10 @@ class AppDatabase extends _$AppDatabase {
           // Migration from v6 to v7: add store-and-forward retry columns
           await m.addColumn(messages, messages.retryCount);
           await m.addColumn(messages, messages.lastAttemptAt);
+        }
+        if (from < 8) {
+          // Migration from v7 to v8: add reply-to support
+          await m.addColumn(messages, messages.replyToMessageId);
         }
       },
       beforeOpen: (details) async {
