@@ -1808,6 +1808,27 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
           'from ${reaction.fromPeerId.substring(0, 8)}',
       'ChatBloc',
     );
+
+    // Notify only when someone adds a reaction to one of our own messages.
+    if (isAdd) {
+      final targetMessage = state.messages.cast<MessageEntry?>().firstWhere(
+        (m) => m?.id == messageId,
+        orElse: () => null,
+      );
+      if (targetMessage != null && targetMessage.senderId == _ownUserId) {
+        final senderName = state.currentConversation?.peerName ??
+            reaction.fromPeerId.substring(0, 8);
+        final preview = targetMessage.textContent?.isNotEmpty == true
+            ? '"${targetMessage.textContent}"'
+            : 'your message';
+        await _notificationService.showReactionNotification(
+          fromPeerId: reaction.fromPeerId,
+          fromName: senderName,
+          emoji: reaction.emoji,
+          messagePreview: preview,
+        );
+      }
+    }
   }
 
   @override

@@ -18,6 +18,7 @@ class NotificationService {
   static const _androidChannelIdMessages = 'messages_channel';
   static const _androidChannelIdPeers = 'peers_channel';
   static const _androidChannelIdAnchorDrops = 'anchor_drops_channel';
+  static const _androidChannelIdReactions = 'reactions_channel';
 
   /// Initialize the notification service
   Future<void> initialize() async {
@@ -104,6 +105,20 @@ class NotificationService {
         .resolvePlatformSpecificImplementation<
             AndroidFlutterLocalNotificationsPlugin>()
         ?.createNotificationChannel(anchorDropsChannel);
+
+    const AndroidNotificationChannel reactionsChannel =
+        AndroidNotificationChannel(
+      _androidChannelIdReactions,
+      'Reactions',
+      description: 'When someone reacts to your message',
+      importance: Importance.defaultImportance,
+      playSound: true,
+    );
+
+    await _notificationsPlugin
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>()
+        ?.createNotificationChannel(reactionsChannel);
   }
 
   /// Request notification permissions (mainly useful on iOS)
@@ -262,6 +277,51 @@ class NotificationService {
     Logger.info('Peer discovered notification - $peerName', 'Notifications');
   }
 
+  /// Show a notification when someone reacts to your message.
+  Future<void> showReactionNotification({
+    required String fromPeerId,
+    required String fromName,
+    required String emoji,
+    required String messagePreview,
+  }) async {
+    if (!_isInitialized) await initialize();
+
+    const AndroidNotificationDetails androidDetails =
+        AndroidNotificationDetails(
+      _androidChannelIdReactions,
+      'Reactions',
+      channelDescription: 'When someone reacts to your message',
+      importance: Importance.defaultImportance,
+      priority: Priority.defaultPriority,
+      showWhen: true,
+    );
+
+    const DarwinNotificationDetails iosDetails = DarwinNotificationDetails(
+      presentAlert: true,
+      presentBadge: false,
+      presentSound: false, // sound played separately via AudioService
+    );
+
+    const NotificationDetails details = NotificationDetails(
+      android: androidDetails,
+      iOS: iosDetails,
+      macOS: iosDetails,
+    );
+
+    await _notificationsPlugin.show(
+      id: NotificationIds.forReaction(fromPeerId),
+      title: '$fromName reacted $emoji',
+      body: messagePreview,
+      notificationDetails: details,
+      payload: 'reaction:$fromPeerId',
+    );
+
+    _audioService?.playReaction();
+
+    Logger.info(
+        'Reaction notification shown - $fromName $emoji', 'Notifications');
+  }
+
   /// Cancel all notifications
   Future<void> cancelAll() async {
     await _notificationsPlugin.cancelAll();
@@ -308,5 +368,11 @@ class NotificationIds {
 
   static int forAnchorDrop(String peerId) {
     return anchorDropBase + peerId.hashCode.abs() % 1000;
+  }
+
+  static const int reactionBase = 4000;
+
+  static int forReaction(String peerId) {
+    return reactionBase + peerId.hashCode.abs() % 1000;
   }
 }
