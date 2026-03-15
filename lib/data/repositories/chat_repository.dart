@@ -396,8 +396,13 @@ class ChatRepository {
         .write(const MessagesCompanion(status: Value(MessageStatus.read)));
   }
 
-  /// Mark all [sent] outgoing messages in a conversation as [read].
+  /// Mark all [sent] outgoing TEXT messages in a conversation as [read].
   /// Called when a read receipt arrives from the peer.
+  ///
+  /// Photo messages are intentionally excluded — they should only be marked
+  /// [read] after the receiver has actually downloaded the full photo (handled
+  /// in ChatBloc._sendFullPhoto). A read receipt fires when the receiver opens
+  /// the chat, which precedes any photo download request.
   Future<void> markSentMessagesRead(
     String conversationId,
     String ownUserId,
@@ -406,7 +411,8 @@ class ChatRepository {
           ..where((t) =>
               t.conversationId.equals(conversationId) &
               t.senderId.equals(ownUserId) &
-              t.status.equalsValue(MessageStatus.sent)))
+              t.status.equalsValue(MessageStatus.sent) &
+              t.contentType.equalsValue(MessageContentType.text)))
         .write(const MessagesCompanion(status: Value(MessageStatus.read)));
   }
 

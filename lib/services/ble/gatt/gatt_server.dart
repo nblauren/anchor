@@ -93,17 +93,14 @@ class GattServer {
 
   /// Set up the GATT server: create service with 4 characteristics and
   /// register event listeners. Safe to call multiple times.
+  ///
+  /// Does NOT pre-check [_peripheralPoweredOn] — instead it attempts the
+  /// native call and infers readiness from the result. This breaks the
+  /// chicken-and-egg where the peripheral state event never fires because
+  /// nothing has poked the native PeripheralManager yet (mirroring how
+  /// CentralManager is implicitly initialised by startDiscovery()).
   Future<void> setup({bool force = false}) async {
     if (_settingUp && !force) return;
-
-    if (!_peripheralPoweredOn) {
-      Logger.warning(
-        'GattServer: Skipping setup — peripheral state: ${_peripheral.state}',
-        'BLE',
-      );
-      _schedulePeripheralRetry();
-      return;
-    }
 
     _settingUp = true;
     _isReady = false;
@@ -190,10 +187,16 @@ class GattServer {
         }
       });
 
+      // Reaching here means the native calls succeeded — peripheral is ready.
+      _peripheralPoweredOn = true;
       _isReady = true;
       Logger.info('GattServer: GATT server ready', 'BLE');
     } catch (e) {
       Logger.error('GattServer: GATT server setup failed', e, null, 'BLE');
+      // Native call failed — peripheral not ready yet. Schedule retry so we
+      // try again rather than waiting indefinitely for a state-change event
+      // that may never arrive.
+      _schedulePeripheralRetry();
     } finally {
       _settingUp = false;
     }
@@ -238,13 +241,11 @@ class GattServer {
       'BLE',
     );
 
-    if (!_peripheralPoweredOn) {
-      Logger.warning(
-        'GattServer: Peripheral not ready (${_peripheral.state}), will retry when ready',
-        'BLE',
-      );
-      _schedulePeripheralRetry();
-      return;
+    if (!_isReady) {
+      // GATT server not set up yet — attempt setup now. setup() will schedule
+      // its own retry if the peripheral is still not ready.
+      await setup();
+      if (!_isReady) return;
     }
 
     await _startAdvertising(payload);

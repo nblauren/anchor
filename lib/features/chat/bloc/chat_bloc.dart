@@ -800,6 +800,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       }
 
       // ── Fall back to BLE/TransportManager ───────────────────────────────
+      bool transferSucceeded = wifiSuccess;
       if (!wifiSuccess) {
         final success = await _transportManager.sendPhoto(
           request.fromPeerId,
@@ -814,6 +815,18 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
             'Chat',
           );
         }
+        transferSucceeded = success;
+      }
+
+      // Mark the photo message as read only after the full photo is delivered.
+      // Read receipts (sent when the receiver opens the chat) intentionally
+      // exclude photo messages, so this is the only place a sent photo gets
+      // promoted to [read].
+      if (transferSucceeded) {
+        add(MessageStatusUpdated(
+          messageId: pending.messageId,
+          status: MessageStatus.read,
+        ));
       }
     } catch (e) {
       Logger.error('_sendFullPhoto failed', e, null, 'ChatBloc');
@@ -908,7 +921,8 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
           if (state.currentConversation?.peerId == bleMsg.fromPeerId) {
             final updatedMessages = state.messages.map((msg) {
               if (msg.senderId == _ownUserId &&
-                  msg.status == MessageStatus.sent) {
+                  msg.status == MessageStatus.sent &&
+                  msg.contentType == MessageContentType.text) {
                 return MessageEntry(
                   id: msg.id,
                   conversationId: msg.conversationId,

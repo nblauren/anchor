@@ -656,8 +656,10 @@ class BleFacade implements BleServiceInterface {
   }
 
   /// Called by BleScanner when a discovered peer needs its profile read.
+  /// Do NOT refresh the peer timeout here — scan results may come from iOS
+  /// Core Bluetooth cache long after a peer has left range. The timeout is
+  /// only refreshed in [_onProfileReadResult] after a confirmed GATT read.
   void _onScannerPeerNeedsProfile(String peerId, Peripheral peripheral) {
-    _refreshPeerTimeout(peerId);
     _profileReader.readProfile(peerId, peripheral);
   }
 
