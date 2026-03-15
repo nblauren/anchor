@@ -49,6 +49,7 @@ class _ChatScreenState extends State<ChatScreen> {
   final _imagePicker = ImagePicker();
   late final ChatBloc _chatBloc;
   bool _anchorDropped = false;
+  final _messageKeys = <String, GlobalKey>{};
 
   @override
   void initState() {
@@ -160,6 +161,18 @@ class _ChatScreenState extends State<ChatScreen> {
     context.read<ChatBloc>().add(const SetReplyingTo(null));
   }
 
+  void _scrollToMessage(String messageId) {
+    final key = _messageKeys[messageId];
+    if (key?.currentContext != null) {
+      Scrollable.ensureVisible(
+        key!.currentContext!,
+        duration: const Duration(milliseconds: 400),
+        curve: Curves.easeInOut,
+        alignment: 0.5,
+      );
+    }
+  }
+
   void _showPhotoOptions() {
     if (widget.isRelayedPeer) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -259,10 +272,16 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  void _showEmojiPicker(BuildContext context, String messageId, String peerId) {
+  /// Shows a bottom sheet with Reply and (for received messages) React options.
+  void _showMessageOptions(
+    BuildContext context,
+    MessageEntry message,
+    String peerId,
+    bool isSentByMe,
+  ) {
     final ownUserId = context.read<ChatBloc>().ownUserId;
     final currentReactions =
-        context.read<ChatBloc>().state.reactions[messageId] ?? [];
+        context.read<ChatBloc>().state.reactions[message.id] ?? [];
 
     showModalBottomSheet<void>(
       context: context,
@@ -271,46 +290,79 @@ class _ChatScreenState extends State<ChatScreen> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: _kReactionEmojis.map((emoji) {
-              final alreadyReacted = currentReactions
-                  .any((r) => r.senderId == ownUserId && r.emoji == emoji);
-              return GestureDetector(
-                onTap: () {
-                  Navigator.pop(ctx);
-                  if (alreadyReacted) {
-                    context.read<ChatBloc>().add(RemoveReaction(
-                          messageId: messageId,
-                          peerId: peerId,
-                          emoji: emoji,
-                        ));
-                  } else {
-                    context.read<ChatBloc>().add(SendReaction(
-                          messageId: messageId,
-                          peerId: peerId,
-                          emoji: emoji,
-                        ));
-                  }
-                },
-                child: Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: alreadyReacted
-                      ? BoxDecoration(
-                          color: AppTheme.primaryColor.withValues(alpha: 0.25),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: AppTheme.primaryColor.withValues(alpha: 0.5),
-                          ),
-                        )
-                      : null,
-                  child: Text(emoji, style: const TextStyle(fontSize: 28)),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: AppTheme.textHint,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            // Emoji row — only for messages from the other person
+            if (!isSentByMe) ...[
+              const SizedBox(height: 12),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: _kReactionEmojis.map((emoji) {
+                    final alreadyReacted = currentReactions.any(
+                        (r) => r.senderId == ownUserId && r.emoji == emoji);
+                    return GestureDetector(
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        if (alreadyReacted) {
+                          context.read<ChatBloc>().add(RemoveReaction(
+                                messageId: message.id,
+                                peerId: peerId,
+                                emoji: emoji,
+                              ));
+                        } else {
+                          context.read<ChatBloc>().add(SendReaction(
+                                messageId: message.id,
+                                peerId: peerId,
+                                emoji: emoji,
+                              ));
+                        }
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: alreadyReacted
+                            ? BoxDecoration(
+                                color: AppTheme.primaryColor
+                                    .withValues(alpha: 0.25),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: AppTheme.primaryColor
+                                      .withValues(alpha: 0.5),
+                                ),
+                              )
+                            : null,
+                        child:
+                            Text(emoji, style: const TextStyle(fontSize: 28)),
+                      ),
+                    );
+                  }).toList(),
                 ),
-              );
-            }).toList(),
-          ),
+              ),
+              const Divider(height: 16, color: AppTheme.darkSurface),
+            ] else
+              const SizedBox(height: 12),
+            // Reply option
+            ListTile(
+              leading: const Icon(Icons.reply, color: AppTheme.textSecondary),
+              title: const Text('Reply'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _startReply(message);
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
         ),
       ),
     );
@@ -477,8 +529,10 @@ class _ChatScreenState extends State<ChatScreen> {
                                       message.createdAt,
                                       state.messages[index + 1].createdAt,
                                     );
+                            final itemKey = _messageKeys.putIfAbsent(
+                                message.id, () => GlobalKey());
 
-                            return Column(
+                            return Column(key: itemKey,
                               children: [
                                 if (showDate)
                                   Padding(
@@ -492,87 +546,72 @@ class _ChatScreenState extends State<ChatScreen> {
                                       ),
                                     ),
                                   ),
-                                Dismissible(
-                                  key: Key('reply_${message.id}'),
-                                  direction: DismissDirection.startToEnd,
-                                  confirmDismiss: (_) async {
-                                    if (!state.isBlocked) _startReply(message);
-                                    return false;
-                                  },
-                                  background: const Align(
-                                    alignment: Alignment.centerLeft,
-                                    child: Padding(
-                                      padding: EdgeInsets.only(left: 16),
-                                      child: Icon(
-                                        Icons.reply,
-                                        color: AppTheme.primaryLight,
-                                      ),
-                                    ),
-                                  ),
-                                  child: MessageBubbleWidget(
-                                    message: message,
-                                    isSentByMe: isSentByMe,
-                                    ownUserId: ownUserId,
-                                    onRetry: () => _retryMessage(message.id),
-                                    isRelayedPeer: widget.isRelayedPeer,
-                                    transferInfo:
-                                        state.getTransferProgress(message.id),
-                                    onRequestFullPhoto: isSentByMe
-                                        ? null
-                                        : (photoId) => _requestFullPhoto(
-                                              message.id,
-                                              photoId,
-                                              state.currentConversation!.peerId,
-                                            ),
-                                    onCancelTransfer:
-                                        state.getTransferProgress(message.id) !=
-                                                null
-                                            ? () => context.read<ChatBloc>().add(
-                                                  CancelPhotoTransfer(message.id),
-                                                )
-                                            : null,
-                                    reactions: state.reactions[message.id] ?? [],
-                                    onReact: state.isBlocked
-                                        ? null
-                                        : (emoji) {
-                                            final peerId = state
-                                                .currentConversation!.peerId;
-                                            final ownReacted =
-                                                (state.reactions[message.id] ??
-                                                        [])
-                                                    .any((r) =>
-                                                        r.senderId == ownUserId &&
-                                                        r.emoji == emoji);
-                                            if (ownReacted) {
-                                              context.read<ChatBloc>().add(
-                                                    RemoveReaction(
-                                                      messageId: message.id,
-                                                      peerId: peerId,
-                                                      emoji: emoji,
-                                                    ),
-                                                  );
-                                            } else {
-                                              context.read<ChatBloc>().add(
-                                                    SendReaction(
-                                                      messageId: message.id,
-                                                      peerId: peerId,
-                                                      emoji: emoji,
-                                                    ),
-                                                  );
-                                            }
-                                          },
-                                    onLongPress: state.isBlocked ||
-                                            message.senderId == ownUserId
-                                        ? null
-                                        : () => _showEmojiPicker(
-                                              context,
-                                              message.id,
-                                              state.currentConversation!.peerId,
-                                            ),
-                                    quotedMessage: message.replyToMessageId != null
-                                        ? state.quotedMessages[message.replyToMessageId]
-                                        : null,
-                                  ),
+                                MessageBubbleWidget(
+                                  message: message,
+                                  isSentByMe: isSentByMe,
+                                  ownUserId: ownUserId,
+                                  onRetry: () => _retryMessage(message.id),
+                                  isRelayedPeer: widget.isRelayedPeer,
+                                  transferInfo:
+                                      state.getTransferProgress(message.id),
+                                  onRequestFullPhoto: isSentByMe
+                                      ? null
+                                      : (photoId) => _requestFullPhoto(
+                                            message.id,
+                                            photoId,
+                                            state.currentConversation!.peerId,
+                                          ),
+                                  onCancelTransfer:
+                                      state.getTransferProgress(message.id) !=
+                                              null
+                                          ? () => context.read<ChatBloc>().add(
+                                                CancelPhotoTransfer(message.id),
+                                              )
+                                          : null,
+                                  reactions: state.reactions[message.id] ?? [],
+                                  onReact: state.isBlocked
+                                      ? null
+                                      : (emoji) {
+                                          final peerId = state
+                                              .currentConversation!.peerId;
+                                          final ownReacted =
+                                              (state.reactions[message.id] ??
+                                                      [])
+                                                  .any((r) =>
+                                                      r.senderId == ownUserId &&
+                                                      r.emoji == emoji);
+                                          if (ownReacted) {
+                                            context.read<ChatBloc>().add(
+                                                  RemoveReaction(
+                                                    messageId: message.id,
+                                                    peerId: peerId,
+                                                    emoji: emoji,
+                                                  ),
+                                                );
+                                          } else {
+                                            context.read<ChatBloc>().add(
+                                                  SendReaction(
+                                                    messageId: message.id,
+                                                    peerId: peerId,
+                                                    emoji: emoji,
+                                                  ),
+                                                );
+                                          }
+                                        },
+                                  onLongPress: state.isBlocked || isSentByMe
+                                      ? null
+                                      : () => _showMessageOptions(
+                                            context,
+                                            message,
+                                            state.currentConversation!.peerId,
+                                            isSentByMe,
+                                          ),
+                                  quotedMessage: message.replyToMessageId != null
+                                      ? state.quotedMessages[message.replyToMessageId]
+                                      : null,
+                                  onQuotedTap: message.replyToMessageId != null
+                                      ? () => _scrollToMessage(message.replyToMessageId!)
+                                      : null,
                                 ),
                               ],
                             );
@@ -668,10 +707,12 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Widget _buildMessageInput(ChatState state) {
     final replyingTo = state.replyingToMessage;
+    final ownUserId = context.read<ChatBloc>().ownUserId;
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (replyingTo != null) _buildReplyBar(replyingTo),
+        if (replyingTo != null)
+          _buildReplyBar(replyingTo, ownUserId, widget.peerName),
         Container(
           padding: EdgeInsets.only(
             left: 8,
@@ -739,39 +780,82 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  Widget _buildReplyBar(MessageEntry replyingTo) {
+  Widget _buildReplyBar(MessageEntry replyingTo, String ownUserId, String peerName) {
+    final isOwnMessage = replyingTo.senderId == ownUserId;
+    final senderLabel = isOwnMessage ? 'Yourself' : peerName;
     final isPhoto = replyingTo.contentType == MessageContentType.photo ||
         replyingTo.contentType == MessageContentType.photoPreview;
-    final preview = isPhoto ? '📷 Photo' : (replyingTo.textContent ?? '');
-    final truncated = preview.length > 60 ? '${preview.substring(0, 60)}…' : preview;
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.fromLTRB(0, 8, 12, 8),
       decoration: const BoxDecoration(
-        color: AppTheme.darkCard,
-        border: Border(
-          top: BorderSide(color: AppTheme.darkSurface),
-          left: BorderSide(color: AppTheme.primaryColor, width: 3),
-        ),
+        color: AppTheme.darkSurface,
+        border: Border(top: BorderSide(color: AppTheme.darkCard)),
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          const Icon(Icons.reply, size: 16, color: AppTheme.primaryLight),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              truncated,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: AppTheme.textSecondary,
-                fontSize: 13,
-              ),
+          // Colored left accent bar
+          Container(
+            width: 3,
+            height: 36,
+            margin: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: BoxDecoration(
+              color: AppTheme.primaryColor,
+              borderRadius: BorderRadius.circular(2),
             ),
           ),
+          // Text content
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Replying to $senderLabel',
+                  style: const TextStyle(
+                    color: AppTheme.primaryLight,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    height: 1.2,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (isPhoto) ...[
+                      const Icon(Icons.image_outlined,
+                          size: 12, color: AppTheme.textHint),
+                      const SizedBox(width: 4),
+                    ],
+                    Flexible(
+                      child: Text(
+                        isPhoto
+                            ? 'Photo'
+                            : (replyingTo.textContent ?? ''),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: AppTheme.textHint,
+                          fontSize: 12,
+                          height: 1.2,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          // Close button
           GestureDetector(
             onTap: _cancelReply,
-            child: const Icon(Icons.close, size: 18, color: AppTheme.textHint),
+            child: Container(
+              padding: const EdgeInsets.all(4),
+              child: const Icon(Icons.close,
+                  size: 16, color: AppTheme.textSecondary),
+            ),
           ),
         ],
       ),

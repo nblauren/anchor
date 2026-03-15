@@ -58,6 +58,7 @@ class LoadMessages extends ChatEvent {
 class SendTextMessage extends ChatEvent {
   const SendTextMessage(this.text, {this.replyToMessageId});
   final String text;
+
   /// The ID of the message being replied to, if any.
   final String? replyToMessageId;
 

@@ -344,11 +344,14 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         replyToMessageId: replyToId,
       );
 
-      // Build updated quoted messages map if this is a reply
+      // Build updated quoted messages map if this is a reply.
+      // Prefer the in-state message (already in memory); fall back to a DB
+      // lookup so the sender's bubble always shows the quote.
       final updatedQuoted = Map<String, MessageEntry>.from(state.quotedMessages);
-      if (replyToId != null) {
-        final existing = state.replyingToMessage;
-        if (existing != null) updatedQuoted[replyToId] = existing;
+      if (replyToId != null && !updatedQuoted.containsKey(replyToId)) {
+        final quoted = state.replyingToMessage ??
+            await _chatRepository.getMessageById(replyToId);
+        if (quoted != null) updatedQuoted[replyToId] = quoted;
       }
 
       // Add to messages list immediately — clear reply bar
@@ -917,6 +920,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
                   createdAt: msg.createdAt,
                   retryCount: msg.retryCount,
                   lastAttemptAt: msg.lastAttemptAt,
+                  replyToMessageId: msg.replyToMessageId,
                 );
               }
               return msg;
@@ -1124,6 +1128,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
             createdAt: msg.createdAt,
             retryCount: msg.retryCount,
             lastAttemptAt: msg.lastAttemptAt,
+            replyToMessageId: msg.replyToMessageId,
           );
         }
         return msg;
@@ -1166,6 +1171,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
             createdAt: msg.createdAt,
             retryCount: msg.retryCount,
             lastAttemptAt: msg.lastAttemptAt,
+            replyToMessageId: msg.replyToMessageId,
           );
         }
         return msg;
@@ -1175,7 +1181,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
 
       // Fire-and-forget: retry in background
       if (message.contentType == MessageContentType.text) {
-        _enqueueSend(() => _sendTextInBackground(message, peerId));
+        _enqueueSend(() => _sendTextInBackground(message, peerId, replyToId: message.replyToMessageId));
       } else if (message.contentType == MessageContentType.photo) {
         _enqueueSend(() => _retryPhotoInBackground(message, peerId));
       }

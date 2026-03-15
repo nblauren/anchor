@@ -50,6 +50,7 @@ class MessageBubbleWidget extends StatelessWidget {
     this.onReact,
     this.onLongPress,
     this.quotedMessage,
+    this.onQuotedTap,
   });
 
   final MessageEntry message;
@@ -71,13 +72,16 @@ class MessageBubbleWidget extends StatelessWidget {
   final void Function(String emoji)? onReact;
   /// Called on long-press to open the emoji picker.
   final VoidCallback? onLongPress;
-  /// The message being replied to, if any. Shown as a quote inside the bubble.
+  /// The message being replied to, if any. Shown as a floating card above the bubble.
   final MessageEntry? quotedMessage;
+  /// Called when the user taps the quoted message card.
+  final VoidCallback? onQuotedTap;
 
   @override
   Widget build(BuildContext context) {
     final contentType = message.contentType;
     final grouped = groupReactions(reactions, ownUserId);
+    final maxWidth = MediaQuery.of(context).size.width * 0.75;
 
     return Align(
       alignment: isSentByMe ? Alignment.centerRight : Alignment.centerLeft,
@@ -85,160 +89,205 @@ class MessageBubbleWidget extends StatelessWidget {
         crossAxisAlignment:
             isSentByMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
         children: [
-          GestureDetector(
-            onLongPress: onLongPress,
-            child: Container(
-              margin: EdgeInsets.only(
-                top: 4,
-                bottom: grouped.isEmpty ? 4 : 2,
-                left: isSentByMe ? 48 : 0,
-                right: isSentByMe ? 0 : 48,
-              ),
-              constraints: BoxConstraints(
-                maxWidth: MediaQuery.of(context).size.width * 0.75,
-              ),
-              decoration: BoxDecoration(
-                color: isSentByMe ? const Color(0xFFA8003E) : AppTheme.darkCard,
-                borderRadius: BorderRadius.only(
-                  topLeft: const Radius.circular(16),
-                  topRight: const Radius.circular(16),
-                  bottomLeft: isSentByMe
-                      ? const Radius.circular(16)
-                      : const Radius.circular(4),
-                  bottomRight: isSentByMe
-                      ? const Radius.circular(4)
-                      : const Radius.circular(16),
-                ),
-              ),
-              clipBehavior: Clip.antiAlias,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  if (quotedMessage != null)
-                    _buildQuotedMessage(quotedMessage!),
-                  if (contentType == MessageContentType.photo)
-                    _buildPhotoContent(context)
-                  else if (contentType == MessageContentType.photoPreview)
-                    _buildPhotoPreviewContent(context)
-                  else
-                    _buildTextContent(),
+          // ── Floating quote card (above the bubble) ──────────────────────
+          if (quotedMessage != null)
+            _buildFloatingQuoteCard(context, maxWidth),
 
-                  // Timestamp and status row
-                  Padding(
-                    padding: EdgeInsets.only(
-                      left: 12,
-                      right: 12,
-                      bottom: 8,
-                      top: contentType != MessageContentType.text ? 8 : 0,
+          // ── Bubble + overlapping reactions ───────────────────────────────
+          Transform.translate(
+            offset: quotedMessage != null ? const Offset(0, -6) : Offset.zero,
+            child: Padding(
+            padding: EdgeInsets.only(
+              top: quotedMessage != null ? 0 : 4,
+              // Extra bottom room so the reaction pill doesn't clip
+              bottom: grouped.isEmpty ? 4 : 16,
+              left: isSentByMe ? 48 : 0,
+              right: isSentByMe ? 0 : 48,
+            ),
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                // Bubble
+                GestureDetector(
+                  onLongPress: onLongPress,
+                  child: Container(
+                    constraints: BoxConstraints(maxWidth: maxWidth),
+                    decoration: BoxDecoration(
+                      color: isSentByMe
+                          ? const Color(0xFFA8003E)
+                          : AppTheme.darkCard,
+                      borderRadius: BorderRadius.only(
+                        topLeft: const Radius.circular(16),
+                        topRight: const Radius.circular(16),
+                        bottomLeft: isSentByMe
+                            ? const Radius.circular(16)
+                            : const Radius.circular(4),
+                        bottomRight: isSentByMe
+                            ? const Radius.circular(4)
+                            : const Radius.circular(16),
+                      ),
                     ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
+                    clipBehavior: Clip.antiAlias,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        Text(
-                          _formatTime(message.createdAt),
-                          style: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.6),
-                            fontSize: 11,
+                        if (contentType == MessageContentType.photo)
+                          _buildPhotoContent(context)
+                        else if (contentType == MessageContentType.photoPreview)
+                          _buildPhotoPreviewContent(context)
+                        else
+                          _buildTextContent(),
+
+                        // Timestamp + status
+                        Padding(
+                          padding: EdgeInsets.only(
+                            left: 12,
+                            right: 12,
+                            bottom: 8,
+                            top: contentType != MessageContentType.text ? 8 : 0,
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                _formatTime(message.createdAt),
+                                style: TextStyle(
+                                  color: Colors.white.withValues(alpha: 0.6),
+                                  fontSize: 11,
+                                ),
+                              ),
+                              if (isSentByMe && isRelayedPeer) ...[
+                                const SizedBox(width: 4),
+                                const Icon(Icons.hub_outlined,
+                                    size: 11, color: Colors.white38),
+                              ],
+                              if (isSentByMe) ...[
+                                const SizedBox(width: 4),
+                                _buildStatusIcon(),
+                              ],
+                            ],
                           ),
                         ),
-                        if (isSentByMe && isRelayedPeer) ...[
-                          const SizedBox(width: 4),
-                          const Icon(
-                            Icons.hub_outlined,
-                            size: 11,
-                            color: Colors.white38,
-                          ),
-                        ],
-                        if (isSentByMe) ...[
-                          const SizedBox(width: 4),
-                          _buildStatusIcon(),
-                        ],
                       ],
                     ),
                   ),
-                ],
-              ),
+                ),
+
+                // Reaction pill — overlaps the bottom corner of the bubble
+                if (grouped.isNotEmpty)
+                  Positioned(
+                    bottom: -11,
+                    // Received → bottom-right; Sent → bottom-left
+                    right: isSentByMe ? null : 6,
+                    left: isSentByMe ? 6 : null,
+                    child: _buildReactionPill(grouped),
+                  ),
+              ],
             ),
           ),
-
-          // Reaction chips
-          if (grouped.isNotEmpty)
-            Padding(
-              padding: EdgeInsets.only(
-                left: isSentByMe ? 48 : 4,
-                right: isSentByMe ? 4 : 48,
-                bottom: 4,
-              ),
-              child: Wrap(
-                spacing: 4,
-                children: grouped.map((g) {
-                  return GestureDetector(
-                    onTap: () => onReact?.call(g.emoji),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: g.isMine
-                            ? AppTheme.primaryColor.withValues(alpha: 0.35)
-                            : AppTheme.darkCard,
-                        borderRadius: BorderRadius.circular(12),
-                        border: g.isMine
-                            ? Border.all(
-                                color: AppTheme.primaryColor.withValues(
-                                    alpha: 0.7),
-                                width: 1,
-                              )
-                            : null,
-                      ),
-                      child: Text(
-                        g.count > 1 ? '${g.emoji} ${g.count}' : g.emoji,
-                        style: const TextStyle(fontSize: 13),
-                      ),
-                    ),
-                  );
-                }).toList(),
-              ),
-            ),
+          ), // Transform.translate
         ],
       ),
     );
   }
 
-  Widget _buildQuotedMessage(MessageEntry quoted) {
+  /// Small floating card rendered above the bubble to show the quoted message.
+  Widget _buildFloatingQuoteCard(BuildContext context, double maxWidth) {
+    final quoted = quotedMessage!;
     final isPhoto = quoted.contentType == MessageContentType.photo ||
         quoted.contentType == MessageContentType.photoPreview;
-    final preview = isPhoto
-        ? '📷 Photo'
-        : (quoted.textContent ?? '');
-    final previewText = preview.length > 80 ? '${preview.substring(0, 80)}…' : preview;
 
-    final quoteBarColor = isSentByMe
-        ? Colors.white.withValues(alpha: 0.5)
-        : AppTheme.primaryColor;
-    final quoteBgColor = isSentByMe
-        ? Colors.black.withValues(alpha: 0.15)
-        : AppTheme.primaryColor.withValues(alpha: 0.12);
-
-    return Container(
-      margin: const EdgeInsets.only(left: 8, right: 8, top: 8),
+    return GestureDetector(
+      onTap: onQuotedTap,
+      child: Container(
+      margin: EdgeInsets.only(
+        left: isSentByMe ? 48 : 0,
+        right: isSentByMe ? 0 : 48,
+      ),
+      constraints: BoxConstraints(maxWidth: maxWidth),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: quoteBgColor,
-        borderRadius: BorderRadius.circular(8),
-        border: Border(
-          left: BorderSide(color: quoteBarColor, width: 3),
-        ),
+        color: AppTheme.darkSurface,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.25),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-      child: Text(
-        previewText,
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-          color: Colors.white.withValues(alpha: 0.8),
-          fontSize: 12,
-          height: 1.3,
-        ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Flexible(
+            child: isPhoto
+                ? const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.image_outlined,
+                          size: 13, color: AppTheme.textHint),
+                      SizedBox(width: 5),
+                      Text(
+                        'Photo',
+                        style: TextStyle(
+                          color: AppTheme.textHint,
+                          fontSize: 12,
+                          fontStyle: FontStyle.italic,
+                        ),
+                      ),
+                    ],
+                  )
+                : Text(
+                    quoted.textContent ?? '',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: AppTheme.textSecondary.withValues(alpha: 0.45),
+                      fontSize: 12,
+                      height: 1.35,
+                    ),
+                  ),
+          ),
+        ],
       ),
+    ), // Container
+    ); // GestureDetector
+  }
+
+  /// Bare emoji row — no container, just the glyphs + optional counts.
+  Widget _buildReactionPill(
+      List<({String emoji, int count, bool isMine})> grouped) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: grouped.map((g) {
+        return GestureDetector(
+          onTap: () => onReact?.call(g.emoji),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 2),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(g.emoji, style: const TextStyle(fontSize: 18)),
+                if (g.count > 1) ...[
+                  const SizedBox(width: 2),
+                  Text(
+                    '${g.count}',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: g.isMine
+                          ? AppTheme.primaryLight
+                          : AppTheme.textSecondary,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        );
+      }).toList(),
     );
   }
 
