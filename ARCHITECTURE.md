@@ -90,21 +90,39 @@ lib/
 │   ├── image_service.dart           # Photo pick, compress, store, thumbnail gen
 │   ├── nsfw_detection_service.dart  # On-device NSFW classifier
 │   ├── notification_service.dart    # Local push notifications
+│   ├── audio_service.dart           # Ambient audio feedback (messages, drops, photos)
+│   ├── store_and_forward_service.dart # Cross-session message retry queue
 │   ├── ble/
+│   │   ├── ble_facade.dart                    # Thin facade exposing BleServiceInterface
 │   │   ├── ble_service_interface.dart         # Abstract BLE contract
-│   │   ├── flutter_blue_plus_ble_service.dart # Production impl (bluetooth_low_energy)
 │   │   ├── mock_ble_service.dart              # Test double
 │   │   ├── ble_models.dart                    # BLE-layer data types
 │   │   ├── ble_config.dart                    # Runtime configuration
 │   │   ├── ble_status_bloc.dart               # BLE adapter state tracking
 │   │   ├── ble_connection_bloc.dart           # BLE service lifecycle management
-│   │   └── photo_chunker.dart                 # Photo chunk/reassemble helpers
-│   └── nearby/
-│       ├── high_speed_transfer_service.dart    # Abstract Wi-Fi Direct interface
-│       ├── nearby_transfer_service_impl.dart   # Production impl (flutter_nearby_connections_plus)
-│       ├── mock_high_speed_transfer_service.dart # Test double
-│       ├── nearby_models.dart                  # NearbyTransferProgress, NearbyPayloadReceived
-│       └── nearby.dart                         # Barrel export
+│   │   ├── photo_chunker.dart                 # Photo chunk/reassemble helpers
+│   │   ├── connection/                        # ConnectionManager, PeerConnection
+│   │   ├── discovery/                         # BleScanner, ProfileReader
+│   │   ├── gatt/                              # GattServer, GattWriteQueue
+│   │   ├── mesh/                              # MeshRelayService
+│   │   └── transfer/                          # PhotoTransferHandler
+│   ├── nearby/
+│   │   ├── high_speed_transfer_service.dart    # Abstract Wi-Fi Direct interface
+│   │   ├── nearby_transfer_service_impl.dart   # Production impl (flutter_nearby_connections_plus)
+│   │   ├── mock_high_speed_transfer_service.dart # Test double
+│   │   ├── nearby_models.dart                  # NearbyTransferProgress, NearbyPayloadReceived
+│   │   └── nearby.dart                         # Barrel export
+│   ├── transport/
+│   │   ├── transport_manager.dart              # Unified LAN + Wi-Fi Aware + BLE router
+│   │   └── transport_enums.dart                # TransportType, etc.
+│   ├── lan/
+│   │   ├── lan_transport_service.dart          # Abstract LAN interface
+│   │   ├── lan_transport_service_impl.dart     # Production impl
+│   │   └── mock_lan_transport_service.dart     # Test double
+│   └── wifi_aware/
+│       ├── wifi_aware_transport_service.dart   # Abstract Wi-Fi Aware interface
+│       ├── wifi_aware_transport_service_impl.dart # Production impl (wifi_aware_p2p)
+│       └── mock_wifi_aware_transport_service.dart # Test double
 │
 └── features/
     ├── profile/                     # Own profile management
@@ -191,7 +209,7 @@ Sender (Central)                           Receiver (Peripheral / GATT server)
 
 Message types (`MessageType` enum): `text`, `photo`, `typing`, `read`, `photoPreview`, `photoRequest`, `wifiTransferReady`
 
-**No store-and-forward for direct messages (v1)**: If the recipient is out of range when a message is sent, the message is not queued. This is a known v1 limitation. See the planned future enhancements section.
+**Store-and-forward for direct messages**: Undelivered messages (status `pending` or `failed`) are persisted in the `messages` table. `StoreAndForwardService` monitors peer discovery events and retries queued messages when a peer is rediscovered, incrementing `retry_count` and updating `last_attempt_at` on each attempt.
 
 ### Photo Transfer Protocol
 
@@ -335,8 +353,11 @@ NsfwDetectionService.classify(thumbnailBytes)
 - Listens to `messageReceived` stream from BLE service
 - Handles photo consent flow: `PhotoPreviewReceived` → `RequestFullPhoto` → `PhotoTransferProgressUpdated`
 - **Non-blocking send queue**: `SendTextMessage` and `SendPhotoMessage` save to DB and update UI immediately, then send via BLE in the background using a FIFO queue (`_sendQueue`). Input is never blocked.
+- **Emoji reactions**: `SendReaction` / `ReactionReceived` events; cannot react to own message
+- **Reply-to**: `SendTextMessage` and `SendPhotoMessage` accept optional `replyToMessageId`
+- **Read receipts**: `MarkMessagesRead` emits BLE read-receipt; `ReadReceiptReceived` updates message status to `read`
 - Wi-Fi Direct integration: `WifiTransferReadyReceived` triggers Nearby browsing; `NearbyPayloadCompleted` handles received photos; `_transferToBleId` map resolves Nearby userIds to BLE device IDs
-- Key events: `SendTextMessage`, `SendPhotoMessage`, `BleMessageReceived`, `PhotoPreviewReceived`, `RequestFullPhoto`, `PhotoRequestReceived`, `CancelPhotoTransfer`, `WifiTransferReadyReceived`, `NearbyPayloadCompleted`, `RegisterPendingOutgoingPhoto`
+- Key events: `SendTextMessage`, `SendPhotoMessage`, `BleMessageReceived`, `PhotoPreviewReceived`, `RequestFullPhoto`, `PhotoRequestReceived`, `CancelPhotoTransfer`, `WifiTransferReadyReceived`, `NearbyPayloadCompleted`, `RegisterPendingOutgoingPhoto`, `SendReaction`, `ReactionReceived`, `MarkMessagesRead`, `ReadReceiptReceived`
 
 **`BleStatusBloc`** (`lib/services/ble/ble_status_bloc.dart`)
 - Tracks Bluetooth adapter state (enabled / disabled / unavailable)
@@ -356,13 +377,26 @@ NsfwDetectionService.classify(thumbnailBytes)
 
 | Table | Purpose |
 |---|---|
-| `user_profile` | The device owner's profile (single row) |
-| `profile_photos` | Photos attached to the user's profile (up to 4) |
-| `discovered_peers` | Cached peer profiles read from BLE |
+| `user_profiles` | The device owner's profile (single row) |
+| `user_photos` | Photos attached to the user's profile (up to 4) |
+| `discovered_peers` | Cached peer profiles read from BLE (includes `userId` for MAC rotation dedup) |
 | `conversations` | 1:1 chat conversations |
-| `messages` | Chat messages (text, photo events, typing, read receipts) |
+| `messages` | Chat messages; includes `retry_count`, `last_attempt_at` (store-and-forward) and `reply_to_message_id` (reply-to) |
 | `blocked_users` | Locally blocked peer IDs |
 | `anchor_drops` | History of sent/received anchor drop signals |
+| `message_reactions` | Emoji reactions on messages (sender, emoji, timestamp) |
+
+**Schema version**: 8
+
+| Migration | Change |
+|---|---|
+| v1 → v2 | Full schema recreate (dropped old tables) |
+| v2 → v3 | Add `anchor_drops` table |
+| v3 → v4 | Add `position` and `interests` columns to `user_profiles` and `discovered_peers` |
+| v4 → v5 | Add `user_id` to `discovered_peers` (stable ID for BLE MAC rotation dedup) |
+| v5 → v6 | Add `message_reactions` table |
+| v6 → v7 | Add `retry_count` and `last_attempt_at` to `messages` (store-and-forward) |
+| v7 → v8 | Add `reply_to_message_id` to `messages` (reply-to) |
 
 All writes go through repositories; Blocs never access the database directly.
 
@@ -372,7 +406,7 @@ All writes go through repositories; Blocs never access the database directly.
 |---|---|
 | `ProfileRepository` | CRUD for own profile and photos |
 | `PeerRepository` | Store/update/query discovered peers; block management |
-| `ChatRepository` | Conversations, messages, unread counts, status updates |
+| `ChatRepository` | Conversations, messages, unread counts, status updates, reactions |
 | `AnchorDropRepository` | Persist and query anchor drop history |
 
 ---
@@ -402,7 +436,10 @@ All writes go through repositories; Blocs never access the database directly.
   1. Sender selects photo → lightweight BLE notification sent (no thumbnail)
   2. Receiver sees "Photo — Tap to download", taps to accept
   3. Full photo transfers via Wi-Fi Direct (< 1 s) with automatic BLE fallback
-- Message status: pending → sent → delivered
+- Message status: pending → sent → delivered → read
+- Emoji reactions (tap-to-react emoji picker; reactions sync over BLE)
+- Reply-to messages with quoted preview bubble
+- Store-and-forward: undelivered messages are retried when peer is rediscovered
 - Keyboard stays open after sending for rapid follow-up messages
 - Out-of-range indicator when peer not currently visible
 
@@ -607,7 +644,6 @@ void setupDependencies(BleConfig config) {
 | Feature | Notes |
 |---|---|
 | End-to-end encryption | RSA key pair per device; keys exchanged during BLE discovery |
-| Store-and-forward (direct) | Queue direct messages for delivery when peer returns to range (across sessions) |
 | Group chat | Broadcast messages to multiple peers; group formation via QR/event code |
 | Voice messages | Record, compress, chunk, transfer over BLE or Wi-Fi Direct |
 | Photo albums | Multiple photos per message; gallery view |

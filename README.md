@@ -22,7 +22,13 @@ Designed with privacy first: no registration, no cloud sync, all data stays on y
 - **Drop Anchor ⚓** — quick interest signal sent to a nearby peer with history tracking
 - **Wi-Fi Direct Photo Transfer** — high-speed photo transfer over Wi-Fi Direct (Nearby Connections / Multipeer Connectivity) with automatic BLE fallback; 100x+ faster than BLE chunking
 - **Non-Blocking Message Queue** — send multiple text and photo messages back-to-back without blocking; messages queue and send sequentially in the background (FIFO)
-- **BLE Mesh Relay** — TTL-based message flooding through connected peers for extended reach; no store-and-forward for relayed messages (direct peers only)
+- **Store-and-Forward Direct Messages** — undelivered messages are persisted and retried when the peer is rediscovered in a future session
+- **Emoji Reactions** — react to any message with an emoji; reactions sync over BLE
+- **Reply-to Messages** — reply directly to any message with a quoted preview
+- **Message Read Receipts** — messages transition from delivered to read when the recipient opens the chat
+- **Ambient Audio Notifications** — subtle audio feedback for new messages, anchor drops, and photo transfers
+- **BLE Mesh Relay** — TTL-based message flooding through connected peers for extended reach
+- **Multi-Transport Layer** — unified `TransportManager` routes over LAN, Wi-Fi Aware, or BLE, with automatic per-peer fallback
 - **Block Users Locally** — full control over who can reach you; blocking is stored on-device only
 - **Privacy-First** — no servers, no accounts, no analytics; delete the app to erase all data
 
@@ -33,7 +39,6 @@ Designed with privacy first: no registration, no cloud sync, all data stays on y
 - Voice messages
 - Photo albums (multiple photos per message)
 - Event codes for organizers to scope discovery to attendees
-- Store-and-forward for direct messages (queue when peer out of range)
 
 ## Technology Stack
 
@@ -46,6 +51,7 @@ Designed with privacy first: no registration, no cloud sync, all data stays on y
 | Dependency Injection | GetIt |
 | Image Handling | `image_picker`, `image_compression_flutter` |
 | Wi-Fi Direct | `flutter_nearby_connections_plus` (Nearby Connections / Multipeer Connectivity) |
+| Wi-Fi Aware | `wifi_aware_p2p` (Android Wi-Fi Aware P2P) |
 | NSFW Detection | `nsfw_detector_flutter` |
 | Notifications | `flutter_local_notifications` |
 
@@ -82,6 +88,7 @@ flutter run
 ### Platform Setup
 
 **iOS Requirements**
+
 - Minimum OS version: iOS 14.0
 - Required `Info.plist` keys (already configured):
   - `NSBluetoothAlwaysUsageDescription`
@@ -91,6 +98,7 @@ flutter run
 - **Important**: On iOS, BLE discovery requires the app to be in the foreground. Inform users of this limitation during onboarding.
 
 **Android Requirements**
+
 - Minimum SDK: API 26 (Android 8.0)
 - Permissions configured in `AndroidManifest.xml`:
   - `BLUETOOTH_SCAN`, `BLUETOOTH_CONNECT`, `BLUETOOTH_ADVERTISE` (Android 12+)
@@ -121,7 +129,7 @@ flutter run
 3. Messages queue in-app and send sequentially — you can type multiple messages without waiting
 4. Photos require explicit receiver consent before transfer begins
 5. Photos transfer over Wi-Fi Direct when available (< 1 second for 5 MB); falls back to BLE chunking automatically
-6. If a peer goes out of range, messages are not queued across sessions (no store-and-forward in v1)
+6. If a peer goes out of range, undelivered messages are persisted and retried automatically when the peer is rediscovered
 
 ### Privacy Controls
 
@@ -168,9 +176,9 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed technical documentation.
 
 | Limitation | Detail |
 |---|---|
-| No store-and-forward | If a peer goes out of range before a message is delivered, the message is not queued across sessions |
 | Photo relay | Full photos are only transferred direct peer-to-peer; multi-hop relay for photos is not supported |
 | Photo transfer speed | < 1 second via Wi-Fi Direct; ~30–60 seconds via BLE fallback for a 200 KB photo |
+| Concurrent Wi-Fi Direct transfers | One transfer at a time; NearbyService reinitialises between sessions |
 
 ### Environment
 
@@ -219,25 +227,39 @@ See [BLE_IMPLEMENTATION.md](BLE_IMPLEMENTATION.md) for detailed BLE testing guid
 - Drop Anchor ⚓ signal with full UI and history tracking
 - Wi-Fi Direct photo transfer with automatic BLE fallback
 - Non-blocking message send queue (FIFO — text and photos queue and send in background)
-- Mesh relay with TTL-based flooding (no store-and-forward for relayed messages)
+- Store-and-forward for direct messages (persisted retries across sessions)
+- Emoji reactions (sync over BLE; cannot react to own message)
+- Reply-to messages with quoted preview
+- Message read receipts
+- Ambient audio notifications (messages, anchor drops, photo transfers)
+- Mesh relay with TTL-based flooding
+- Multi-transport layer (TransportManager: LAN + Wi-Fi Aware + BLE with per-peer fallback)
 - Local user blocking
 - Battery saver mode (adaptive scan intervals)
 - Connection pooling (max 5 concurrent)
 - Onboarding with iOS background limitation disclosure
 - Settings screen with debug menu
+- Maestro UI tests
 
 ### In Progress / Planned
 
-- Store-and-forward for direct messages
-- End-to-end encryption
-- Group chat
-- Voice messages
-- Photo albums
+- Full Security Checklist Before Production
+  - E2EE with Noise or libsodium for all chat messages & photos
+  - Ephemeral IDs (rotate per session or app restart)
+  - Secure key storage (flutter_secure_storage or native keychain/keystore)
+  - Public key exchange only on first direct connection
+  - No plaintext in advertisements/GATT reads (except public discovery data)
+  - NSFW detection before broadcasting primary photo
+  - Privacy policy stating: "All communication encrypted end-to-end, no servers, no data collection"
 - Event codes for organizers
+- Group chat (maybe never)
+- Voice messages (maybe never)
+- Photo albums (maybe never)
 
 ## Contributing
 
 Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for:
+
 - Development setup
 - Coding standards
 - Testing requirements

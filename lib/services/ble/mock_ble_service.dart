@@ -556,6 +556,9 @@ class MockBleService implements BleServiceInterface {
   }
 
   @override
+  String? getPeerIdForUserId(String userId) => null;
+
+  @override
   List<String> get visiblePeerIds => _visiblePeers.keys.toList();
 
   @override

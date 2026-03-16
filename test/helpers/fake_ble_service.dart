@@ -280,4 +280,7 @@ class FakeBleService implements BleServiceInterface {
 
   @override
   int get meshRoutingTableSize => 0;
+
+  @override
+  String? getPeerIdForUserId(String userId) => null;
 }

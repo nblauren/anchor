@@ -2,6 +2,8 @@ import 'dart:typed_data';
 
 import 'package:equatable/equatable.dart';
 
+import '../../../services/transport/transport_enums.dart';
+
 abstract class DiscoveryEvent extends Equatable {
   const DiscoveryEvent();
 
@@ -29,6 +31,7 @@ class PeerDiscovered extends DiscoveryEvent {
   const PeerDiscovered({
     required this.peerId,
     required this.name,
+    this.userId,
     this.age,
     this.bio,
     this.position,
@@ -43,6 +46,8 @@ class PeerDiscovered extends DiscoveryEvent {
 
   final String peerId;
   final String name;
+  /// Stable app-level user ID — used to detect cross-transport duplicates.
+  final String? userId;
   final int? age;
   final String? bio;
   /// Position ID from peer BLE profile characteristic. null = not shared.
@@ -61,7 +66,7 @@ class PeerDiscovered extends DiscoveryEvent {
 
   @override
   List<Object?> get props =>
-      [peerId, name, age, bio, position, interests, thumbnailData, photoThumbnails, rssi, isRelayed, hopCount, fullPhotoCount];
+      [peerId, name, userId, age, bio, position, interests, thumbnailData, photoThumbnails, rssi, isRelayed, hopCount, fullPhotoCount];
 }
 
 /// Peer data updated (signal strength, new info)
@@ -196,5 +201,19 @@ class PeerIdChangedEvent extends DiscoveryEvent {
 
   @override
   List<Object?> get props => [oldPeerId, newPeerId, userId];
+}
+
+/// A peer's best available transport changed (e.g. LAN → BLE fallback).
+class PeerTransportChangedEvent extends DiscoveryEvent {
+  const PeerTransportChangedEvent({
+    required this.peerId,
+    required this.newTransport,
+  });
+
+  final String peerId;
+  final TransportType newTransport;
+
+  @override
+  List<Object?> get props => [peerId, newTransport];
 }
 

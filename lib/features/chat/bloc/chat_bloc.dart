@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:anchor/services/notification_service.dart';
@@ -162,6 +163,15 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   final String _ownUserId;
   final HighSpeedTransferService? _highSpeedService;
   final StoreAndForwardService? _storeAndForwardService;
+
+  /// True when the transport for [peerId] has enough bandwidth to send
+  /// full-quality photos without BLE compression (LAN or Wi-Fi Aware).
+  bool _isHighBandwidthForPeer(String peerId) {
+    final transport = _transportManager.transportForPeer(peerId) ??
+        _transportManager.activeTransport;
+    return transport == TransportType.lan ||
+        transport == TransportType.wifiAware;
+  }
 
   // Transport manager subscriptions
   StreamSubscription<ble.ReceivedMessage>? _messageSubscription;
@@ -500,12 +510,19 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     required String peerId,
   }) async {
     try {
-      // 1. Compress photo for transfer.
+      // 1. Compress photo for storage (chat quality, ~100-200 KB).
       final compressedPath = await _imageService.compressForChat(photoPath);
       final absolutePath =
           await resolvePhotoPath(compressedPath) ?? compressedPath;
-      final blePhotoBytes =
-          await _imageService.compressForBleTransfer(absolutePath);
+      // On high-bandwidth transports (LAN, Wi-Fi Aware) the full chat-quality
+      // photo is sent — no need for aggressive BLE compression.
+      final int previewOriginalSize;
+      if (_isHighBandwidthForPeer(peerId)) {
+        previewOriginalSize = await File(absolutePath).length();
+      } else {
+        previewOriginalSize =
+            (await _imageService.compressForBleTransfer(absolutePath)).length;
+      }
 
       // Persist the compressed relative path so the photo survives app restarts.
       // The original photoPath may be a picker temp file that gets deleted.
@@ -536,7 +553,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         messageId: message.id,
         photoId: photoId,
         thumbnailBytes: Uint8List(0),
-        originalSize: blePhotoBytes.length,
+        originalSize: previewOriginalSize,
       );
 
       if (!previewSent && !isClosed) {
@@ -731,9 +748,17 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
             ..remove(request.photoId);
       emit(state.copyWith(pendingOutgoingPhotos: updatedPending));
 
-      // Compress photo (fast, ~50ms) — the only thing we await in this handler.
-      final photoBytes =
-          await _imageService.compressForBleTransfer(pending.localPhotoPath);
+      // On high-bandwidth transports send full chat-quality photo; BLE gets
+      // aggressively compressed to fit its tight bandwidth constraints.
+      final Uint8List photoBytes;
+      if (_isHighBandwidthForPeer(request.fromPeerId)) {
+        final absolutePath = await resolvePhotoPath(pending.localPhotoPath)
+            ?? pending.localPhotoPath;
+        photoBytes = await File(absolutePath).readAsBytes();
+      } else {
+        photoBytes =
+            await _imageService.compressForBleTransfer(pending.localPhotoPath);
+      }
 
       // Fire-and-forget: kick off the transfer in the background so we don't
       // block the bloc event queue (Wi-Fi Direct timeout + BLE chunking can
@@ -758,6 +783,23 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     required Uint8List photoBytes,
   }) async {
     try {
+      // ── LAN: skip Wi-Fi Direct entirely, use TransportManager directly ──
+      if (_transportManager.activeTransport == TransportType.lan) {
+        final success = await _transportManager.sendPhoto(
+          request.fromPeerId,
+          photoBytes,
+          pending.messageId,
+          photoId: request.photoId,
+        );
+        if (success) {
+          add(MessageStatusUpdated(
+            messageId: pending.messageId,
+            status: MessageStatus.read,
+          ));
+        }
+        return;
+      }
+
       // ── Try Wi-Fi Direct first ──────────────────────────────────────────
       bool wifiSuccess = false;
       final hsService = _highSpeedService;
@@ -1214,8 +1256,9 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     try {
       final absolutePath =
           await resolvePhotoPath(message.photoPath) ?? message.photoPath!;
-      final bleBytes =
-          await _imageService.compressForBleTransfer(absolutePath);
+      final bleBytes = _isHighBandwidthForPeer(peerId)
+          ? await File(absolutePath).readAsBytes()
+          : await _imageService.compressForBleTransfer(absolutePath);
       const uuidGen = Uuid();
       final photoId = uuidGen.v4();
 

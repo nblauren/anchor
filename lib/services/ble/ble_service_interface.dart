@@ -161,6 +161,10 @@ abstract class BleServiceInterface {
   /// Check if a peer is currently reachable
   bool isPeerReachable(String peerId);
 
+  /// Resolve the BLE peripheral UUID for a given app-level userId, or null
+  /// if the mapping hasn't been established yet (peer not yet scanned).
+  String? getPeerIdForUserId(String userId);
+
   /// Get list of currently visible peer IDs
   List<String> get visiblePeerIds;
 

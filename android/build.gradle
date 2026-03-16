@@ -1,12 +1,12 @@
 buildscript {
-    ext.kotlin_version = '1.9.24'  // or '2.0.0' / '2.1.0' if you want newer; 1.9.24 is safe
+    ext.kotlin_version = '2.1.0'
     repositories {
         google()
         mavenCentral()
     }
     dependencies {
         // Update AGP to a version compatible with Flutter 3.35+ (8.1 → higher)
-        classpath 'com.android.tools.build:gradle:8.5.0'  // Start here; try 8.6.0 or 8.9.0 if needed
+        classpath 'com.android.tools.build:gradle:8.6.0'
         classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
     }
 }
@@ -16,11 +16,44 @@ allprojects {
         google()
         mavenCentral()
     }
+    configurations.all {
+        resolutionStrategy {
+            eachDependency { details ->
+                if (details.requested.group == 'com.github.VNAPNIC.flutter_nearby_connections' || 
+                    details.requested.name.contains('flutter_nearby_connections_plus')) {
+                }
+            }
+        }
+    }
 }
 
 rootProject.buildDir = '../build'
 subprojects {
     project.buildDir = "${rootProject.buildDir}/${project.name}"
+    afterEvaluate { subproject ->
+        if (subproject.hasProperty('android') && subproject.android.namespace == null) {
+            def manifest = file("${subproject.projectDir}/src/main/AndroidManifest.xml")
+            if (manifest.exists()) {
+                def pkg = (manifest.text =~ /package\s*=\s*"([^"]+)"/)
+                if (pkg.find()) {
+                    subproject.android.namespace = pkg.group(1)
+                }
+            }
+        }
+        if (subproject.hasProperty('android')) {
+            subproject.android {
+                compileOptions {
+                    sourceCompatibility JavaVersion.VERSION_17
+                    targetCompatibility JavaVersion.VERSION_17
+                }
+            }
+            subproject.tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+                kotlinOptions {
+                    jvmTarget = "17"
+                }
+            }
+        }
+    }
 }
 subprojects {
     project.evaluationDependsOn(':app')

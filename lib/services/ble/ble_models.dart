@@ -105,6 +105,7 @@ class DiscoveredPeer extends Equatable {
   const DiscoveredPeer({
     required this.peerId,
     required this.name,
+    this.userId,
     this.age,
     this.bio,
     this.position,
@@ -120,6 +121,10 @@ class DiscoveredPeer extends Equatable {
 
   final String peerId;
   final String name;
+  /// App-level user ID (stable UUID from profile creation).
+  /// Used for cross-transport deduplication (BLE UUID ≠ LAN session UUID
+  /// but both belong to the same person).
+  final String? userId;
   final int? age;
   final String? bio;
   /// Position preference ID received from peer's profile. null = not shared.
@@ -160,6 +165,7 @@ class DiscoveredPeer extends Equatable {
   DiscoveredPeer copyWith({
     String? peerId,
     String? name,
+    String? userId,
     int? age,
     String? bio,
     int? position,
@@ -175,6 +181,7 @@ class DiscoveredPeer extends Equatable {
     return DiscoveredPeer(
       peerId: peerId ?? this.peerId,
       name: name ?? this.name,
+      userId: userId ?? this.userId,
       age: age ?? this.age,
       bio: bio ?? this.bio,
       position: position ?? this.position,
@@ -191,7 +198,7 @@ class DiscoveredPeer extends Equatable {
 
   @override
   List<Object?> get props => [
-        peerId, name, age, bio, position, interests,
+        peerId, name, userId, age, bio, position, interests,
         thumbnailBytes, photoThumbnails,
         rssi, timestamp, isRelayed, hopCount, fullPhotoCount,
       ];

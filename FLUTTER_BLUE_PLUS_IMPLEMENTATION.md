@@ -1,8 +1,16 @@
 # Flutter Blue Plus BLE Implementation Guide
 
-## Overview
+> **⚠️ This file is outdated and kept for historical reference only.**
+>
+> Anchor no longer uses `flutter_blue_plus`. The production BLE implementation uses
+> **`bluetooth_low_energy`** (central + peripheral in one API) and has been decomposed
+> into focused modules under `lib/services/ble/` with `ble_facade.dart` as the entry point.
+>
+> **Refer to [BLE_IMPLEMENTATION.md](BLE_IMPLEMENTATION.md) for the current guide.**
 
-Anchor uses **flutter_blue_plus** for direct peer-to-peer Bluetooth Low Energy communication.
+## Overview (Historical)
+
+Anchor originally used **flutter_blue_plus** for direct peer-to-peer Bluetooth Low Energy communication.
 
 ## What's Implemented ✅
 
@@ -34,11 +42,11 @@ Characteristics:
   - Messaging:        0000fff3-0000-1000-8000-00805f9b34fb (WRITE, NOTIFY)
 ```
 
-### Dependencies
+### Dependencies (Current)
 
 ```yaml
 dependencies:
-  flutter_blue_plus: ^1.32.0      # BLE communication
+  bluetooth_low_energy: ^6.2.1    # BLE communication (central + peripheral)
   permission_handler: ^11.0.0      # Runtime permissions
 ```
 
@@ -60,14 +68,7 @@ dependencies:
 
 ### 1. Store-and-Forward Message Queue
 
-**Status**: Not implemented across sessions. In-session FIFO queue exists in ChatBloc.
-
-**Requirements**:
-- Database table for pending messages
-- Queue messages when peer goes out of range
-- Deliver when peer rediscovered in a future session
-- Retry logic with exponential backoff
-- Message expiration after 24 hours
+**Status**: ✅ **Implemented** — see `lib/services/store_and_forward_service.dart` and schema v7 (`retry_count`, `last_attempt_at` columns on `messages`).
 
 ### 2. Concurrent Wi-Fi Direct Transfers
 
@@ -136,7 +137,7 @@ dependencies:
 
 ### Known Issues
 
-1. **No cross-session store-and-forward**: Messages sent while peer offline are lost
+1. **Store-and-forward**: ✅ Implemented — messages are persisted and retried on peer rediscovery
 2. **One concurrent Wi-Fi Direct transfer**: Second transfer requires NearbyService reinit
 3. **iOS Background**: Discovery stops when app backgrounded (iOS limitation)
 4. **Connection Limits**: Only 5 concurrent connections (by design, configurable)
@@ -230,7 +231,7 @@ The implementation will be fully complete when:
 - ✅ Photos transfer via Wi-Fi Direct (< 1 s) with BLE fallback (~60 s)
 - ✅ App handles 10+ nearby peers
 - ⚠️ Battery drain acceptable (<10% per hour) — needs profiling
-- ⚠️ Messages queue across sessions when peers offline
+- ✅ Messages queue across sessions when peers offline (store-and-forward)
 - ✅ No crashes from BLE errors
 - ✅ Both iOS and Android working
 - ✅ Clear permissions flow

@@ -98,6 +98,7 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
     on<TogglePositionFilter>(_onTogglePositionFilter);
     on<ToggleInterestFilter>(_onToggleInterestFilter);
     on<PeerIdChangedEvent>(_onPeerIdChanged);
+    on<PeerTransportChangedEvent>(_onPeerTransportChanged);
     on<ClearFilters>(
       (event, emit) => emit(state.copyWith(
         filterPositionIds: const {},
@@ -127,6 +128,14 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
       )),
     );
 
+    _peerTransportChangedSubscription =
+        _transportManager.peerTransportChangedStream.listen(
+      (change) => add(PeerTransportChangedEvent(
+        peerId: change.peerId,
+        newTransport: change.newTransport,
+      )),
+    );
+
     // Debounce timer for batching peer updates
     _debounceTimer?.cancel();
   }
@@ -141,6 +150,7 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
   StreamSubscription<String>? _peerLostSubscription;
   StreamSubscription<ble.AnchorDropReceived>? _anchorDropSubscription;
   StreamSubscription<ble.PeerIdChanged>? _peerIdChangedSubscription;
+  StreamSubscription<PeerTransportChanged>? _peerTransportChangedSubscription;
 
   /// Handle BLE peer discovered event - convert to bloc event
   void _onBlePeerDiscovered(ble.DiscoveredPeer peer) {
@@ -150,6 +160,7 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
         add(PeerDiscovered(
           peerId: peer.peerId,
           name: peer.name,
+          userId: peer.userId,
           age: peer.age,
           bio: peer.bio,
           position: peer.position,
@@ -258,10 +269,34 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
           fullPhotoCount: event.fullPhotoCount,
         );
       } else {
+        // Cross-transport deduplication: if this userId is already known under
+        // a different peerId (e.g. BLE → LAN upgrade), migrate before upserting
+        // so we never have two DB rows for the same physical person.
+        if (event.userId != null) {
+          final existing =
+              await _peerRepository.getPeerByUserId(event.userId!);
+          if (existing != null && existing.peerId != event.peerId) {
+            // Migrate DB and remove stale peer from in-memory list.
+            await _peerRepository.migratePeerId(
+              oldPeerId: existing.peerId,
+              newPeerId: event.peerId,
+              userId: event.userId!,
+            );
+            final withoutOld =
+                state.peers.where((p) => p.peerId != existing.peerId).toList();
+            emit(state.copyWith(peers: withoutOld));
+            Logger.info(
+              'DiscoveryBloc: Pre-migration ${existing.peerId} → ${event.peerId} (userId=${event.userId})',
+              'Discovery',
+            );
+          }
+        }
+
         // Direct peer: persist to database
         final entry = await _peerRepository.upsertPeer(
           peerId: event.peerId,
           name: event.name,
+          userId: event.userId,
           age: event.age,
           bio: event.bio,
           position: event.position,
@@ -723,6 +758,17 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
     });
   }
 
+  /// Handle transport change for a peer — log for debugging.
+  void _onPeerTransportChanged(
+    PeerTransportChangedEvent event,
+    Emitter<DiscoveryState> emit,
+  ) {
+    Logger.info(
+      'DiscoveryBloc: peer ${event.peerId} transport → ${event.newTransport.name}',
+      'Discovery',
+    );
+  }
+
   // ── Local filter handlers ─────────────────────────────────────────────────
 
   void _onTogglePositionFilter(
@@ -758,6 +804,7 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
     _peerLostSubscription?.cancel();
     _anchorDropSubscription?.cancel();
     _peerIdChangedSubscription?.cancel();
+    _peerTransportChangedSubscription?.cancel();
     return super.close();
   }
 }

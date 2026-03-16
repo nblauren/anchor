@@ -51,6 +51,8 @@ class PhotoTransferInfo extends Equatable {
   /// Human-readable transport label for UI.
   String get transportLabel {
     switch (transport) {
+      case TransportType.lan:
+        return 'LAN';
       case TransportType.wifiAware:
         return 'Wi-Fi Aware';
       case TransportType.wifiDirect:

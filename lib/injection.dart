@@ -8,6 +8,7 @@ import 'services/ble/ble.dart';
 import 'services/database_service.dart';
 import 'services/image_service.dart';
 import 'services/audio_service.dart';
+import 'services/lan/lan.dart';
 import 'services/nearby/nearby.dart';
 import 'services/notification_service.dart';
 import 'services/nsfw_detection_service.dart';
@@ -83,6 +84,17 @@ Future<void> initializeDependencies({
     }
   });
 
+  // LAN transport service
+  getIt.registerLazySingleton<LanTransportService>(() {
+    if (config.useMockService) {
+      Logger.info('Using MockLanTransportService for testing', 'DI');
+      return MockLanTransportService();
+    } else {
+      Logger.info('Using LanTransportServiceImpl for production', 'DI');
+      return LanTransportServiceImpl();
+    }
+  });
+
   // Wi-Fi Aware transport service
   getIt.registerLazySingleton<WifiAwareTransportService>(() {
     if (config.useMockService) {
@@ -94,8 +106,9 @@ Future<void> initializeDependencies({
     }
   });
 
-  // Unified transport manager (Wi-Fi Aware primary, BLE fallback)
+  // Unified transport manager (LAN primary, Wi-Fi Aware secondary, BLE fallback)
   getIt.registerLazySingleton<TransportManager>(() => TransportManager(
+    lanService: getIt<LanTransportService>(),
     wifiAwareService: getIt<WifiAwareTransportService>(),
     bleService: getIt<BleServiceInterface>(),
   ));
@@ -166,6 +179,7 @@ Future<void> initializeDependencies({
 Future<void> disposeDependencies() async {
   await getIt<StoreAndForwardService>().dispose();
   await getIt<TransportManager>().dispose();
+  await getIt<LanTransportService>().dispose();
   await getIt<HighSpeedTransferService>().dispose();
   await getIt<DatabaseService>().close();
   await getIt.reset();

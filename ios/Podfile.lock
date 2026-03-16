@@ -17,7 +17,7 @@ PODS:
     - Flutter
   - flutter_native_splash (2.4.3):
     - Flutter
-  - flutter_nearby_connections_plus (1.2.3):
+  - flutter_nearby_connections_plus (0.0.1):
     - Flutter
     - SwiftyJSON (~> 4.0)
   - image_compression_flutter (1.0.0):
@@ -44,9 +44,9 @@ PODS:
     - FlutterMacOS
   - permission_handler_apple (9.3.0):
     - Flutter
-  - SDWebImage (5.21.6):
-    - SDWebImage/Core (= 5.21.6)
-  - SDWebImage/Core (5.21.6)
+  - SDWebImage (5.21.7):
+    - SDWebImage/Core (= 5.21.7)
+  - SDWebImage/Core (5.21.7)
   - SDWebImageWebPCoder (0.15.0):
     - libwebp (~> 1.0)
     - SDWebImage/Core (~> 5.17)
@@ -175,14 +175,14 @@ SPEC CHECKSUMS:
   flutter_image_compress_common: 1697a328fd72bfb335507c6bca1a65fa5ad87df1
   flutter_local_notifications: a5a732f069baa862e728d839dd2ebb904737effb
   flutter_native_splash: c32d145d68aeda5502d5f543ee38c192065986cf
-  flutter_nearby_connections_plus: f8e734e6c43cad0f8030bcee114503aa96d1041a
+  flutter_nearby_connections_plus: a040585e4557e3d4857a92afe4e7736a767e9892
   image_compression_flutter: d5024f18de4d279a6accdf7543d4874ac0927239
   image_picker_ios: 7fe1ff8e34c1790d6fff70a32484959f563a928a
   libwebp: 02b23773aedb6ff1fd38cec7a77b81414c6842a8
   Mantle: c5aa8794a29a022dfbbfc9799af95f477a69b62d
   path_provider_foundation: 080d55be775b7414fd5a5ef3ac137b97b097e564
   permission_handler_apple: 4ed2196e43d0651e8ff7ca3483a069d469701f2d
-  SDWebImage: 1bb6a1b84b6fe87b972a102bdc77dd589df33477
+  SDWebImage: e9fc87c1aab89a8ab1bbd74eba378c6f53be8abf
   SDWebImageWebPCoder: 0e06e365080397465cc73a7a9b472d8a3bd0f377
   shared_preferences_foundation: 9e1978ff2562383bd5676f64ec4e9aa8fa06a6f7
   sqlite3: 8d708bc63e9f4ce48f0ad9d6269e478c5ced1d9b
@@ -191,7 +191,7 @@ SPEC CHECKSUMS:
   TensorFlowLiteC: 20785a69299185a379ba9852b6625f00afd7984a
   TensorFlowLiteSwift: 3a4928286e9e35bdd3e17970f48e53c80d25e793
   tflite_flutter: 64b192e11352fe36943ab6656e1d49207f1a5595
-  wifi_aware_p2p: 6b164923675fdd04025e15a870d9abbd99826588
+  wifi_aware_p2p: b0b5b468cfaf671ec8edba4ce3916a8a55f79528
 
 PODFILE CHECKSUM: 06a85feef96d483dcebf5aaed63f10852029f1de
 

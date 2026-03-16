@@ -8,8 +8,39 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+---
+
+## [1.2.0] — 2026-03-16
+
 ### Added
-- Store-and-forward for direct messages (queue when peer out of range across sessions)
+- **Store-and-forward for direct messages**: Undelivered messages are persisted across sessions and retried when the peer is rediscovered. `StoreAndForwardService` (`lib/services/store_and_forward_service.dart`) queues messages with retry count and last-attempt timestamp. DB schema v7 adds `retry_count` and `last_attempt_at` columns to `messages`.
+- **Emoji reactions**: Users can react to any message with an emoji. Reactions are sent via BLE and persisted locally in the new `message_reactions` table (DB schema v6). Users cannot react to their own messages.
+- **Reply-to messages**: Users can reply directly to any message in a conversation. `replyToMessageId` column added to `messages` table (DB schema v8). Reply bubbles display a quoted preview of the original message.
+- **Message read receipts**: Read status is tracked and synced over BLE. Messages transition from `delivered` to `read` when the recipient opens the conversation.
+- **Ambient sound notifications**: Subtle audio feedback via `AudioService` (`lib/services/audio_service.dart`) for new messages, anchor drops, and photo transfers. Uses ambient (non-interrupting) playback.
+- **TransportManager**: Unified transport abstraction (`lib/services/transport/transport_manager.dart`) that manages BLE, Wi-Fi Aware, and LAN transports concurrently with per-peer best-transport routing and automatic fallback.
+- **Wi-Fi Aware transport**: `WifiAwareTransportService` (`lib/services/wifi_aware/`) uses `wifi_aware_p2p` for high-speed peer communication on Android, layered under `TransportManager`.
+- **LAN transport**: `LanTransportService` (`lib/services/lan/`) for same-network (Wi-Fi/LAN) peer messaging, layered under `TransportManager`.
+
+### Changed
+- **BLE service decomposed into focused modules**: The BLE monolith (`flutter_blue_plus_ble_service.dart`) is now split across 5 focused sub-modules under `lib/services/ble/`:
+  - `connection/` — `ConnectionManager`, `PeerConnection`
+  - `discovery/` — `BleScanner`, `ProfileReader`
+  - `gatt/` — `GattServer`, `GattWriteQueue`
+  - `mesh/` — `MeshRelayService`
+  - `transfer/` — `PhotoTransferHandler`
+  - `ble_facade.dart` — thin facade that re-exposes the combined `BleServiceInterface`
+- **MeshRelayService exposes local injection**: Added public method to inject a locally-originated message into the mesh, used as a fallback path in `sendMessage` and `sendDropAnchor`.
+
+### Fixed
+- **MAC rotation dedup**: `discovered_peers` table now stores `userId` (DB schema v5), enabling stable conversation lookup across BLE MAC address rotations.
+- **Position/interests on DiscoveredPeers**: Position ID and interest IDs from peers are now persisted in `discovered_peers` (DB schema v4), enabling filter continuity after app restart.
+- **Pending outgoing photos after session restart**: Photos with `pending` status are recovered and re-queued when the `ChatBloc` reopens a conversation.
+- **GATT write reliability**: GATT write queue (`GattWriteQueue`) prevents concurrent writes that caused silent failures on some Android devices.
+- **BLE RSSI sort stability**: Discovery grid now uses 10 dBm buckets for RSSI sorting, preventing rapid reordering as signal fluctuates.
+- **Offline peer indicators**: Discovery grid and chat show a clear "out of range" indicator for peers that are no longer visible in BLE scan results.
+- **Photo read status**: Photos are correctly marked as read when the recipient views the full photo.
+- **Chat bubble layout**: Improved message bubble layout for reply quotes, reaction chips, and long messages.
 
 ---
 

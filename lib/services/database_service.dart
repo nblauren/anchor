@@ -89,6 +89,7 @@ class DatabaseService {
 
     await _database.transaction(() async {
       // Delete in order to respect foreign key constraints
+      await _database.delete(_database.messageReactions).go();
       await _database.delete(_database.messages).go();
       await _database.delete(_database.conversations).go();
       await _database.delete(_database.blockedUsers).go();

@@ -646,6 +646,7 @@ class BleFacade implements BleServiceInterface {
     final peer = DiscoveredPeer(
       peerId: peerId,
       name: effectiveName,
+      userId: _getAppUserIdForPeer(peerId),
       age: age ?? existing?.age,
       bio: existing?.bio,
       thumbnailBytes: existing?.thumbnailBytes,
@@ -1290,6 +1291,9 @@ class BleFacade implements BleServiceInterface {
   bool isPeerReachable(String peerId) {
     return _visiblePeers.containsKey(peerId);
   }
+
+  @override
+  String? getPeerIdForUserId(String userId) => _userIdToPeerId[userId];
 
   @override
   List<String> get visiblePeerIds => _visiblePeers.keys.toList();

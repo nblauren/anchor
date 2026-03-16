@@ -609,12 +609,10 @@ packages:
   flutter_nearby_connections_plus:
     dependency: "direct main"
     description:
-      path: "."
-      ref: "feature/fix-ios-podspec-module-name-mismatch"
-      resolved-ref: de9dc02bf4a2f49e7bf0ee19a7e10631c7ec8ddd
-      url: "https://github.com/AppDev42/flutter_nearby_connections_plus.git"
-    source: git
-    version: "1.2.3"
+      path: "/Users/nblaurenciana/Documents/GitHub/flutter_nearby_connections_plus"
+      relative: false
+    source: path
+    version: "1.2.2"
   flutter_plugin_android_lifecycle:
     dependency: transitive
     description:
@@ -716,10 +714,11 @@ packages:
   image_compression_flutter:
     dependency: "direct main"
     description:
-      name: image_compression_flutter
-      sha256: "0d7fc5d37bb69996285dd57342b3a37ad92fa4bb0616484af084ec924d6818b4"
-      url: "https://pub.dev"
-    source: hosted
+      path: "."
+      ref: main
+      resolved-ref: "52cf2f0ed37c4f111cdcf8567fee42dc08e5c72e"
+      url: "https://github.com/alvynfash/image_compression_flutter.git"
+    source: git
     version: "1.0.4"
   image_picker:
     dependency: "direct main"
@@ -1441,11 +1440,9 @@ packages:
   wifi_aware_p2p:
     dependency: "direct main"
     description:
-      path: "."
-      ref: main
-      resolved-ref: "9609fc7548ff1b606512fb8fee4d79477c02484e"
-      url: "https://github.com/nblauren/wifi_aware_p2p.git"
-    source: git
+      path: "/Users/nblaurenciana/Documents/GitHub/wifi_aware_p2p"
+      relative: false
+    source: path
     version: "0.1.0"
   xdg_directories:
     dependency: transitive

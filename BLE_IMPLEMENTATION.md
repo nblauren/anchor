@@ -31,13 +31,18 @@ Despite the historical filename, this class uses `bluetooth_low_energy` internal
 | Text messaging over GATT (fff3) | ✅ |
 | Full photo characteristic (fff4) | ✅ (served on-demand) |
 | Photo consent flow (preview → request → transfer) | ✅ |
+| Emoji reactions over BLE | ✅ |
+| Read receipts over BLE | ✅ |
+| Reply-to message metadata in BLE payload | ✅ |
 | NSFW detection before broadcast | ✅ |
 | Connection pooling (max 5 concurrent) | ✅ |
 | Adaptive scan intervals (normal / battery saver / high density) | ✅ |
 | Peer timeout and `peerLost` events | ✅ |
 | TTL-based mesh relay (text messages only) | ✅ |
-| Drop Anchor signal (fff3 message type) | ✅ (BLE layer; UI completion pending) |
+| Drop Anchor signal (fff3 message type) | ✅ |
 | Battery saver mode | ✅ |
+| GATT write queue (prevents concurrent write errors) | ✅ |
+| MAC rotation dedup (stable userId in discovered_peers) | ✅ |
 
 ---
 
@@ -246,12 +251,12 @@ Messages are JSON-encoded and written to fff3. The receiver's GATT server notifi
 
 | Limitation | Detail |
 |---|---|
-| No store-and-forward | Direct messages sent while peer is out of range are not queued |
 | Photo relay | Full photos are direct only; not relayed through mesh |
 | iOS background | Discovery stops when app is backgrounded (Apple restriction); disclosed in onboarding |
 | iOS connection limit | ~8–10 concurrent BLE connections |
 | iOS MTU | Typically 185 bytes (affects chunk size and throughput) |
 | Android MTU | Negotiable up to 512 bytes |
+| One concurrent Wi-Fi Direct transfer | NearbyService reinitialises between sessions; parallel transfers not yet supported |
 
 ---
 
@@ -272,10 +277,17 @@ Messages are JSON-encoded and written to fff3. The receiver's GATT server notifi
 
 | Component | File |
 |---|---|
-| Production BLE service | `lib/services/ble/flutter_blue_plus_ble_service.dart` |
+| BLE facade (entry point) | `lib/services/ble/ble_facade.dart` |
 | BLE interface | `lib/services/ble/ble_service_interface.dart` |
 | BLE data models | `lib/services/ble/ble_models.dart` |
 | Configuration | `lib/services/ble/ble_config.dart` |
+| Connection management | `lib/services/ble/connection/connection_manager.dart` |
+| Scanning | `lib/services/ble/discovery/ble_scanner.dart` |
+| Profile reading | `lib/services/ble/discovery/profile_reader.dart` |
+| GATT server | `lib/services/ble/gatt/gatt_server.dart` |
+| GATT write queue | `lib/services/ble/gatt/gatt_write_queue.dart` |
+| Mesh relay | `lib/services/ble/mesh/mesh_relay_service.dart` |
+| Photo transfer | `lib/services/ble/transfer/photo_transfer_handler.dart` |
 | Photo chunker | `lib/services/ble/photo_chunker.dart` |
 | Adapter state bloc | `lib/services/ble/ble_status_bloc.dart` |
 | Service lifecycle bloc | `lib/services/ble/ble_connection_bloc.dart` |
@@ -284,6 +296,8 @@ Messages are JSON-encoded and written to fff3. The receiver's GATT server notifi
 | Wi-Fi Direct impl | `lib/services/nearby/nearby_transfer_service_impl.dart` |
 | Wi-Fi Direct models | `lib/services/nearby/nearby_models.dart` |
 | Mock Wi-Fi Direct | `lib/services/nearby/mock_high_speed_transfer_service.dart` |
+| Transport manager | `lib/services/transport/transport_manager.dart` |
+| Store-and-forward | `lib/services/store_and_forward_service.dart` |
 | Dependency wiring | `lib/injection.dart` |
 
 ---

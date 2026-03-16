@@ -82,6 +82,7 @@ class TestFixtures {
   /// Create a BLE [ble.DiscoveredPeer] with sensible test defaults.
   static ble.DiscoveredPeer makeBlePeer({
     String peerId = 'peer-1',
+    String? userId,
     String name = 'Alice',
     int? age = 30,
     String? bio,
@@ -96,6 +97,7 @@ class TestFixtures {
   }) {
     return ble.DiscoveredPeer(
       peerId: peerId,
+      userId: userId ?? 'user-$peerId',
       name: name,
       age: age,
       bio: bio,

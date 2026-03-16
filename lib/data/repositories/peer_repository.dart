@@ -28,6 +28,14 @@ class PeerRepository {
         .getSingleOrNull();
   }
 
+  /// Get a peer by stable app-level userId (for cross-transport deduplication).
+  Future<DiscoveredPeerEntry?> getPeerByUserId(String userId) async {
+    return await (_db.select(_db.discoveredPeers)
+          ..where((t) => t.userId.equals(userId))
+          ..limit(1))
+        .getSingleOrNull();
+  }
+
   /// Get peers seen within a time window
   Future<List<DiscoveredPeerEntry>> getRecentPeers(Duration window) async {
     final cutoff = DateTime.now().subtract(window);
@@ -43,6 +51,7 @@ class PeerRepository {
   Future<DiscoveredPeerEntry> upsertPeer({
     required String peerId,
     required String name,
+    String? userId,
     int? age,
     String? bio,
     int? position,
@@ -59,6 +68,7 @@ class PeerRepository {
       // Update existing peer
       final companion = DiscoveredPeersCompanion(
         name: Value(name),
+        userId: userId != null ? Value(userId) : const Value.absent(),
         // Only overwrite when we actually have a new value — don't let stale
         // advertisement scans wipe richer data from the GATT profile read.
         age: age != null ? Value(age) : const Value.absent(),
@@ -77,6 +87,7 @@ class PeerRepository {
 
       return DiscoveredPeerEntry(
         peerId: peerId,
+        userId: userId ?? existing.userId,
         name: name,
         age: age ?? existing.age,
         bio: bio ?? existing.bio,
@@ -91,6 +102,7 @@ class PeerRepository {
       // Insert new peer
       final entry = DiscoveredPeersCompanion.insert(
         peerId: peerId,
+        userId: Value(userId),
         name: name,
         age: Value(age),
         bio: Value(bio),
@@ -106,6 +118,7 @@ class PeerRepository {
 
       return DiscoveredPeerEntry(
         peerId: peerId,
+        userId: userId,
         name: name,
         age: age,
         bio: bio,
