@@ -68,6 +68,8 @@ class BleFacade implements BleServiceInterface {
       UUID.fromString('0000fff2-0000-1000-8000-00805f9b34fb');
   static final _fullPhotosCharUuid =
       UUID.fromString('0000fff4-0000-1000-8000-00805f9b34fb');
+  static final _reversePathCharUuid =
+      UUID.fromString('0000fff5-0000-1000-8000-00805f9b34fb');
 
   // Status
   BleStatus _status = BleStatus.disabled;
@@ -119,6 +121,11 @@ class BleFacade implements BleServiceInterface {
   // In-memory message ID deduplication — prevents the same BLE write
   // from being processed twice if the transport retransmits it.
   final Set<String> _seenMessageIds = {};
+
+  // Buffered outbound handshake messages waiting for peer discovery.
+  // Keyed by app userId — when _onProfileReadResult populates
+  // _userIdToPeerId for that userId, pending messages are flushed.
+  final Map<String, _PendingHandshake> _pendingHandshakeMessages = {};
 
   // Timer that periodically broadcasts this device's neighbor list.
   Timer? _neighborListTimer;
@@ -543,17 +550,131 @@ class BleFacade implements BleServiceInterface {
   @override
   Future<void> sendHandshakeMessage(
       String peerId, int step, Uint8List payload) async {
-    var conn = _connectionManager.getConnection(peerId);
+    // The peerId may be a Central UUID (e.g. when the remote device connected
+    // to our GATT before we scanned them). Try to resolve it to the Peripheral
+    // UUID we can actually connect to.
+    var resolvedId = peerId;
+
+    // Try to find userId from Central UUID mapping first, then reverse-lookup
+    // from _userIdToPeerId (for when we already scanned the peer's profile).
+    var userId = _centralUuidToUserId[peerId];
+    if (userId == null) {
+      // Reverse lookup: peerId might be a known peripheral UUID
+      for (final entry in _userIdToPeerId.entries) {
+        if (entry.value == peerId) {
+          userId = entry.key;
+          break;
+        }
+      }
+    }
+    if (userId != null && _userIdToPeerId.containsKey(userId)) {
+      resolvedId = _userIdToPeerId[userId]!;
+      if (resolvedId != peerId) {
+        Logger.debug(
+          'sendHandshakeMessage: resolved $peerId → Peripheral $resolvedId',
+          'E2EE',
+        );
+      }
+    }
+
+    // Clear dead-peer status so connection attempts aren't silently blocked.
+    _connectionManager.clearDeadStatus(resolvedId);
+
+    var conn = _connectionManager.getConnection(resolvedId);
     if (conn == null || !conn.canSendMessages) {
-      final peripheral = _connectionManager.getPeripheral(peerId);
+      final peripheral = _connectionManager.getPeripheral(resolvedId);
+      Logger.debug(
+        'sendHandshakeMessage step $step: no active connection to $resolvedId, '
+        'peripheral=${peripheral != null ? "found" : "null"}',
+        'E2EE',
+      );
       if (peripheral != null) {
-        conn = await _connectionManager.connect(peerId, peripheral);
+        conn = await _connectionManager.connect(resolvedId, peripheral);
+      }
+    }
+    // The responder may not yet have a connection back to the initiator
+    // (the initiator connected to our GATT, but we haven't scanned and
+    // connected to theirs yet). Trigger scans and retry several times.
+    if (conn == null || !conn.canSendMessages) {
+      for (var attempt = 0; attempt < 5; attempt++) {
+        // Trigger a scan each attempt — the scanner rate-limits internally.
+        _scanner.triggerImmediateScan();
+        await Future.delayed(const Duration(seconds: 3));
+        // Re-check resolution — scan may have populated _userIdToPeerId
+        if (userId != null && _userIdToPeerId.containsKey(userId)) {
+          final newResolved = _userIdToPeerId[userId]!;
+          if (newResolved != resolvedId) {
+            resolvedId = newResolved;
+          }
+        }
+        // Clear dead status each attempt — handshake retries should not be
+        // blocked by the low _maxConsecutiveFailures threshold (2).
+        _connectionManager.clearDeadStatus(resolvedId);
+        conn = _connectionManager.getConnection(resolvedId);
+        if (conn != null && conn.canSendMessages) break;
+        final peripheral = _connectionManager.getPeripheral(resolvedId);
+        if (peripheral != null) {
+          conn = await _connectionManager.connect(resolvedId, peripheral);
+          if (conn != null && conn.canSendMessages) break;
+        }
+        Logger.debug(
+          'sendHandshakeMessage step $step: retry ${attempt + 1}/5 '
+          'for $resolvedId — conn=${conn != null}, '
+          'peripheral=${peripheral != null}',
+          'E2EE',
+        );
       }
     }
     if (conn == null || !conn.canSendMessages) {
-      Logger.warning(
-          'Cannot send handshake step $step — peer $peerId not connected',
-          'E2EE');
+      // Direct outbound connection unavailable. Try reverse-path: if the peer
+      // connected to OUR GATT server as a Central, we can push the handshake
+      // response back via fff3 GATT notification. This is the primary fix for
+      // cross-platform (Android↔iOS) where one device can't discover the
+      // other's Peripheral but already has an inbound server connection.
+      final centralUuid = _centralUuidToUserId.entries
+          .where((e) => e.value == userId)
+          .map((e) => e.key)
+          .firstOrNull;
+      if (centralUuid != null) {
+        final hsJson = <String, dynamic>{
+          'type': 'noise_hs',
+          'step': step,
+          'payload': base64.encode(payload),
+          'sender_id': _gattServer.ownUserId,
+        };
+        final hsData =
+            Uint8List.fromList(utf8.encode(jsonEncode(hsJson)));
+        final sent = await _gattServer.sendToCentral(centralUuid, hsData);
+        if (sent) {
+          Logger.info(
+            'Handshake step $step sent via GATT notify (reverse-path) to '
+            'central ${centralUuid.substring(0, min(8, centralUuid.length))}',
+            'E2EE',
+          );
+          return;
+        }
+      }
+
+      // Reverse-path also unavailable — buffer for later delivery.
+      if (userId != null) {
+        _pendingHandshakeMessages[userId] = _PendingHandshake(
+          peerId: peerId,
+          step: step,
+          payload: payload,
+          enqueuedAt: DateTime.now(),
+        );
+        Logger.info(
+          'Buffered handshake step $step for userId $userId — '
+          'will deliver when peer is discovered',
+          'E2EE',
+        );
+      } else {
+        Logger.warning(
+          'Cannot send handshake step $step — peer $resolvedId not connected '
+          'and no userId for deferred delivery',
+          'E2EE',
+        );
+      }
       return;
     }
     final json = <String, dynamic>{
@@ -565,16 +686,27 @@ class BleFacade implements BleServiceInterface {
     final data = Uint8List.fromList(utf8.encode(jsonEncode(json)));
     await _writeQueue
         .enqueue(
-      peerId: peerId,
+      peerId: resolvedId,
       peripheral: conn.peripheral,
       characteristic: conn.messagingChar!,
       data: data,
       priority: WritePriority.userMessage,
     )
         .catchError((Object e) {
-      Logger.error('Handshake write failed for $peerId', e, null, 'E2EE');
+      Logger.error('Handshake write failed for $resolvedId', e, null, 'E2EE');
       return false;
     });
+  }
+
+  @override
+  String? resolveToPeripheralId(String peerId) {
+    // Check if this is a known Central UUID and resolve to Peripheral UUID.
+    final userId = _centralUuidToUserId[peerId];
+    if (userId != null && _userIdToPeerId.containsKey(userId)) {
+      return _userIdToPeerId[userId];
+    }
+    // Maybe it's already a Peripheral UUID or unknown.
+    return null;
   }
 
   /// Returns the app userId for a given BLE peripheral UUID, or null if
@@ -584,6 +716,36 @@ class BleFacade implements BleServiceInterface {
       if (entry.value == blePeerId) return entry.key;
     }
     return null;
+  }
+
+  /// Deliver any buffered handshake message for [userId] (or the userId
+  /// associated with [peerId]).  Called from both scan-discovery and
+  /// profile-read paths so whichever fires first triggers delivery.
+  void _flushPendingHandshake(String peerId, String? userId) {
+    // Also try to match by peerId if userId is null (e.g. scan found the
+    // peer but we haven't read their profile yet).
+    userId ??= _getAppUserIdForPeer(peerId);
+    if (userId == null) return;
+
+    final pending = _pendingHandshakeMessages.remove(userId);
+    if (pending == null) return;
+
+    if (pending.isExpired) {
+      Logger.debug(
+        'Discarding expired buffered handshake for userId $userId',
+        'E2EE',
+      );
+      return;
+    }
+
+    Logger.info(
+      'Flushing buffered handshake step ${pending.step} '
+      'for userId $userId → $peerId',
+      'E2EE',
+    );
+    // Fire-and-forget — sendHandshakeMessage will resolve the peerId
+    // and connect as needed.
+    sendHandshakeMessage(peerId, pending.step, pending.payload);
   }
 
   // ==================== Mesh Relay (delegated to MeshRelayService) ====================
@@ -795,10 +957,12 @@ class BleFacade implements BleServiceInterface {
         ? existing.name
         : name;
 
+    final appUserId = _getAppUserIdForPeer(peerId);
+
     final peer = DiscoveredPeer(
       peerId: peerId,
       name: effectiveName,
-      userId: _getAppUserIdForPeer(peerId),
+      userId: appUserId,
       age: age ?? existing?.age,
       bio: existing?.bio,
       thumbnailBytes: existing?.thumbnailBytes,
@@ -810,6 +974,10 @@ class BleFacade implements BleServiceInterface {
       publicKeyHex: existing?.publicKeyHex,
     );
     _emitPeer(peer);
+
+    // Flush any buffered handshake messages for this peer now that we have
+    // a fresh Peripheral reference from the scan.
+    _flushPendingHandshake(peerId, appUserId);
   }
 
   /// Called by BleScanner when a discovered peer needs its profile read.
@@ -855,7 +1023,11 @@ class BleFacade implements BleServiceInterface {
       }
       _userIdToPeerId[userId] = peerId;
 
-      // Check if a Central UUID was temporarily used as the peerId
+      // Check if a Central UUID was temporarily used as the peerId.
+      // Emit PeerIdChanged BEFORE flushing handshake — TransportManager
+      // needs to call migratePeerId() to re-key the EncryptionService's
+      // pending handshake from the Central UUID to the Peripheral UUID
+      // before the buffered msg2 is delivered.
       final centralId = _centralUuidToUserId.entries
           .where((e) => e.value == userId)
           .map((e) => e.key)
@@ -873,6 +1045,9 @@ class BleFacade implements BleServiceInterface {
           userId: userId,
         ));
       }
+
+      // Now flush any buffered handshake messages for this userId.
+      _flushPendingHandshake(peerId, userId);
     }
 
     // Update the existing peer entry with profile data
@@ -1006,6 +1181,41 @@ class BleFacade implements BleServiceInterface {
       _profileReader.handleThumbnailChunk(peerId, args.value);
     } else if (args.characteristic.uuid == _fullPhotosCharUuid) {
       _profileReader.handleFullPhotosChunk(peerId, args.value);
+    } else if (args.characteristic.uuid == _reversePathCharUuid) {
+      // Reverse-path: the remote Peripheral pushed data back to us (Central)
+      // via fff5 notify. This is used for cross-platform handshake responses
+      // where the responder can't discover our Peripheral.
+      _onReversePathNotification(peerId, args.value);
+    }
+  }
+
+  /// Process a reverse-path fff3 notification received from a Peripheral.
+  ///
+  /// The sender is identified by their Peripheral UUID (which we connected to
+  /// as Central), not a Central UUID. This is the same peerId used in our
+  /// ConnectionManager and _userIdToPeerId mappings.
+  void _onReversePathNotification(String peerId, Uint8List data) {
+    try {
+      final jsonStr = utf8.decode(data);
+      final json = jsonDecode(jsonStr) as Map<String, dynamic>;
+      final type = json['type'] as String? ?? 'message';
+
+      _refreshPeerTimeout(peerId);
+
+      Logger.info(
+        'BleService: Received reverse-path $type from '
+        '${peerId.substring(0, min(8, peerId.length))}',
+        'BLE',
+      );
+
+      if (type == 'noise_hs') {
+        _handleNoiseHandshake(json, peerId);
+      } else {
+        _handleReceivedMessage(json, peerId);
+      }
+    } catch (e) {
+      Logger.error(
+          'BleService: Reverse-path notification failed', e, null, 'BLE');
     }
   }
 
@@ -1533,4 +1743,24 @@ class BleFacade implements BleServiceInterface {
     Logger.info(
         'BleService: Battery saver ${enabled ? 'enabled' : 'disabled'}', 'BLE');
   }
+}
+
+/// Buffered handshake message awaiting peer discovery/connection.
+class _PendingHandshake {
+  _PendingHandshake({
+    required this.peerId,
+    required this.step,
+    required this.payload,
+    required this.enqueuedAt,
+  });
+
+  final String peerId;
+  final int step;
+  final Uint8List payload;
+  final DateTime enqueuedAt;
+
+  /// Expire after 50 seconds — slightly longer than the 45 s handshake
+  /// timeout so the buffer survives until the encryption service gives up.
+  bool get isExpired =>
+      DateTime.now().difference(enqueuedAt).inSeconds > 50;
 }

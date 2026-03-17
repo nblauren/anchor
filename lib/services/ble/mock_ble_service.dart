@@ -587,4 +587,7 @@ class MockBleService implements BleServiceInterface {
   @override
   Stream<NoiseHandshakeReceived> get noiseHandshakeStream =>
       const Stream.empty();
+
+  @override
+  String? resolveToPeripheralId(String peerId) => null;
 }

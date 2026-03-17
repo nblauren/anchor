@@ -5,9 +5,12 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../core/widgets/transport_badge.dart';
 import '../../../data/local_database/database.dart';
 import '../../discovery/bloc/discovery_bloc.dart';
 import '../../discovery/bloc/discovery_event.dart';
+import '../../transport/bloc/transport_bloc.dart';
+import '../../transport/bloc/transport_state.dart';
 import '../bloc/chat_bloc.dart';
 import '../bloc/chat_event.dart';
 import '../bloc/chat_state.dart';
@@ -432,8 +435,8 @@ class _ChatScreenState extends State<ChatScreen> {
                             ],
                           )
                         else if (state.isE2eeActive)
-                          // E2EE lock indicator — visible when Noise_XK session
-                          // is established.  Tapping shows a brief explanation.
+                          // E2EE lock indicator + transport badge — visible when
+                          // Noise_XK session is established.
                           GestureDetector(
                             onTap: () {
                               ScaffoldMessenger.of(context).showSnackBar(
@@ -449,19 +452,27 @@ class _ChatScreenState extends State<ChatScreen> {
                                 ),
                               );
                             },
-                            child: const Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.lock, size: 11, color: Colors.greenAccent),
-                                SizedBox(width: 3),
-                                Text(
-                                  'End-to-end encrypted',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.greenAccent,
-                                  ),
-                                ),
-                              ],
+                            child: BlocBuilder<TransportBloc, TransportState>(
+                              builder: (context, transportState) {
+                                final peerTransport =
+                                    transportState.transportForPeer(widget.peerId);
+                                return Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.lock, size: 11, color: Colors.greenAccent),
+                                    const SizedBox(width: 3),
+                                    const Text(
+                                      'Encrypted',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.greenAccent,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    TransportBadge(transport: peerTransport),
+                                  ],
+                                );
+                              },
                             ),
                           )
                         else if (state.isE2eeHandshaking)

@@ -114,7 +114,7 @@ class PeerRepository {
         isBlocked: const Value(false),
       );
 
-      await _db.into(_db.discoveredPeers).insert(entry);
+      await _db.into(_db.discoveredPeers).insertOnConflictUpdate(entry);
 
       return DiscoveredPeerEntry(
         peerId: peerId,
@@ -201,7 +201,7 @@ class PeerRepository {
       final newPeer = await getPeerById(newPeerId);
       if (newPeer == null) {
         // Create new peer with old peer's profile data
-        await _db.into(_db.discoveredPeers).insert(
+        await _db.into(_db.discoveredPeers).insertOnConflictUpdate(
               DiscoveredPeersCompanion.insert(
                 peerId: newPeerId,
                 userId: Value(userId),

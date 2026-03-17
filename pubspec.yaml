@@ -56,6 +56,9 @@ dependencies:
   # (Android Keystore / iOS Secure Enclave-backed Keychain).
   flutter_secure_storage: ^9.2.2
 
+  # Battery monitoring (transport power policy)
+  battery_plus: ^6.0.3
+
   # Audio
   audioplayers: ^6.1.0
 

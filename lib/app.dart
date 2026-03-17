@@ -6,6 +6,7 @@ import 'core/theme/app_theme.dart';
 import 'features/discovery/bloc/discovery_bloc.dart';
 import 'features/profile/bloc/profile_bloc.dart';
 import 'features/profile/bloc/profile_event.dart';
+import 'features/transport/bloc/transport_bloc.dart';
 import 'injection.dart';
 import 'services/ble/ble.dart';
 
@@ -28,6 +29,9 @@ class AnchorApp extends StatelessWidget {
         ),
         BlocProvider<BleStatusBloc>(
           create: (_) => getIt<BleStatusBloc>(),
+        ),
+        BlocProvider<TransportBloc>(
+          create: (_) => getIt<TransportBloc>(),
         ),
       ],
       child: MaterialApp(

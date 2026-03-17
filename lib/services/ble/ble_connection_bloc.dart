@@ -1,10 +1,12 @@
 import 'dart:async';
 
+import 'package:battery_plus/battery_plus.dart';
 import 'package:equatable/equatable.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/utils/logger.dart';
+import '../transport/transport_manager.dart';
 import 'ble_models.dart';
 import 'ble_service_interface.dart';
 
@@ -74,6 +76,15 @@ class SetMeshRelay extends BleConnectionEvent {
   List<Object?> get props => [enabled];
 }
 
+/// Battery level changed (internal) — updates transport policy.
+class _BatteryLevelChanged extends BleConnectionEvent {
+  const _BatteryLevelChanged(this.level);
+  final int level;
+
+  @override
+  List<Object?> get props => [level];
+}
+
 /// BLE status changed (internal)
 class _BleStatusChanged extends BleConnectionEvent {
   const _BleStatusChanged(this.status);
@@ -126,6 +137,7 @@ class BleConnectionState extends Equatable {
     this.isVisible = true,
     this.isBatterySaver = false,
     this.isMeshRelay = true,
+    this.batteryLevel = 100,
     this.errorMessage,
   });
 
@@ -139,6 +151,7 @@ class BleConnectionState extends Equatable {
   final bool isVisible;
   final bool isBatterySaver;
   final bool isMeshRelay;
+  final int batteryLevel;
   final String? errorMessage;
 
   /// Whether BLE is ready to use
@@ -194,6 +207,7 @@ class BleConnectionState extends Equatable {
     bool? isVisible,
     bool? isBatterySaver,
     bool? isMeshRelay,
+    int? batteryLevel,
     String? errorMessage,
   }) {
     return BleConnectionState(
@@ -207,6 +221,7 @@ class BleConnectionState extends Equatable {
       isVisible: isVisible ?? this.isVisible,
       isBatterySaver: isBatterySaver ?? this.isBatterySaver,
       isMeshRelay: isMeshRelay ?? this.isMeshRelay,
+      batteryLevel: batteryLevel ?? this.batteryLevel,
       errorMessage: errorMessage,
     );
   }
@@ -223,6 +238,7 @@ class BleConnectionState extends Equatable {
         isVisible,
         isBatterySaver,
         isMeshRelay,
+        batteryLevel,
         errorMessage,
       ];
 }
@@ -232,7 +248,9 @@ class BleConnectionState extends Equatable {
 class BleConnectionBloc extends Bloc<BleConnectionEvent, BleConnectionState> {
   BleConnectionBloc({
     required BleServiceInterface bleService,
+    TransportManager? transportManager,
   })  : _bleService = bleService,
+        _transportManager = transportManager,
         super(const BleConnectionState()) {
     on<InitializeBleConnection>(_onInitialize);
     on<RequestBlePermissions>(_onRequestPermissions);
@@ -244,15 +262,34 @@ class BleConnectionBloc extends Bloc<BleConnectionEvent, BleConnectionState> {
     on<SetBatterySaver>(_onSetBatterySaver);
     on<SetMeshRelay>(_onSetMeshRelay);
     on<_BleStatusChanged>(_onStatusChanged);
+    on<_BatteryLevelChanged>(_onBatteryLevelChanged);
 
     // Listen to BLE status changes
     _statusSubscription = _bleService.statusStream.listen((status) {
       add(_BleStatusChanged(status));
     });
+
+    // Monitor battery level for transport policy
+    _battery = Battery();
+    _batterySubscription = _battery.onBatteryStateChanged.listen((_) async {
+      try {
+        final level = await _battery.batteryLevel;
+        if (!isClosed) add(_BatteryLevelChanged(level));
+      } catch (_) {
+        // Battery level unavailable (e.g. simulator)
+      }
+    });
+    // Initial battery level
+    _battery.batteryLevel.then((level) {
+      if (!isClosed) add(_BatteryLevelChanged(level));
+    }).catchError((_) {});
   }
 
   final BleServiceInterface _bleService;
+  final TransportManager? _transportManager;
+  late final Battery _battery;
   StreamSubscription<BleStatus>? _statusSubscription;
+  StreamSubscription<BatteryState>? _batterySubscription;
 
   static const _prefVisible = 'ble_visible';
   static const _prefBatterySaver = 'ble_battery_saver';
@@ -476,9 +513,22 @@ class BleConnectionBloc extends Bloc<BleConnectionEvent, BleConnectionState> {
     ));
   }
 
+  void _onBatteryLevelChanged(
+    _BatteryLevelChanged event,
+    Emitter<BleConnectionState> emit,
+  ) {
+    emit(state.copyWith(batteryLevel: event.level));
+    _transportManager?.setBatteryPolicy(event.level);
+    Logger.debug(
+      'BleConnectionBloc: Battery level ${event.level}%',
+      'BLE',
+    );
+  }
+
   @override
   Future<void> close() {
     _statusSubscription?.cancel();
+    _batterySubscription?.cancel();
     return super.close();
   }
 }

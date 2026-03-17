@@ -4,6 +4,7 @@ import 'core/utils/logger.dart';
 import 'features/chat/bloc/chat_bloc.dart';
 import 'features/discovery/bloc/discovery_bloc.dart';
 import 'features/profile/bloc/profile_bloc.dart';
+import 'features/transport/bloc/transport_bloc.dart';
 import 'services/ble/ble.dart';
 import 'services/database_service.dart';
 import 'services/encryption/encryption.dart';
@@ -118,13 +119,25 @@ Future<void> initializeDependencies({
     }
   });
 
+  // Transport health tracker (per-peer, per-transport metrics)
+  getIt.registerLazySingleton<TransportHealthTracker>(
+    () => TransportHealthTracker(),
+  );
+
   // Unified transport manager (LAN primary, Wi-Fi Aware secondary, BLE fallback)
   getIt.registerLazySingleton<TransportManager>(() => TransportManager(
     lanService: getIt<LanTransportService>(),
     wifiAwareService: getIt<WifiAwareTransportService>(),
     bleService: getIt<BleServiceInterface>(),
     encryptionService: getIt<EncryptionService>(),
+    healthTracker: getIt<TransportHealthTracker>(),
+    highSpeedTransferService: getIt<HighSpeedTransferService>(),
   ));
+
+  // In-session transport retry queue
+  getIt.registerLazySingleton<TransportRetryQueue>(
+    () => TransportRetryQueue(transportManager: getIt<TransportManager>()),
+  );
 
   // Store-and-forward service (singleton — retries pending messages on peer rediscovery)
   getIt.registerLazySingleton<StoreAndForwardService>(
@@ -171,6 +184,15 @@ Future<void> initializeDependencies({
       highSpeedTransferService: getIt<HighSpeedTransferService>(),
       storeAndForwardService: getIt<StoreAndForwardService>(),
       encryptionService: getIt<EncryptionService>(),
+      retryQueue: getIt<TransportRetryQueue>(),
+    ),
+  );
+
+  // TransportBloc for UI transport indicators
+  getIt.registerLazySingleton<TransportBloc>(
+    () => TransportBloc(
+      transportManager: getIt<TransportManager>(),
+      healthTracker: getIt<TransportHealthTracker>(),
     ),
   );
 
@@ -185,6 +207,7 @@ Future<void> initializeDependencies({
   getIt.registerFactory<BleConnectionBloc>(
     () => BleConnectionBloc(
       bleService: getIt<BleServiceInterface>(),
+      transportManager: getIt<TransportManager>(),
     ),
   );
 }
@@ -193,6 +216,8 @@ Future<void> initializeDependencies({
 Future<void> disposeDependencies() async {
   await getIt<EncryptionService>().dispose();
   await getIt<StoreAndForwardService>().dispose();
+  await getIt<TransportRetryQueue>().dispose();
+  await getIt<TransportHealthTracker>().dispose();
   await getIt<TransportManager>().dispose();
   await getIt<LanTransportService>().dispose();
   await getIt<HighSpeedTransferService>().dispose();

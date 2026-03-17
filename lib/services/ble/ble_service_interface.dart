@@ -202,6 +202,12 @@ abstract class BleServiceInterface {
   /// TransportManager subscribes to this and routes to EncryptionService.
   Stream<NoiseHandshakeReceived> get noiseHandshakeStream;
 
+  /// Resolve a BLE Central UUID to the corresponding Peripheral UUID.
+  ///
+  /// On iOS/macOS the Central and Peripheral UUIDs differ for the same device.
+  /// Returns null if the mapping is unknown.
+  String? resolveToPeripheralId(String peerId);
+
   // ==================== Mesh ====================
 
   /// Enable or disable mesh relay (message forwarding between devices)

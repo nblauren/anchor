@@ -77,6 +77,10 @@ class ProfileReader {
   /// Persisted to SharedPreferences so the skip-check survives app restarts.
   final Map<String, int> _peerThumbnailReceivedSizes = {};
 
+  /// Peers for which we've already subscribed to fff5 (reverse-path) notifications.
+  /// Prevents redundant subscribe calls on every 30s profile re-read cycle.
+  final Set<String> _reversePathNotifySubscribed = {};
+
   /// Load previously persisted thumbnail sizes from SharedPreferences.
   /// Call once after construction (e.g. from BleFacade.initialize).
   void loadPersistedSizes() {
@@ -218,6 +222,31 @@ class ProfileReader {
         'ProfileReader: No thumbnail char found for $peerId',
         'BLE',
       );
+    }
+
+    // Subscribe to fff5 (reverse-path) notifications for cross-platform responses.
+    // This enables cross-platform E2EE handshakes: when the remote Peripheral
+    // needs to push a handshake response back to us (the Central), it uses
+    // fff5 GATT notifications. Only subscribe once per connection.
+    final reversePathChar = conn.reversePathChar;
+    if (reversePathChar != null && !_reversePathNotifySubscribed.contains(peerId)) {
+      try {
+        await _central.setCharacteristicNotifyState(
+          conn.peripheral,
+          reversePathChar,
+          state: true,
+        );
+        _reversePathNotifySubscribed.add(peerId);
+        Logger.info(
+          'ProfileReader: Subscribed to fff5 notifications from $peerId',
+          'BLE',
+        );
+      } catch (e) {
+        Logger.debug(
+          'ProfileReader: fff5 notify subscribe failed for $peerId: $e',
+          'BLE',
+        );
+      }
     }
   }
 

@@ -150,6 +150,7 @@ class GattWriteQueue {
       peripheral: peripheral,
       characteristic: characteristic,
       data: data,
+      priority: priority,
       completer: completer,
     ));
 
@@ -237,15 +238,18 @@ class GattWriteQueue {
         if (request.completer.isCompleted) continue;
 
         try {
+          // User messages use writeWithResponse for delivery confirmation.
+          // Photo chunks and mesh relay use writeWithoutResponse for throughput
+          // (some packet loss is acceptable — photos retry, mesh is best-effort).
+          final writeType = request.priority == WritePriority.userMessage
+              ? GATTCharacteristicWriteType.withResponse
+              : GATTCharacteristicWriteType.withoutResponse;
+
           await _central.writeCharacteristic(
             request.peripheral,
             request.characteristic,
             value: request.data,
-            // withoutResponse bypasses the CoreBluetooth ATT prepare queue
-            // (CBATTError Code=9 "prepare queue full"). The fff3 characteristic
-            // declares writeWithoutResponse; delivery reliability is handled by
-            // the store-and-forward retry service at a higher level.
-            type: GATTCharacteristicWriteType.withoutResponse,
+            type: writeType,
           );
           if (!request.completer.isCompleted) {
             request.completer.complete(true);
@@ -283,6 +287,7 @@ class _WriteRequest {
     required this.peripheral,
     required this.characteristic,
     required this.data,
+    required this.priority,
     required this.completer,
   });
 
@@ -290,5 +295,6 @@ class _WriteRequest {
   final Peripheral peripheral;
   final GATTCharacteristic characteristic;
   final Uint8List data;
+  final WritePriority priority;
   final Completer<bool> completer;
 }

@@ -32,6 +32,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     HighSpeedTransferService? highSpeedTransferService,
     StoreAndForwardService? storeAndForwardService,
     EncryptionService? encryptionService,
+    TransportRetryQueue? retryQueue,
   })  : _chatRepository = chatRepository,
         _peerRepository = peerRepository,
         _imageService = imageService,
@@ -41,6 +42,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         _highSpeedService = highSpeedTransferService,
         _storeAndForwardService = storeAndForwardService,
         _encryptionService = encryptionService,
+        _retryQueue = retryQueue,
         super(const ChatState()) {
     on<LoadConversations>(_onLoadConversations);
     on<OpenConversation>(_onOpenConversation);
@@ -82,6 +84,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     // E2EE
     on<E2eeSessionEstablished>(_onE2eeSessionEstablished);
     on<_E2eePeerKeyArrived>(_onE2eePeerKeyArrived);
+    on<_E2eeHandshakeTimeout>(_onE2eeHandshakeTimeout);
 
     // Subscribe to transport manager streams (Wi-Fi Aware or BLE — unified)
     _messageSubscription = _transportManager.messageReceivedStream.listen(
@@ -134,6 +137,10 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       _e2eeKeyStoredSubscription = enc.peerKeyStoredStream.listen((peerId) {
         if (!isClosed) add(_E2eePeerKeyArrived(peerId));
       });
+
+      _e2eeTimeoutSubscription = enc.handshakeTimeoutStream.listen((peerId) {
+        if (!isClosed) add(_E2eeHandshakeTimeout(peerId));
+      });
     }
 
     // Initialize Nearby / Wi-Fi Direct and subscribe to streams.
@@ -174,6 +181,20 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         },
       );
     }
+
+    // Subscribe to in-session retry queue delivery updates.
+    final rq = _retryQueue;
+    if (rq != null) {
+      _retryQueueSubscription = rq.deliveryStream.listen((update) {
+        if (!isClosed) {
+          add(MessageStatusUpdated(
+            messageId: update.messageId,
+            status: update.delivered ? MessageStatus.sent : MessageStatus.failed,
+          ));
+          if (update.delivered) add(const LoadConversations());
+        }
+      });
+    }
   }
 
   final ChatRepository _chatRepository;
@@ -185,8 +206,12 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   final HighSpeedTransferService? _highSpeedService;
   final StoreAndForwardService? _storeAndForwardService;
   final EncryptionService? _encryptionService;
+  final TransportRetryQueue? _retryQueue;
   StreamSubscription? _e2eeSessionSubscription;
   StreamSubscription? _e2eeKeyStoredSubscription;
+  StreamSubscription? _e2eeTimeoutSubscription;
+  StreamSubscription? _retryQueueSubscription;
+  int _handshakeRetryCount = 0;
 
   /// True when the transport for [peerId] has enough bandwidth to send
   /// full-quality photos without BLE compression (LAN or Wi-Fi Aware).
@@ -451,13 +476,15 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
 
   /// Background helper: sends a text message via BLE without blocking the
   /// event queue.  Status updates are dispatched as events.
+  ///
+  /// On failure, enqueues to [TransportRetryQueue] for automatic retry when
+  /// the peer's transport becomes available (instead of inline exponential
+  /// backoff).
   Future<void> _sendTextInBackground(
     MessageEntry message,
     String peerId, {
-    int attempt = 1,
     String? replyToId,
   }) async {
-    const maxRetries = 3;
     try {
       final payload = ble.MessagePayload(
         messageId: message.id,
@@ -476,32 +503,23 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         return;
       }
 
-      // Peer not reachable — schedule a retry WITHOUT blocking the queue.
-      // This lets other queued sends proceed immediately.
-      if (attempt < maxRetries) {
-        Logger.info(
-          'ChatBloc: Send attempt $attempt failed for ${peerId.substring(0, 8)}, '
-              'will retry in ${attempt * 3}s...',
-          'Chat',
-        );
-        Future<void>.delayed(Duration(seconds: attempt * 3), () {
-          if (!isClosed) {
-            _enqueueSend(() => _sendTextInBackground(
-                  message,
-                  peerId,
-                  attempt: attempt + 1,
-                  replyToId: replyToId,
-                ));
-          }
-        });
-        return;
+      // All transports failed — enqueue for retry when peer reconnects.
+      final rq = _retryQueue;
+      if (rq != null) {
+        rq.enqueue(PendingSend(
+          peerId: peerId,
+          messageId: message.id,
+          type: PendingSendType.text,
+          payload: payload,
+        ));
+        // Leave status as pending — retry queue will update on success/failure.
+      } else {
+        add(MessageStatusUpdated(
+          messageId: message.id,
+          status: MessageStatus.failed,
+        ));
+        add(const LoadConversations());
       }
-
-      add(MessageStatusUpdated(
-        messageId: message.id,
-        status: MessageStatus.failed,
-      ));
-      add(const LoadConversations());
     } catch (e) {
       Logger.error('Background text send failed', e, null, 'ChatBloc');
       add(MessageStatusUpdated(
@@ -810,8 +828,10 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
             ?? pending.localPhotoPath;
         photoBytes = await File(absolutePath).readAsBytes();
       } else {
+        final absolutePath = await resolvePhotoPath(pending.localPhotoPath)
+            ?? pending.localPhotoPath;
         photoBytes =
-            await _imageService.compressForBleTransfer(pending.localPhotoPath);
+            await _imageService.compressForBleTransfer(absolutePath);
       }
 
       // Fire-and-forget: kick off the transfer in the background so we don't
@@ -827,7 +847,10 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     }
   }
 
-  /// Background helper: tries Wi-Fi Direct then falls back to BLE.
+  /// Background helper: sends a full-resolution photo via TransportManager.
+  ///
+  /// TransportManager handles the LAN → Wi-Fi Aware → Wi-Fi Direct → BLE
+  /// fallback chain internally.  This method just delegates and updates status.
   ///
   /// Runs outside the bloc event handler so it doesn't block the event queue.
   /// State updates go through `add()` (events) so they're processed safely.
@@ -837,104 +860,27 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     required Uint8List photoBytes,
   }) async {
     try {
-      // ── LAN: skip Wi-Fi Direct entirely, use TransportManager directly ──
-      if (_transportManager.activeTransport == TransportType.lan) {
-        final success = await _transportManager.sendPhoto(
-          request.fromPeerId,
-          photoBytes,
-          pending.messageId,
-          photoId: request.photoId,
-        );
-        if (success) {
-          add(MessageStatusUpdated(
-            messageId: pending.messageId,
-            status: MessageStatus.read,
-          ));
-        }
-        return;
-      }
-
-      // ── Try Wi-Fi Direct first ──────────────────────────────────────────
-      bool wifiSuccess = false;
-      final hsService = _highSpeedService;
-      if (hsService != null && await hsService.isAvailable) {
-        Logger.info('ChatBloc: Attempting Wi-Fi Direct transfer', 'Chat');
-
-        // Encrypt for E2EE before sending over Wi-Fi Direct (Nearby).
-        // request.fromPeerId is the BLE device ID — same key EncryptionService uses.
-        Uint8List wifiBytes = photoBytes;
-        final enc = _encryptionService;
-        if (enc != null && enc.hasSession(request.fromPeerId)) {
-          final encPayload = await enc.encryptBytes(request.fromPeerId, photoBytes);
-          if (encPayload != null) {
-            wifiBytes = Uint8List.fromList(
-                [0x01, ...encPayload.nonce, ...encPayload.ciphertext]);
-          }
-        }
-
-        final sendFuture = hsService.sendPayload(
-          transferId: request.photoId,
-          peerId: request.fromPeerId,
-          data: wifiBytes,
-          timeout: const Duration(seconds: 15),
-        );
-
-        // Tiny delay to ensure advertising is started before the BLE signal.
-        await Future.delayed(const Duration(milliseconds: 200));
-
-        // Tell receiver to start browsing for us.
-        await _transportManager.sendMessage(
-          request.fromPeerId,
-          ble.MessagePayload(
-            messageId: request.photoId,
-            type: ble.MessageType.wifiTransferReady,
-            content: jsonEncode({
-              'transfer_id': request.photoId,
-              'sender_nearby_id': _ownUserId,
-            }),
-          ),
-        );
-
-        wifiSuccess = await sendFuture;
-
-        if (wifiSuccess) {
-          Logger.info('ChatBloc: Wi-Fi Direct transfer succeeded', 'Chat');
-        } else {
-          Logger.warning(
-            'ChatBloc: Wi-Fi Direct failed, falling back to BLE',
-            'Chat',
-          );
-        }
-      }
-
-      // ── Fall back to BLE/TransportManager ───────────────────────────────
-      bool transferSucceeded = wifiSuccess;
-      if (!wifiSuccess) {
-        final success = await _transportManager.sendPhoto(
-          request.fromPeerId,
-          photoBytes,
-          pending.messageId,
-          photoId: request.photoId,
-        );
-
-        if (!success) {
-          Logger.warning(
-            'ChatBloc: Photo send also failed for ${request.photoId}',
-            'Chat',
-          );
-        }
-        transferSucceeded = success;
-      }
+      final success = await _transportManager.sendPhoto(
+        request.fromPeerId,
+        photoBytes,
+        pending.messageId,
+        photoId: request.photoId,
+      );
 
       // Mark the photo message as read only after the full photo is delivered.
       // Read receipts (sent when the receiver opens the chat) intentionally
       // exclude photo messages, so this is the only place a sent photo gets
       // promoted to [read].
-      if (transferSucceeded) {
+      if (success) {
         add(MessageStatusUpdated(
           messageId: pending.messageId,
           status: MessageStatus.read,
         ));
+      } else {
+        Logger.warning(
+          'ChatBloc: Photo send failed for ${request.photoId}',
+          'Chat',
+        );
       }
     } catch (e) {
       Logger.error('_sendFullPhoto failed', e, null, 'ChatBloc');
@@ -2042,6 +1988,53 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     }
   }
 
+  Future<void> _onE2eeHandshakeTimeout(
+    _E2eeHandshakeTimeout event,
+    Emitter<ChatState> emit,
+  ) async {
+    final enc = _encryptionService;
+    if (enc == null) return;
+
+    final conv = state.currentConversation;
+    if (conv == null || conv.peerId != event.peerId) return;
+
+    // Already have a session (race with late msg delivery)
+    if (enc.hasSession(event.peerId)) return;
+
+    // Auto-retry once — the peer's Peripheral is likely discovered by now.
+    if (_handshakeRetryCount >= 1) {
+      Logger.info(
+        'E2EE handshake timed out for ${event.peerId} — max retries reached',
+        'Chat',
+      );
+      emit(state.copyWith(isE2eeHandshaking: false));
+      return;
+    }
+
+    _handshakeRetryCount++;
+    Logger.info(
+      'E2EE handshake timed out for ${event.peerId} — auto-retrying '
+      '(attempt $_handshakeRetryCount)',
+      'Chat',
+    );
+
+    // Brief delay to let pending scans complete.
+    await Future.delayed(const Duration(seconds: 2));
+    if (isClosed) return;
+    if (enc.hasSession(event.peerId) || enc.hasPendingHandshake(event.peerId)) {
+      return;
+    }
+
+    emit(state.copyWith(isE2eeHandshaking: true));
+    final result = await enc.initiateHandshake(event.peerId);
+    if (result.hasError) {
+      Logger.warning(
+        'E2EE handshake auto-retry failed for ${event.peerId}: ${result.error}',
+        'Chat',
+      );
+    }
+  }
+
   Future<void> _onE2eePeerKeyArrived(
     _E2eePeerKeyArrived event,
     Emitter<ChatState> emit,
@@ -2068,6 +2061,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   Future<void> close() {
     _e2eeSessionSubscription?.cancel();
     _e2eeKeyStoredSubscription?.cancel();
+    _e2eeTimeoutSubscription?.cancel();
     _echoTimer?.cancel();
     _messageSubscription?.cancel();
     _photoProgressSubscription?.cancel();
@@ -2080,6 +2074,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     _nearbyPayloadSubscription?.cancel();
     _reactionSubscription?.cancel();
     _storeForwardSubscription?.cancel();
+    _retryQueueSubscription?.cancel();
     for (final timer in _photoDownloadTimers.values) {
       timer.cancel();
     }
@@ -2092,6 +2087,16 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
 // Used to retry a handshake when the key arrives after conversation open.
 class _E2eePeerKeyArrived extends ChatEvent {
   const _E2eePeerKeyArrived(this.peerId);
+  final String peerId;
+
+  @override
+  List<Object?> get props => [peerId];
+}
+
+// Internal event: handshake timed out. Auto-retry once — the peer's
+// Peripheral may have been discovered since the first attempt.
+class _E2eeHandshakeTimeout extends ChatEvent {
+  const _E2eeHandshakeTimeout(this.peerId);
   final String peerId;
 
   @override

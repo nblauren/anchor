@@ -523,8 +523,10 @@ class WifiAwareTransportServiceImpl implements WifiAwareTransportService {
 
     // Parse profile metadata from serviceInfo
     final info = waPeer.serviceInfo ?? {};
+    final userId = info['userId'];
     final anchorPeer = ble.DiscoveredPeer(
       peerId: waPeer.peerId,
+      userId: userId != null && userId.isNotEmpty ? userId : null,
       name: info['name'] ?? 'Unknown',
       age: int.tryParse(info['age'] ?? ''),
       bio: info['bio'],

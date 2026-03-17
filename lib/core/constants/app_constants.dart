@@ -38,6 +38,15 @@ class AppConstants {
   static const int messageRetryWindowHours = 24;
   static const int messageMaxCrossSessionRetries = 20;
 
+  // In-session transport retry queue
+  static const int maxInSessionRetries = 5;
+  static const int retryQueueExpiryMinutes = 10;
+  static const int maxRetryQueueSize = 100;
+
+  // Battery-aware transport policy
+  static const int batteryCriticalThreshold = 10;
+  static const int batteryLowThreshold = 20;
+
   // Transport feature flags
   /// Set to false to disable LAN (TCP/UDP) transport entirely and fall back
   /// to BLE-only mode. Useful for debugging or environments where local

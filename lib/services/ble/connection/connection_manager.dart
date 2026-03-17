@@ -351,6 +351,8 @@ class ConnectionManager {
           conn.messagingChar = char;
         } else if (char.uuid == _fullPhotosCharUuid) {
           conn.fullPhotosChar = char;
+        } else if (char.uuid == _reversePathCharUuid) {
+          conn.reversePathChar = char;
         }
       }
 
@@ -474,6 +476,8 @@ class ConnectionManager {
       UUID.fromString('0000fff3-0000-1000-8000-00805f9b34fb');
   static final _fullPhotosCharUuid =
       UUID.fromString('0000fff4-0000-1000-8000-00805f9b34fb');
+  static final _reversePathCharUuid =
+      UUID.fromString('0000fff5-0000-1000-8000-00805f9b34fb');
 }
 
 /// Queued connection request when the concurrent limit is reached.

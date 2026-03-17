@@ -44,8 +44,10 @@ import 'noise_handshake.dart';
 const _kPrivateKeyStorageKey = 'anchor_e2ee_private_key_hex';
 const _kPublicKeyStorageKey = 'anchor_e2ee_public_key_hex';
 
-/// Timeout for a pending Noise handshake (peer must respond within 30 s).
-const _kHandshakeTimeout = Duration(seconds: 30);
+/// Timeout for a pending Noise handshake (peer must respond within 45 s).
+/// Cross-platform (Android↔iOS) handshakes need extra time because the
+/// responder may not have discovered the initiator's BLE Peripheral yet.
+const _kHandshakeTimeout = Duration(seconds: 45);
 
 class EncryptionService {
   EncryptionService({
@@ -96,6 +98,13 @@ class EncryptionService {
   final _peerKeyStoredController = StreamController<String>.broadcast();
   Stream<String> get peerKeyStoredStream => _peerKeyStoredController.stream;
 
+  // Stream: emits peerIds when a handshake times out.
+  // ChatBloc listens to this to auto-retry (the peer's Peripheral may have
+  // been discovered since the first attempt, making retry likely to succeed).
+  final _handshakeTimeoutController = StreamController<String>.broadcast();
+  Stream<String> get handshakeTimeoutStream =>
+      _handshakeTimeoutController.stream;
+
   // ── Lifecycle ─────────────────────────────────────────────────────────────
 
   /// Must be called once at app start (after secure storage is available).
@@ -116,6 +125,7 @@ class EncryptionService {
     await _outboundHandshakeController.close();
     await _sessionEstablishedController.close();
     await _peerKeyStoredController.close();
+    await _handshakeTimeoutController.close();
   }
 
   // ── Key management ────────────────────────────────────────────────────────
@@ -685,6 +695,7 @@ class EncryptionService {
       if (_pending.containsKey(peerId)) {
         Logger.warning('Handshake timeout for peer $peerId', 'E2EE');
         _cancelPendingHandshake(peerId);
+        _handshakeTimeoutController.add(peerId);
       }
     });
   }

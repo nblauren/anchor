@@ -31,6 +31,9 @@ class PeerConnection {
   /// fff4 — full photo set, on-demand (READ, NOTIFY)
   GATTCharacteristic? fullPhotosChar;
 
+  /// fff5 — reverse-path responses (READ, NOTIFY)
+  GATTCharacteristic? reversePathChar;
+
   /// Maximum safe write length negotiated for this connection.
   /// Defaults to iOS conservative minimum (ATT MTU 185 - 3 = 182).
   int maxWriteLength;
@@ -64,5 +67,6 @@ class PeerConnection {
     thumbnailChar = null;
     messagingChar = null;
     fullPhotosChar = null;
+    reversePathChar = null;
   }
 }

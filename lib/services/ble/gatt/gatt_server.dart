@@ -34,12 +34,20 @@ class GattServer {
       UUID.fromString('0000fff3-0000-1000-8000-00805f9b34fb');
   static final _fullPhotosCharUuid =
       UUID.fromString('0000fff4-0000-1000-8000-00805f9b34fb');
+  static final _reversePathCharUuid =
+      UUID.fromString('0000fff5-0000-1000-8000-00805f9b34fb');
 
   // GATT characteristics (server side)
   GATTCharacteristic? _profileChar;
   GATTCharacteristic? _thumbnailChar;
   GATTCharacteristic? _messagingChar;
   GATTCharacteristic? _fullPhotosChar;
+  GATTCharacteristic? _reversePathChar;
+
+  // Connected Centrals — tracked so we can send GATT notifications back
+  // to a Central that wrote to us (reverse-path for cross-platform handshakes
+  // where the responder can't discover the initiator's Peripheral).
+  final Map<String, Central> _connectedCentrals = {};
 
   // State
   bool _isReady = false;
@@ -152,6 +160,19 @@ class GattServer {
         descriptors: [],
       );
 
+      // Reverse-path characteristic (fff5): Peripheral → Central notifications
+      // for cross-platform E2EE handshake responses. Separate from fff3 because
+      // combining write + notify on one characteristic breaks Android GATT.
+      _reversePathChar = GATTCharacteristic.mutable(
+        uuid: _reversePathCharUuid,
+        properties: [
+          GATTCharacteristicProperty.read,
+          GATTCharacteristicProperty.notify,
+        ],
+        permissions: [GATTCharacteristicPermission.read],
+        descriptors: [],
+      );
+
       final service = GATTService(
         uuid: _serviceUuid,
         isPrimary: true,
@@ -161,6 +182,7 @@ class GattServer {
           _thumbnailChar!,
           _messagingChar!,
           _fullPhotosChar!,
+          _reversePathChar!,
         ],
       );
 
@@ -184,6 +206,9 @@ class GattServer {
           _onThumbnailNotifyStateChanged(args);
         } else if (args.characteristic.uuid == _fullPhotosCharUuid) {
           _onFullPhotosNotifyStateChanged(args);
+        } else if (args.characteristic.uuid == _reversePathCharUuid) {
+          // Track Central when it subscribes to fff5 (reverse-path) notifications
+          _connectedCentrals[args.central.uuid.toString()] = args.central;
         }
       });
 
@@ -498,9 +523,50 @@ class GattServer {
       final data = args.request.value;
       if (data.isEmpty) return;
 
+      // Track this Central so we can send GATT notifications back to it
+      // (reverse-path for handshake responses).
+      final centralUuid = args.central.uuid.toString();
+      _connectedCentrals[centralUuid] = args.central;
+
       onWriteReceived?.call(data, args.central.uuid);
     } catch (e) {
       Logger.error('GattServer: Write receive failed', e, null, 'BLE');
+    }
+  }
+
+  /// Send data to a specific connected Central via fff5 GATT notification.
+  ///
+  /// Used for reverse-path handshake responses when we (Peripheral) can't
+  /// discover the Central's Peripheral (common Android↔iOS scenario).
+  /// Returns true if the notification was sent successfully.
+  Future<bool> sendToCentral(String centralUuidStr, Uint8List data) async {
+    final central = _connectedCentrals[centralUuidStr];
+    if (central == null || _reversePathChar == null) {
+      Logger.debug(
+        'GattServer: sendToCentral — central $centralUuidStr not tracked '
+        'or reverse-path char not ready',
+        'BLE',
+      );
+      return false;
+    }
+    try {
+      await _peripheral.notifyCharacteristic(
+        central,
+        _reversePathChar!,
+        value: data,
+      );
+      Logger.info(
+        'GattServer: Sent ${data.length}B via fff5 notify to central '
+        '${centralUuidStr.substring(0, min(8, centralUuidStr.length))}',
+        'BLE',
+      );
+      return true;
+    } catch (e) {
+      Logger.warning(
+        'GattServer: fff5 notify to $centralUuidStr failed: $e',
+        'BLE',
+      );
+      return false;
     }
   }
 
