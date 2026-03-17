@@ -338,9 +338,15 @@ class NotificationService {
 
   /// Set badge count (iOS mainly)
   Future<void> setBadgeCount(int count) async {
-    AppBadgePlus.updateBadge(count);
-    Logger.info(
-        'NotificationService: Badge count set to $count', 'Notifications');
+    try {
+      AppBadgePlus.updateBadge(count);
+      Logger.info(
+          'NotificationService: Badge count set to $count', 'Notifications');
+    } catch (e) {
+      Logger.debug(
+          'NotificationService: Badge update not supported on this launcher: $e',
+          'Notifications');
+    }
   }
 
   /// Clear badge (iOS/macOS)

@@ -46,12 +46,22 @@ lib/
 - `lib/core/routing/app_shell.dart` - Routing logic (onboarding → permissions → profile setup → home)
 
 ### BLE Implementation (Critical)
-- `lib/services/ble/flutter_blue_plus_ble_service.dart` - Production BLE service (~670 lines)
-- `lib/services/ble/ble_service_interface.dart` - Abstract BLE interface
+- `lib/services/ble/ble_facade.dart` - Entry point; thin facade that delegates to sub-modules (connection/, discovery/, gatt/, mesh/, transfer/)
+- `lib/services/ble/ble_service_interface.dart` - Abstract BLE contract (also declares `sendHandshakeMessage` and `noiseHandshakeStream`)
 - `lib/services/ble/mock_ble_service.dart` - Testing mock
-- `lib/services/ble/ble_models.dart` - DiscoveredPeer, BleMessage, etc.
+- `lib/services/ble/ble_models.dart` - `DiscoveredPeer` (incl. `publicKeyHex`), `BroadcastPayload` (incl. `publicKeyHex`), `NoiseHandshakeReceived`, etc.
 - `lib/services/ble/ble_status_bloc.dart` - BLE adapter state tracking
 - `lib/services/ble/ble_connection_bloc.dart` - BLE lifecycle management
+
+### Transport Manager & LAN
+- `lib/services/transport/transport_manager.dart` - Unified LAN + Wi-Fi Aware + BLE router; owns E2EE handshake routing; maintains canonical peer ID maps (`_peerIdAlias`, `_bleIdForCanonical`)
+- `lib/services/lan/lan_transport_service_impl.dart` - LAN (TCP/UDP) transport; UDP beacon includes `pk` field; handles `noise_hs` TCP frames
+- `lib/services/lan/lan_transport_service.dart` - Abstract LAN interface
+
+### End-to-End Encryption
+- `lib/services/encryption/encryption_service.dart` - Key gen/storage, Noise_XK handshake lifecycle, `hasSession()`, encrypt/decrypt
+- `lib/services/encryption/noise_handshake.dart` - Pure Noise_XK state machine (`NoiseHandshakeProcessor`)
+- `lib/services/encryption/encryption_models.dart` - `NoiseSession`, `EncryptedPayload`, `HandshakeResult`, `HandshakeMessageOut`
 
 ### Wi-Fi Direct / Nearby Transfer
 - `lib/services/nearby/high_speed_transfer_service.dart` - Abstract interface
@@ -60,7 +70,7 @@ lib/
 - `lib/services/nearby/nearby_models.dart` - NearbyTransferProgress, NearbyPayloadReceived, TransferTransport
 
 ### Database
-- `lib/data/local_database/database.dart` - Drift database schema (tables: user_profile, discovered_peers, conversations, messages, blocked_users, profile_photos, anchor_drops)
+- `lib/data/local_database/database.dart` - Drift database schema v9 (tables: user_profile, discovered_peers, conversations, messages, blocked_users, profile_photos, anchor_drops, message_reactions, peer_public_keys)
 - `lib/data/repositories/profile_repository.dart` - Profile CRUD
 - `lib/data/repositories/peer_repository.dart` - Peer discovery, blocking
 - `lib/data/repositories/chat_repository.dart` - Conversations, messages
@@ -92,18 +102,20 @@ Messaging:           0000fff3-0000-1000-8000-00805f9b34fb (WRITE, NOTIFY)
 ### How Discovery Works
 1. Device A scans for service UUID `0000fff0-...`
 2. Device B advertises that UUID (peripheral mode)
-3. Device A connects via GATT, reads Profile Metadata + Thumbnail
-4. Device A emits `DiscoveredPeer` to stream
-5. DiscoveryBloc receives peer, filters blocked users, updates UI
-6. Device A disconnects after 60s idle (or keeps for active chat)
+3. Device A connects via GATT, reads Profile Metadata (`fff1`) — includes `pk` (X25519 public key hex) — then reads Thumbnail (`fff2`)
+4. Device A emits `DiscoveredPeer` (with `publicKeyHex`) to stream
+5. `TransportManager` stores peer's public key via `encryptionService.storePeerPublicKey(canonicalId, pk)`
+6. DiscoveryBloc receives peer, filters blocked users, updates UI
+7. Device A disconnects after 60s idle (or keeps for active chat)
 
 ### How Messaging Works
-1. User sends message → ChatBloc saves to DB → adds to UI immediately → returns (non-blocking)
+0. **E2EE handshake first**: On `OpenConversation`, `ChatBloc` checks `encryptionService.hasSession(peerId)`. If no session, it calls `initiateHandshake()` and shows a "Initiating secure connection…" banner. Input is blocked until the Noise_XK 3-way handshake completes (≤2 BLE RTTs). Messages **cannot** be sent before `isE2eeActive` is true.
+1. User sends message → ChatBloc encrypts via `encryptionService.encrypt()` → saves ciphertext to DB → adds to UI immediately → returns (non-blocking)
 2. Background FIFO queue (`_sendQueue`) processes sends sequentially:
-   - `_sendTextInBackground()` → `bleService.sendMessage(peerId, payload)`
-   - `_sendPhotoInBackground()` → compress + `bleService.sendPhotoPreview()`
-3. BLE service writes to Messaging characteristic (fff3)
-4. Recipient subscribes to fff3 notifications → receives message → ChatBloc saves to DB → updates UI
+   - `_sendTextInBackground()` → `TransportManager.sendMessage(peerId, payload)` (routes to best transport)
+   - `_sendPhotoInBackground()` → compress + send photo preview
+3. Transport layer writes to peer (BLE fff3 or LAN TCP frame)
+4. Recipient receives message → decrypts if `v=1` → ChatBloc saves to DB → updates UI
 5. User can send multiple messages without waiting — each shows a pending indicator until delivered
 
 ### How Photo Transfer Works
@@ -123,10 +135,10 @@ Messaging:           0000fff3-0000-1000-8000-00805f9b34fb (WRITE, NOTIFY)
 - **Eviction**: LRU (Least Recently Used)
 
 ### Known Limitations (Important!)
-1. **Store-and-forward**: Not implemented across sessions — if peer goes out of range, unsent messages fail
-2. **One concurrent Wi-Fi Direct transfer**: NearbyService reinitializes between transfers; no parallel transfers
-3. **iOS Background**: Very limited discovery when app backgrounded (Apple restriction)
-4. **Wi-Fi Direct platform channel threading**: Native callbacks may arrive on non-platform thread (logged warning, no data loss observed)
+1. **One concurrent Wi-Fi Direct transfer**: NearbyService reinitializes between transfers; no parallel transfers
+2. **iOS Background**: Very limited discovery when app backgrounded (Apple restriction)
+3. **Wi-Fi Direct platform channel threading**: Native callbacks may arrive on non-platform thread (logged warning, no data loss observed)
+4. **E2EE session re-keying**: Sessions are per-connection (in-memory only). If the peer disconnects and reconnects, a new handshake is required. The UI shows "Securing…" again on reconnect.
 
 ## Common Tasks and How to Do Them
 

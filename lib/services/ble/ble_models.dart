@@ -45,6 +45,7 @@ class BroadcastPayload extends Equatable {
     this.interests,
     this.thumbnailBytes,
     this.thumbnailsList,
+    this.publicKeyHex,
   });
 
   final String userId;
@@ -60,6 +61,13 @@ class BroadcastPayload extends Equatable {
   /// When set, [thumbnailBytes] should be the first element.
   final List<Uint8List>? thumbnailsList;
 
+  /// X25519 long-term public key (32 bytes, hex-encoded, 64 chars).
+  ///
+  /// Null for old clients that don't support E2EE (backward-compatible).
+  /// When present, the receiving peer stores it for Noise_XK handshake
+  /// initiation.  NEVER include the private key here.
+  final String? publicKeyHex;
+
   /// Serialize to bytes for BLE transmission
   Map<String, dynamic> toJson() {
     return {
@@ -70,6 +78,9 @@ class BroadcastPayload extends Equatable {
       if (position != null) 'position': position,
       if (interests != null && interests!.isNotEmpty) 'interests': interests,
       'thumbnailBytes': thumbnailBytes?.toList(),
+      // 'pk' field carries our X25519 public key for E2EE key exchange.
+      // Old clients that don't know about 'pk' will simply ignore this field.
+      if (publicKeyHex != null) 'pk': publicKeyHex,
     };
   }
 
@@ -85,11 +96,36 @@ class BroadcastPayload extends Equatable {
       thumbnailBytes: json['thumbnailBytes'] != null
           ? Uint8List.fromList(List<int>.from(json['thumbnailBytes']))
           : null,
+      publicKeyHex: json['pk'] as String?,
+    );
+  }
+
+  BroadcastPayload copyWith({
+    String? userId,
+    String? name,
+    int? age,
+    String? bio,
+    int? position,
+    String? interests,
+    Uint8List? thumbnailBytes,
+    List<Uint8List>? thumbnailsList,
+    String? publicKeyHex,
+  }) {
+    return BroadcastPayload(
+      userId: userId ?? this.userId,
+      name: name ?? this.name,
+      age: age ?? this.age,
+      bio: bio ?? this.bio,
+      position: position ?? this.position,
+      interests: interests ?? this.interests,
+      thumbnailBytes: thumbnailBytes ?? this.thumbnailBytes,
+      thumbnailsList: thumbnailsList ?? this.thumbnailsList,
+      publicKeyHex: publicKeyHex ?? this.publicKeyHex,
     );
   }
 
   @override
-  List<Object?> get props => [userId, name, age, bio, position, interests, thumbnailBytes, thumbnailsList];
+  List<Object?> get props => [userId, name, age, bio, position, interests, thumbnailBytes, thumbnailsList, publicKeyHex];
 }
 
 /// A peer discovered via BLE scan and profile read (fff1 + fff2).
@@ -117,6 +153,7 @@ class DiscoveredPeer extends Equatable {
     this.isRelayed = false,
     this.hopCount = 0,
     this.fullPhotoCount = 0,
+    this.publicKeyHex,
   });
 
   final String peerId;
@@ -143,6 +180,9 @@ class DiscoveredPeer extends Equatable {
   /// Total number of profile photos available from the peer via fff4.
   /// 0 = unknown, 1 = primary only, >1 = multiple photos available.
   final int fullPhotoCount;
+  /// Peer's X25519 public key (64-char hex) for Noise_XK E2EE handshake.
+  /// Null if the peer's client does not support E2EE.
+  final String? publicKeyHex;
 
   /// Estimated distance based on RSSI
   String? get distanceEstimate {
@@ -177,6 +217,7 @@ class DiscoveredPeer extends Equatable {
     bool? isRelayed,
     int? hopCount,
     int? fullPhotoCount,
+    String? publicKeyHex,
   }) {
     return DiscoveredPeer(
       peerId: peerId ?? this.peerId,
@@ -193,6 +234,7 @@ class DiscoveredPeer extends Equatable {
       isRelayed: isRelayed ?? this.isRelayed,
       hopCount: hopCount ?? this.hopCount,
       fullPhotoCount: fullPhotoCount ?? this.fullPhotoCount,
+      publicKeyHex: publicKeyHex ?? this.publicKeyHex,
     );
   }
 
@@ -200,8 +242,26 @@ class DiscoveredPeer extends Equatable {
   List<Object?> get props => [
         peerId, name, userId, age, bio, position, interests,
         thumbnailBytes, photoThumbnails,
-        rssi, timestamp, isRelayed, hopCount, fullPhotoCount,
+        rssi, timestamp, isRelayed, hopCount, fullPhotoCount, publicKeyHex,
       ];
+}
+
+/// Incoming Noise_XK handshake frame from a peer (BLE or LAN).
+///
+/// Emitted by [BleServiceInterface.noiseHandshakeStream] and
+/// [LanTransportService.noiseHandshakeStream]. TransportManager subscribes to
+/// both, translates [fromPeerId] to the canonical conversation ID, then calls
+/// [EncryptionService.processHandshakeMessage].
+class NoiseHandshakeReceived {
+  const NoiseHandshakeReceived({
+    required this.fromPeerId,
+    required this.step,
+    required this.payload,
+  });
+
+  final String fromPeerId;
+  final int step;
+  final Uint8List payload;
 }
 
 /// Message type for BLE transmission
@@ -266,6 +326,7 @@ class ReceivedMessage extends Equatable {
     required this.content,
     required this.timestamp,
     this.replyToId,
+    this.isEncrypted = false,
   });
 
   final String fromPeerId;
@@ -276,8 +337,13 @@ class ReceivedMessage extends Equatable {
   /// ID of the message being replied to, if any.
   final String? replyToId;
 
+  /// True when this message was successfully decrypted via E2EE (Noise_XK session).
+  /// False for old clients or when no session is established.
+  /// Used to drive the 🔒 lock icon and "End-to-end encrypted" label in the UI.
+  final bool isEncrypted;
+
   @override
-  List<Object?> get props => [fromPeerId, messageId, type, content, timestamp, replyToId];
+  List<Object?> get props => [fromPeerId, messageId, type, content, timestamp, replyToId, isEncrypted];
 }
 
 /// Photo transfer status

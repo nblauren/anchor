@@ -579,4 +579,12 @@ class MockBleService implements BleServiceInterface {
 
   @override
   int get meshRoutingTableSize => 0;
+
+  @override
+  Future<void> sendHandshakeMessage(
+      String peerId, int step, Uint8List payload) async {}
+
+  @override
+  Stream<NoiseHandshakeReceived> get noiseHandshakeStream =>
+      const Stream.empty();
 }

@@ -192,6 +192,16 @@ abstract class BleServiceInterface {
   /// Stream of received emoji reactions from peers.
   Stream<ReactionReceived> get reactionReceivedStream;
 
+  // ==================== Noise_XK Handshake ====================
+
+  /// Send an outbound Noise_XK handshake step to a BLE peer.
+  /// [peerId] must be the BLE peripheral UUID (not a LAN UUID).
+  Future<void> sendHandshakeMessage(String peerId, int step, Uint8List payload);
+
+  /// Stream of incoming Noise_XK handshake frames received from BLE peers.
+  /// TransportManager subscribes to this and routes to EncryptionService.
+  Stream<NoiseHandshakeReceived> get noiseHandshakeStream;
+
   // ==================== Mesh ====================
 
   /// Enable or disable mesh relay (message forwarding between devices)

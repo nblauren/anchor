@@ -103,6 +103,8 @@ class ChatState extends Equatable {
     this.reactions = const {},
     this.replyingToMessage,
     this.quotedMessages = const {},
+    this.isE2eeActive = false,
+    this.isE2eeHandshaking = false,
   });
 
   final ChatStatus status;
@@ -124,6 +126,13 @@ class ChatState extends Equatable {
   /// Quoted messages keyed by message ID. Used to render reply previews inside bubbles.
   /// Populated from [Messages.replyToMessageId] when loading messages.
   final Map<String, MessageEntry> quotedMessages;
+
+  /// True when a Noise_XK session is established with the current peer.
+  /// Drives the 🔒 lock icon and "End-to-end encrypted" label in the header.
+  final bool isE2eeActive;
+
+  /// True while the Noise_XK handshake is in progress (awaiting round-trip).
+  final bool isE2eeHandshaking;
 
   /// Total unread count across all conversations
   int get totalUnreadCount =>
@@ -150,6 +159,8 @@ class ChatState extends Equatable {
     MessageEntry? replyingToMessage,
     bool clearReplyingToMessage = false,
     Map<String, MessageEntry>? quotedMessages,
+    bool? isE2eeActive,
+    bool? isE2eeHandshaking,
   }) {
     return ChatState(
       status: status ?? this.status,
@@ -166,6 +177,8 @@ class ChatState extends Equatable {
       reactions: reactions ?? this.reactions,
       replyingToMessage: clearReplyingToMessage ? null : (replyingToMessage ?? this.replyingToMessage),
       quotedMessages: quotedMessages ?? this.quotedMessages,
+      isE2eeActive: isE2eeActive ?? this.isE2eeActive,
+      isE2eeHandshaking: isE2eeHandshaking ?? this.isE2eeHandshaking,
     );
   }
 
@@ -183,5 +196,7 @@ class ChatState extends Equatable {
         reactions,
         replyingToMessage,
         quotedMessages,
+        isE2eeActive,
+        isE2eeHandshaking,
       ];
 }

@@ -13,6 +13,7 @@ import '../../../data/local_database/database.dart';
 import '../../../data/repositories/chat_repository.dart';
 import '../../../data/repositories/peer_repository.dart';
 import '../../../services/ble/ble.dart' as ble;
+import '../../../services/encryption/encryption.dart';
 import '../../../services/image_service.dart';
 import '../../../services/nearby/nearby.dart';
 import '../../../services/store_and_forward_service.dart';
@@ -30,6 +31,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     required String ownUserId,
     HighSpeedTransferService? highSpeedTransferService,
     StoreAndForwardService? storeAndForwardService,
+    EncryptionService? encryptionService,
   })  : _chatRepository = chatRepository,
         _peerRepository = peerRepository,
         _imageService = imageService,
@@ -38,6 +40,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         _ownUserId = ownUserId,
         _highSpeedService = highSpeedTransferService,
         _storeAndForwardService = storeAndForwardService,
+        _encryptionService = encryptionService,
         super(const ChatState()) {
     on<LoadConversations>(_onLoadConversations);
     on<OpenConversation>(_onOpenConversation);
@@ -76,6 +79,9 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     on<BleReactionReceived>(_onBleReactionReceived);
     // Reply
     on<SetReplyingTo>(_onSetReplyingTo);
+    // E2EE
+    on<E2eeSessionEstablished>(_onE2eeSessionEstablished);
+    on<_E2eePeerKeyArrived>(_onE2eePeerKeyArrived);
 
     // Subscribe to transport manager streams (Wi-Fi Aware or BLE — unified)
     _messageSubscription = _transportManager.messageReceivedStream.listen(
@@ -114,6 +120,21 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     _reactionSubscription = _transportManager.reactionReceivedStream.listen(
       (reaction) => add(BleReactionReceived(reaction)),
     );
+
+    // Subscribe to E2EE session established events — update UI lock icon.
+    final enc = _encryptionService;
+    if (enc != null) {
+      _e2eeSessionSubscription = enc.sessionEstablishedStream.listen((peerId) {
+        if (!isClosed) add(E2eeSessionEstablished(peerId));
+      });
+
+      // Retry handshake when the peer's public key arrives after conversation
+      // open (e.g. user tapped chat before the BLE profile read completed, or
+      // the peer just upgraded to E2EE-capable firmware).
+      _e2eeKeyStoredSubscription = enc.peerKeyStoredStream.listen((peerId) {
+        if (!isClosed) add(_E2eePeerKeyArrived(peerId));
+      });
+    }
 
     // Initialize Nearby / Wi-Fi Direct and subscribe to streams.
     final highSpeed = _highSpeedService;
@@ -163,6 +184,9 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   final String _ownUserId;
   final HighSpeedTransferService? _highSpeedService;
   final StoreAndForwardService? _storeAndForwardService;
+  final EncryptionService? _encryptionService;
+  StreamSubscription? _e2eeSessionSubscription;
+  StreamSubscription? _e2eeKeyStoredSubscription;
 
   /// True when the transport for [peerId] has enough bandwidth to send
   /// full-quality photos without BLE compression (LAN or Wi-Fi Aware).
@@ -284,6 +308,34 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
 
       // Load messages
       add(const LoadMessages());
+
+      // E2EE: initiate Noise_XK handshake if no session exists yet.
+      // The handshake runs in the background; the lock icon appears when
+      // the session is established (E2eeSessionEstablished event).
+      final enc = _encryptionService;
+      if (enc != null) {
+        // E2EE sessions are keyed by canonical peerId (= conv.peerId).
+        // TransportManager routes handshake messages to the right transport.
+        final peerId = event.peerId;
+        if (enc.hasSession(peerId)) {
+          emit(state.copyWith(isE2eeActive: true));
+        } else if (enc.hasPendingHandshake(peerId)) {
+          // Handshake already in flight (e.g. user closed and reopened chat).
+          // Just mark handshaking and wait for sessionEstablishedStream.
+          emit(state.copyWith(isE2eeHandshaking: true));
+        } else {
+          emit(state.copyWith(isE2eeHandshaking: true));
+          final result = await enc.initiateHandshake(peerId);
+          if (result.hasError) {
+            Logger.warning(
+              'E2EE handshake initiation failed for $peerId: ${result.error}',
+              'Chat',
+            );
+            // Keep isE2eeHandshaking true — peerKeyStoredStream retries when
+            // the peer's public key is stored (via BLE profile or LAN beacon).
+          }
+        }
+      }
     } catch (e) {
       Logger.error('Failed to open conversation', e, null, 'ChatBloc');
       emit(state.copyWith(
@@ -341,6 +393,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     if (state.currentConversation == null) return;
     if (event.text.trim().isEmpty) return;
     if (state.isBlocked) return;
+    if (!state.isE2eeActive) return; // Never send without an established E2EE session.
 
     try {
       final peerId = state.currentConversation!.peerId;
@@ -469,6 +522,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   ) async {
     if (state.currentConversation == null) return;
     if (state.isBlocked) return;
+    if (!state.isE2eeActive) return; // Never send without an established E2EE session.
 
     try {
       final peerId = state.currentConversation!.peerId;
@@ -806,10 +860,22 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       if (hsService != null && await hsService.isAvailable) {
         Logger.info('ChatBloc: Attempting Wi-Fi Direct transfer', 'Chat');
 
+        // Encrypt for E2EE before sending over Wi-Fi Direct (Nearby).
+        // request.fromPeerId is the BLE device ID — same key EncryptionService uses.
+        Uint8List wifiBytes = photoBytes;
+        final enc = _encryptionService;
+        if (enc != null && enc.hasSession(request.fromPeerId)) {
+          final encPayload = await enc.encryptBytes(request.fromPeerId, photoBytes);
+          if (encPayload != null) {
+            wifiBytes = Uint8List.fromList(
+                [0x01, ...encPayload.nonce, ...encPayload.ciphertext]);
+          }
+        }
+
         final sendFuture = hsService.sendPayload(
           transferId: request.photoId,
           peerId: request.fromPeerId,
-          data: photoBytes,
+          data: wifiBytes,
           timeout: const Duration(seconds: 15),
         );
 
@@ -1552,7 +1618,24 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       final conversation =
           await _chatRepository.getOrCreateConversation(bleDeviceId);
 
-      final photoPath = await _imageService.saveReceivedPhoto(payload.data);
+      // Decrypt if the sender E2EE-encrypted the payload.
+      // Wire format: [0x01] + 24-byte nonce + ciphertext (set by _sendFullPhoto).
+      Uint8List photoBytes = payload.data;
+      if (photoBytes.length > 25 && photoBytes[0] == 0x01) {
+        final enc = _encryptionService;
+        if (enc != null) {
+          final decrypted = await enc.decryptBytes(
+            bleDeviceId,
+            EncryptedPayload(
+              nonce: photoBytes.sublist(1, 25),
+              ciphertext: photoBytes.sublist(25),
+            ),
+          );
+          if (decrypted != null) photoBytes = decrypted;
+        }
+      }
+
+      final photoPath = await _imageService.saveReceivedPhoto(photoBytes);
 
       final previewMsg = state.messages.where((m) {
         if (m.contentType != MessageContentType.photoPreview) return false;
@@ -1944,8 +2027,47 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     }
   }
 
+  // ── E2EE ────────────────────────────────────────────────────────────────
+
+  void _onE2eeSessionEstablished(
+    E2eeSessionEstablished event,
+    Emitter<ChatState> emit,
+  ) {
+    final conv = state.currentConversation;
+    if (conv == null) return;
+    // Sessions are now keyed by canonical peerId — direct comparison.
+    if (conv.peerId == event.peerId) {
+      emit(state.copyWith(isE2eeActive: true, isE2eeHandshaking: false));
+      Logger.info('E2EE session active in chat with ${conv.peerId}', 'Chat');
+    }
+  }
+
+  Future<void> _onE2eePeerKeyArrived(
+    _E2eePeerKeyArrived event,
+    Emitter<ChatState> emit,
+  ) async {
+    final enc = _encryptionService;
+    if (enc == null) return;
+
+    final conv = state.currentConversation;
+    if (conv == null) return;
+    // peerKeyStoredStream now emits the canonical peerId — direct comparison.
+    if (conv.peerId != event.peerId) return;
+    if (enc.hasSession(event.peerId) || enc.hasPendingHandshake(event.peerId)) return;
+
+    Logger.info('Public key arrived for ${event.peerId} — retrying E2EE handshake', 'Chat');
+    emit(state.copyWith(isE2eeHandshaking: true));
+
+    final result = await enc.initiateHandshake(event.peerId);
+    if (result.hasError) {
+      Logger.warning('E2EE handshake retry failed for ${event.peerId}: ${result.error}', 'Chat');
+    }
+  }
+
   @override
   Future<void> close() {
+    _e2eeSessionSubscription?.cancel();
+    _e2eeKeyStoredSubscription?.cancel();
     _echoTimer?.cancel();
     _messageSubscription?.cancel();
     _photoProgressSubscription?.cancel();
@@ -1964,4 +2086,14 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     _photoDownloadTimers.clear();
     return super.close();
   }
+}
+
+// Internal event: peer's public key was stored by EncryptionService.
+// Used to retry a handshake when the key arrives after conversation open.
+class _E2eePeerKeyArrived extends ChatEvent {
+  const _E2eePeerKeyArrived(this.peerId);
+  final String peerId;
+
+  @override
+  List<Object?> get props => [peerId];
 }

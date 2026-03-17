@@ -283,4 +283,12 @@ class FakeBleService implements BleServiceInterface {
 
   @override
   String? getPeerIdForUserId(String userId) => null;
+
+  @override
+  Future<void> sendHandshakeMessage(
+      String peerId, int step, Uint8List payload) async {}
+
+  @override
+  Stream<NoiseHandshakeReceived> get noiseHandshakeStream =>
+      const Stream.empty();
 }

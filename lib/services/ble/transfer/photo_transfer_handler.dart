@@ -9,6 +9,7 @@ import '../connection/connection_manager.dart';
 import '../connection/peer_connection.dart';
 import '../gatt/gatt_write_queue.dart';
 import '../photo_chunker.dart';
+import '../../encryption/encryption.dart';
 
 /// Handles all BLE photo transfer: sending photos/previews/requests and
 /// receiving binary photo chunks, preview thumbnails, and photo requests.
@@ -23,14 +24,17 @@ class PhotoTransferHandler {
     required ConnectionManager connectionManager,
     required GattWriteQueue writeQueue,
     required BleConfig config,
+    EncryptionService? encryptionService,
   })  : _connectionManager = connectionManager,
         _writeQueue = writeQueue,
         _config = config,
+        _encryptionService = encryptionService,
         _photoReassembler = PhotoReassembler();
 
   final ConnectionManager _connectionManager;
   final GattWriteQueue _writeQueue;
   final BleConfig _config;
+  final EncryptionService? _encryptionService;
   final PhotoReassembler _photoReassembler;
 
   // ==================== State ====================
@@ -99,14 +103,32 @@ class PhotoTransferHandler {
         return false;
       }
 
+      // Optionally encrypt the photo bytes before chunking.
+      // The nonce is sent in photo_start; the binary chunks carry ciphertext.
+      Uint8List transferData = photoData;
+      String? nonceB64;
+      final enc = _encryptionService;
+      if (enc != null && enc.hasSession(peerId)) {
+        final encrypted = await enc.encryptBytes(peerId, photoData);
+        if (encrypted != null) {
+          transferData = encrypted.ciphertext;
+          nonceB64 = base64.encode(encrypted.nonce);
+          Logger.debug(
+            'PhotoTransfer: Encrypted ${photoData.length}B → '
+            '${transferData.length}B for $messageId',
+            'E2EE',
+          );
+        }
+      }
+
       final maxWriteLen = conn.maxWriteLength;
       const binaryOverhead = 3;
       final rawChunkSize = max(20, maxWriteLen - binaryOverhead);
       final totalChunks =
-          (photoData.length + rawChunkSize - 1) ~/ rawChunkSize;
+          (transferData.length + rawChunkSize - 1) ~/ rawChunkSize;
 
       Logger.info(
-        'PhotoTransfer: Binary transfer: ${photoData.length}B, '
+        'PhotoTransfer: Binary transfer: ${transferData.length}B, '
         '$totalChunks chunks (${rawChunkSize}B each, maxWrite=$maxWriteLen)',
         'BLE',
       );
@@ -118,7 +140,8 @@ class PhotoTransferHandler {
         'message_id': messageId,
         if (photoId != null) 'photo_id': photoId,
         'total_chunks': totalChunks,
-        'total_size': photoData.length,
+        'total_size': transferData.length,
+        if (nonceB64 != null) ...{'v': 1, 'n': nonceB64},
       }));
 
       final startSuccess = await _writeQueue.enqueue(
@@ -137,7 +160,7 @@ class PhotoTransferHandler {
 
       _emitProgress(messageId, peerId, 0, PhotoTransferStatus.starting);
 
-      // Phase 2: Binary chunks
+      // Phase 2: Binary chunks (of ciphertext when encrypted)
       for (var i = 0; i < totalChunks; i++) {
         if (_cancelledTransfers.contains(messageId)) {
           _cancelledTransfers.remove(messageId);
@@ -147,8 +170,8 @@ class PhotoTransferHandler {
         }
 
         final dataStart = i * rawChunkSize;
-        final dataEnd = min(dataStart + rawChunkSize, photoData.length);
-        final chunkData = photoData.sublist(dataStart, dataEnd);
+        final dataEnd = min(dataStart + rawChunkSize, transferData.length);
+        final chunkData = transferData.sublist(dataStart, dataEnd);
 
         final chunkPayload = Uint8List(binaryOverhead + chunkData.length);
         chunkPayload[0] = 0x02;
@@ -218,11 +241,23 @@ class PhotoTransferHandler {
         return false;
       }
 
+      // Optionally encrypt the thumbnail before chunking.
+      Uint8List transferThumb = thumbnailBytes;
+      String? thumbNonceB64;
+      final enc = _encryptionService;
+      if (enc != null && enc.hasSession(peerId)) {
+        final encrypted = await enc.encryptBytes(peerId, thumbnailBytes);
+        if (encrypted != null) {
+          transferThumb = encrypted.ciphertext;
+          thumbNonceB64 = base64.encode(encrypted.nonce);
+        }
+      }
+
       final maxWriteLen = conn.maxWriteLength;
       const binaryOverhead = 3;
       final rawChunkSize = max(20, maxWriteLen - binaryOverhead);
       final totalChunks =
-          (thumbnailBytes.length + rawChunkSize - 1) ~/ rawChunkSize;
+          (transferThumb.length + rawChunkSize - 1) ~/ rawChunkSize;
 
       // Phase 1: JSON metadata
       final startPayload = utf8.encode(jsonEncode({
@@ -232,6 +267,7 @@ class PhotoTransferHandler {
         'photo_id': photoId,
         'original_size': originalSize,
         'thumbnail_chunks': totalChunks,
+        if (thumbNonceB64 != null) ...{'v': 1, 'n': thumbNonceB64},
       }));
 
       final startSuccess = await _writeQueue.enqueue(
@@ -244,7 +280,7 @@ class PhotoTransferHandler {
 
       if (!startSuccess) return false;
 
-      // Phase 2: Binary thumbnail chunks (0x03 marker)
+      // Phase 2: Binary thumbnail chunks (0x03 marker, ciphertext when encrypted)
       for (var i = 0; i < totalChunks; i++) {
         if (_cancelledTransfers.contains(messageId)) {
           _cancelledTransfers.remove(messageId);
@@ -252,8 +288,8 @@ class PhotoTransferHandler {
         }
 
         final dataStart = i * rawChunkSize;
-        final dataEnd = min(dataStart + rawChunkSize, thumbnailBytes.length);
-        final chunkData = thumbnailBytes.sublist(dataStart, dataEnd);
+        final dataEnd = min(dataStart + rawChunkSize, transferThumb.length);
+        final chunkData = transferThumb.sublist(dataStart, dataEnd);
 
         final chunkPayload = Uint8List(binaryOverhead + chunkData.length);
         chunkPayload[0] = 0x03;
@@ -346,6 +382,12 @@ class PhotoTransferHandler {
     final totalChunks = json['total_chunks'] as int? ?? 0;
     final totalSize = json['total_size'] as int? ?? 0;
 
+    Uint8List? nonce;
+    if (json['v'] == 1) {
+      final nStr = json['n'] as String?;
+      if (nStr != null) nonce = Uint8List.fromList(base64.decode(nStr));
+    }
+
     _incomingPhotoTransfers[fromPeerId] = _IncomingPhotoTransfer(
       messageId: messageId,
       photoId: photoId,
@@ -353,6 +395,7 @@ class PhotoTransferHandler {
       totalSize: totalSize,
       receivedData: BytesBuilder(copy: false),
       receivedCount: 0,
+      nonce: nonce,
     );
 
     Logger.info(
@@ -366,7 +409,7 @@ class PhotoTransferHandler {
   }
 
   /// Handle binary photo chunk: [0x02][uint16 chunk_index][raw data]
-  void handleBinaryPhotoChunk(Uint8List data, String centralId) {
+  Future<void> handleBinaryPhotoChunk(Uint8List data, String centralId) async {
     if (data.length < 3) return;
 
     final chunkIndex = (data[1] << 8) | data[2];
@@ -411,13 +454,34 @@ class PhotoTransferHandler {
         PhotoTransferStatus.inProgress);
 
     if (transfer.receivedCount >= transfer.totalChunks) {
-      final photoBytes = transfer.receivedData.toBytes();
+      final rawBytes = transfer.receivedData.toBytes();
 
       Logger.info(
         'PhotoTransfer: Binary photo complete: ${transfer.messageId} '
-        '(${photoBytes.length} bytes)',
+        '(${rawBytes.length} bytes)',
         'BLE',
       );
+
+      // Decrypt if the sender included an E2EE nonce.
+      Uint8List photoBytes = rawBytes;
+      final nonce = transfer.nonce;
+      final enc = _encryptionService;
+      if (nonce != null && enc != null) {
+        final payload = EncryptedPayload(
+          nonce: nonce,
+          ciphertext: rawBytes,
+        );
+        final decrypted = await enc.decryptBytes(fromPeerId, payload);
+        if (decrypted == null) {
+          Logger.warning(
+            'PhotoTransfer: Decryption failed for ${transfer.messageId} — dropping',
+            'E2EE',
+          );
+          _incomingPhotoTransfers.remove(fromPeerId);
+          return;
+        }
+        photoBytes = decrypted;
+      }
 
       onPhotoReceived?.call(ReceivedPhoto(
         fromPeerId: fromPeerId,
@@ -515,6 +579,12 @@ class PhotoTransferHandler {
       return;
     }
 
+    Uint8List? thumbNonce;
+    if (json['v'] == 1) {
+      final nStr = json['n'] as String?;
+      if (nStr != null) thumbNonce = Uint8List.fromList(base64.decode(nStr));
+    }
+
     _incomingThumbnailTransfers[fromPeerId] = _IncomingThumbnailTransfer(
       messageId: messageId,
       photoId: photoId,
@@ -522,11 +592,12 @@ class PhotoTransferHandler {
       totalChunks: totalChunks,
       receivedData: BytesBuilder(copy: false),
       receivedCount: 0,
+      nonce: thumbNonce,
     );
   }
 
   /// Handle binary thumbnail chunk: [0x03][uint16 chunk_index][raw data]
-  void handleBinaryThumbnailChunk(Uint8List data, String centralId) {
+  Future<void> handleBinaryThumbnailChunk(Uint8List data, String centralId) async {
     if (data.length < 3) return;
 
     _IncomingThumbnailTransfer? transfer =
@@ -555,13 +626,35 @@ class PhotoTransferHandler {
     transfer.receivedCount++;
 
     if (transfer.receivedCount >= transfer.totalChunks) {
-      final thumbnailBytes = transfer.receivedData.toBytes();
+      final rawThumb = transfer.receivedData.toBytes();
 
       Logger.info(
         'PhotoTransfer: Thumbnail complete: ${transfer.messageId} '
-        '(${thumbnailBytes.length} bytes)',
+        '(${rawThumb.length} bytes)',
         'BLE',
       );
+
+      // Decrypt if the sender included an E2EE nonce.
+      Uint8List thumbnailBytes = rawThumb;
+      final thumbNonce = transfer.nonce;
+      final enc = _encryptionService;
+      if (thumbNonce != null && enc != null) {
+        final payload = EncryptedPayload(
+          nonce: thumbNonce,
+          ciphertext: rawThumb,
+        );
+        final decrypted = await enc.decryptBytes(centralId, payload);
+        if (decrypted == null) {
+          Logger.warning(
+            'PhotoTransfer: Thumbnail decryption failed for '
+            '${transfer.messageId} — dropping',
+            'E2EE',
+          );
+          _incomingThumbnailTransfers.remove(centralId);
+          return;
+        }
+        thumbnailBytes = decrypted;
+      }
 
       onPhotoPreviewReceived?.call(ReceivedPhotoPreview(
         fromPeerId: centralId,
@@ -648,6 +741,7 @@ class _IncomingPhotoTransfer {
     required this.receivedData,
     required this.receivedCount,
     this.photoId,
+    this.nonce,
   });
 
   final String messageId;
@@ -656,6 +750,8 @@ class _IncomingPhotoTransfer {
   final int totalSize;
   final BytesBuilder receivedData;
   int receivedCount;
+  /// Non-null when the sender encrypted the photo (v:1 in photo_start).
+  final Uint8List? nonce;
 }
 
 /// Tracks an incoming binary thumbnail transfer for the preview consent flow.
@@ -667,6 +763,7 @@ class _IncomingThumbnailTransfer {
     required this.totalChunks,
     required this.receivedData,
     required this.receivedCount,
+    this.nonce,
   });
 
   final String messageId;
@@ -675,4 +772,6 @@ class _IncomingThumbnailTransfer {
   final int totalChunks;
   final BytesBuilder receivedData;
   int receivedCount;
+  /// Non-null when the sender encrypted the thumbnail (v:1 in photo_preview).
+  final Uint8List? nonce;
 }

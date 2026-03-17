@@ -150,6 +150,28 @@ class BlockedUsers extends Table {
   Set<Column> get primaryKey => {peerId};
 }
 
+/// Long-term X25519 public keys for peers.
+///
+/// Populated during GATT profile reads (fff1) when the peer's [BroadcastPayload]
+/// includes a `pk` field.  Keys are used to initiate Noise_XK handshakes and
+/// cached here to survive app restarts.
+///
+/// A key is updated (and any existing session invalidated) when a new value
+/// arrives for the same [peerId].
+@DataClassName('PeerPublicKeyEntry')
+class PeerPublicKeys extends Table {
+  /// BLE peripheral UUID (same as [DiscoveredPeers.peerId]).
+  TextColumn get peerId => text()();
+
+  /// Raw 32-byte X25519 public key, stored as hex string.
+  TextColumn get publicKeyHex => text()();
+
+  DateTimeColumn get receivedAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {peerId};
+}
+
 /// Emoji reactions on messages
 @DataClassName('ReactionEntry')
 class MessageReactions extends Table {
@@ -174,6 +196,7 @@ class MessageReactions extends Table {
   AnchorDrops,
   BlockedUsers,
   MessageReactions,
+  PeerPublicKeys,
 ])
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
@@ -182,7 +205,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 8;
+  int get schemaVersion => 9;
 
   @override
   MigrationStrategy get migration {
@@ -225,6 +248,10 @@ class AppDatabase extends _$AppDatabase {
         if (from < 8) {
           // Migration from v7 to v8: add reply-to support
           await m.addColumn(messages, messages.replyToMessageId);
+        }
+        if (from < 9) {
+          // Migration from v8 to v9: add peer_public_keys table for E2EE (Noise_XK)
+          await m.createTable(peerPublicKeys);
         }
       },
       beforeOpen: (details) async {

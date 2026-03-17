@@ -24,6 +24,7 @@ class _LanPeerMeta {
     this.position,
     this.interests,
     this.thumbnailBytes,
+    this.publicKeyHex,
   });
 
   final String lanPeerId;
@@ -36,6 +37,8 @@ class _LanPeerMeta {
   final int? position;
   final String? interests;
   Uint8List? thumbnailBytes;
+  /// Peer's X25519 public key (64-char hex) for E2EE key exchange.
+  final String? publicKeyHex;
 }
 
 class _PendingPhoto {
@@ -147,6 +150,8 @@ class LanTransportServiceImpl implements LanTransportService {
       StreamController<ble.AnchorDropReceived>.broadcast();
   final _reactionReceivedController =
       StreamController<ble.ReactionReceived>.broadcast();
+  final _noiseHandshakeController =
+      StreamController<ble.NoiseHandshakeReceived>.broadcast();
   final _availabilityController = StreamController<bool>.broadcast();
 
   // ==================== Lifecycle ====================
@@ -291,6 +296,7 @@ class LanTransportServiceImpl implements LanTransportService {
     await _photoRequestReceivedController.close();
     await _anchorDropReceivedController.close();
     await _reactionReceivedController.close();
+    await _noiseHandshakeController.close();
     await _availabilityController.close();
     Logger.info('LAN: transport disposed', _tag);
   }
@@ -569,6 +575,7 @@ class LanTransportServiceImpl implements LanTransportService {
       if (_profile!.position != null) 'position': _profile!.position,
       if (_profile!.interests != null && _profile!.interests!.isNotEmpty)
         'interests': _profile!.interests,
+      if (_profile!.publicKeyHex != null) 'pk': _profile!.publicKeyHex,
     };
 
     try {
@@ -665,6 +672,8 @@ class LanTransportServiceImpl implements LanTransportService {
       final bio = json['bio'] as String?;
       final position = json['position'] as int?;
       final interests = json['interests'] as String?;
+      final pk = json['pk'] as String?;
+      final publicKeyHex = (pk != null && pk.length == 64) ? pk : null;
       final ipAddress = datagram.address.address;
 
       _lastSeen[lanPeerId] = DateTime.now();
@@ -681,6 +690,7 @@ class LanTransportServiceImpl implements LanTransportService {
           bio: bio,
           position: position,
           interests: interests,
+          publicKeyHex: publicKeyHex,
         );
         _peers[lanPeerId] = meta;
 
@@ -696,7 +706,8 @@ class LanTransportServiceImpl implements LanTransportService {
             existing.age != age ||
             existing.bio != bio ||
             existing.position != position ||
-            existing.interests != interests) {
+            existing.interests != interests ||
+            existing.publicKeyHex != publicKeyHex) {
           final updated = _LanPeerMeta(
             lanPeerId: lanPeerId,
             userId: userId,
@@ -708,6 +719,7 @@ class LanTransportServiceImpl implements LanTransportService {
             position: position,
             interests: interests,
             thumbnailBytes: existing.thumbnailBytes,
+            publicKeyHex: publicKeyHex,
           );
           _peers[lanPeerId] = updated;
           _peerDiscoveredController.add(_buildDiscoveredPeer(updated));
@@ -779,9 +791,14 @@ class LanTransportServiceImpl implements LanTransportService {
 
       switch (type) {
         case 'chat_message':
-          final messageType = ble.MessageType.values.byName(
-            payload['messageType'] as String? ?? 'text',
-          );
+          final rawType = payload['messageType'] as String? ?? 'text';
+          final ble.MessageType messageType;
+          try {
+            messageType = ble.MessageType.values.byName(rawType);
+          } catch (_) {
+            Logger.debug('LAN: unknown messageType "$rawType" — skipping', _tag);
+            return;
+          }
           _messageReceivedController.add(ble.ReceivedMessage(
             fromPeerId: fromPeerId,
             messageId: payload['messageId'] as String? ?? const Uuid().v4(),
@@ -813,6 +830,17 @@ class LanTransportServiceImpl implements LanTransportService {
 
         case 'photo_chunk':
           _handlePhotoChunk(fromPeerId, payload);
+
+        case 'noise_hs':
+          final step = payload['step'] as int?;
+          final dataB64 = payload['data'] as String?;
+          if (step != null && dataB64 != null) {
+            _noiseHandshakeController.add(ble.NoiseHandshakeReceived(
+              fromPeerId: fromPeerId,
+              step: step,
+              payload: Uint8List.fromList(base64Decode(dataB64)),
+            ));
+          }
 
         case 'drop_anchor':
           _anchorDropReceivedController.add(ble.AnchorDropReceived(
@@ -1020,7 +1048,30 @@ class LanTransportServiceImpl implements LanTransportService {
       interests: meta.interests,
       thumbnailBytes: meta.thumbnailBytes,
       timestamp: DateTime.now(),
+      publicKeyHex: meta.publicKeyHex,
     );
+  }
+
+  @override
+  Stream<ble.NoiseHandshakeReceived> get noiseHandshakeStream =>
+      _noiseHandshakeController.stream;
+
+  @override
+  Future<bool> sendHandshakeMessage(
+      String peerId, int step, Uint8List payload) async {
+    final socket = await _getOrConnectSocket(peerId);
+    if (socket == null) return false;
+    final envelope = {
+      'v': 1,
+      'type': 'noise_hs',
+      'fromPeerId': _lanPeerId,
+      'fromUserId': _ownUserId,
+      'payload': {
+        'step': step,
+        'data': base64Encode(payload),
+      },
+    };
+    return _sendFrame(socket, envelope);
   }
 }
 

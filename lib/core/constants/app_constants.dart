@@ -37,4 +37,10 @@ class AppConstants {
   // Store-and-forward message retry
   static const int messageRetryWindowHours = 24;
   static const int messageMaxCrossSessionRetries = 20;
+
+  // Transport feature flags
+  /// Set to false to disable LAN (TCP/UDP) transport entirely and fall back
+  /// to BLE-only mode. Useful for debugging or environments where local
+  /// network discovery causes issues.
+  static const bool enableLanTransport = false;
 }

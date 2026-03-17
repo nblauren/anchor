@@ -431,6 +431,58 @@ class _ChatScreenState extends State<ChatScreen> {
                               ),
                             ],
                           )
+                        else if (state.isE2eeActive)
+                          // E2EE lock indicator — visible when Noise_XK session
+                          // is established.  Tapping shows a brief explanation.
+                          GestureDetector(
+                            onTap: () {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Row(
+                                    children: [
+                                      Icon(Icons.lock, color: Colors.white, size: 16),
+                                      SizedBox(width: 8),
+                                      Text('End-to-end encrypted'),
+                                    ],
+                                  ),
+                                  duration: Duration(seconds: 2),
+                                ),
+                              );
+                            },
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.lock, size: 11, color: Colors.greenAccent),
+                                SizedBox(width: 3),
+                                Text(
+                                  'End-to-end encrypted',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.greenAccent,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          )
+                        else if (state.isE2eeHandshaking)
+                          const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              SizedBox(
+                                width: 10,
+                                height: 10,
+                                child: CircularProgressIndicator(strokeWidth: 1.5),
+                              ),
+                              SizedBox(width: 3),
+                              Text(
+                                'Securing…',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: AppTheme.textSecondary,
+                                ),
+                              ),
+                            ],
+                          )
                         else if (widget.onViewProfile != null)
                           const Text(
                             'Tap for info',
@@ -620,10 +672,13 @@ class _ChatScreenState extends State<ChatScreen> {
                 ),
               ),
 
-              // Message input
-              state.isBlocked
-                  ? _buildBlockedBanner()
-                  : _buildMessageInput(state),
+              // Message input — only shown once E2EE session is established.
+              if (state.isBlocked)
+                _buildBlockedBanner()
+              else if (!state.isE2eeActive)
+                _buildSecureConnectionBanner(state.isE2eeHandshaking)
+              else
+                _buildMessageInput(state),
             ],
           ),
         );
@@ -679,6 +734,40 @@ class _ChatScreenState extends State<ChatScreen> {
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: AppTheme.textHint,
                 ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSecureConnectionBanner(bool isHandshaking) {
+    final message = isHandshaking
+        ? 'Initiating secure connection\u2026'
+        : 'Waiting for secure connection\u2026';
+    return Container(
+      padding: EdgeInsets.only(
+        left: 16,
+        right: 16,
+        top: 12,
+        bottom: MediaQuery.of(context).padding.bottom + 12,
+      ),
+      decoration: const BoxDecoration(
+        color: AppTheme.darkSurface,
+        border: Border(top: BorderSide(color: AppTheme.darkCard)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(
+            width: 14,
+            height: 14,
+            child: CircularProgressIndicator(strokeWidth: 1.5),
+          ),
+          const SizedBox(width: 10),
+          Text(
+            message,
+            style: const TextStyle(color: AppTheme.textHint, fontSize: 13),
           ),
         ],
       ),

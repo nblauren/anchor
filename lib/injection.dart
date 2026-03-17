@@ -6,6 +6,7 @@ import 'features/discovery/bloc/discovery_bloc.dart';
 import 'features/profile/bloc/profile_bloc.dart';
 import 'services/ble/ble.dart';
 import 'services/database_service.dart';
+import 'services/encryption/encryption.dart';
 import 'services/image_service.dart';
 import 'services/audio_service.dart';
 import 'services/lan/lan.dart';
@@ -49,12 +50,23 @@ Future<void> initializeDependencies({
       return MockBleService();
     } else {
       Logger.info('Using BleFacade for production', 'DI');
-      return BleFacade(config: config);
+      return BleFacade(
+        config: config,
+        encryptionService: getIt<EncryptionService>(),
+      );
     }
   });
 
   // Initialize database
   await getIt<DatabaseService>().initialize();
+
+  // Encryption service — registered after database is ready.
+  // Must be initialized before BLE so it can supply the local public key
+  // for embedding in BroadcastPayload (fff1 characteristic).
+  getIt.registerLazySingleton<EncryptionService>(
+    () => EncryptionService(database: getIt<DatabaseService>().database),
+  );
+  await getIt<EncryptionService>().initialize();
 
   // Initialize BLE service
   try {
@@ -111,6 +123,7 @@ Future<void> initializeDependencies({
     lanService: getIt<LanTransportService>(),
     wifiAwareService: getIt<WifiAwareTransportService>(),
     bleService: getIt<BleServiceInterface>(),
+    encryptionService: getIt<EncryptionService>(),
   ));
 
   // Store-and-forward service (singleton — retries pending messages on peer rediscovery)
@@ -157,6 +170,7 @@ Future<void> initializeDependencies({
       ownUserId: ownUserId,
       highSpeedTransferService: getIt<HighSpeedTransferService>(),
       storeAndForwardService: getIt<StoreAndForwardService>(),
+      encryptionService: getIt<EncryptionService>(),
     ),
   );
 
@@ -177,6 +191,7 @@ Future<void> initializeDependencies({
 
 /// Dispose all dependencies
 Future<void> disposeDependencies() async {
+  await getIt<EncryptionService>().dispose();
   await getIt<StoreAndForwardService>().dispose();
   await getIt<TransportManager>().dispose();
   await getIt<LanTransportService>().dispose();

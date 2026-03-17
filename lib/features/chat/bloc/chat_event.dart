@@ -350,3 +350,16 @@ class BleReactionReceived extends ChatEvent {
   @override
   List<Object?> get props => [reaction];
 }
+
+// ── E2EE ─────────────────────────────────────────────────────────────────────
+
+/// Emitted internally when a Noise_XK session is established with a peer.
+/// Updates the chat header lock icon + "End-to-end encrypted" label.
+class E2eeSessionEstablished extends ChatEvent {
+  const E2eeSessionEstablished(this.peerId);
+  final String peerId;
+
+  @override
+  List<Object?> get props => [peerId];
+}
+

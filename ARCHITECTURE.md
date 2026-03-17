@@ -92,6 +92,11 @@ lib/
 │   ├── notification_service.dart    # Local push notifications
 │   ├── audio_service.dart           # Ambient audio feedback (messages, drops, photos)
 │   ├── store_and_forward_service.dart # Cross-session message retry queue
+│   ├── encryption/
+│   │   ├── encryption_service.dart  # Key gen/storage, Noise_XK handshake lifecycle, encrypt/decrypt
+│   │   ├── encryption_models.dart   # NoiseSession, EncryptedPayload, HandshakeResult, etc.
+│   │   ├── noise_handshake.dart     # Pure Noise_XK state machine (NoiseHandshakeProcessor)
+│   │   └── encryption.dart          # Barrel export
 │   ├── ble/
 │   │   ├── ble_facade.dart                    # Thin facade exposing BleServiceInterface
 │   │   ├── ble_service_interface.dart         # Abstract BLE contract
@@ -162,7 +167,7 @@ Both roles run simultaneously on the same device, enabling true peer-to-peer dis
 Main Service:           0000fff0-0000-1000-8000-00805f9b34fb
 
 Characteristics:
-  fff1  Profile metadata    READ, NOTIFY   name, age, position ID, interest IDs, userId
+  fff1  Profile metadata    READ, NOTIFY   name, age, position ID, interest IDs, userId, pk (X25519 public key hex)
   fff2  Primary thumbnail   READ, NOTIFY   JPEG bytes, 10–30 KB
   fff3  Messaging           WRITE, NOTIFY  JSON-encoded messages (text, photo events, anchor drop)
   fff4  Full photo set      READ           On-demand; serves all profile thumbnails concatenated
@@ -179,7 +184,7 @@ Device A (Central)                         Device B (Peripheral)
       |-- GATT connect -------------------------->|
       |-- read fff1 (profile metadata) ---------->|
       |<-- { userId, name, age, positionId,       |
-      |       interestIds, hopCount } ------------|
+      |       interestIds, hopCount, pk } --------|
       |-- read fff2 (primary thumbnail) --------->|
       |<-- JPEG bytes (≤30 KB) ------------------|
       |                                           |
@@ -208,6 +213,8 @@ Sender (Central)                           Receiver (Peripheral / GATT server)
 ```
 
 Message types (`MessageType` enum): `text`, `photo`, `typing`, `read`, `photoPreview`, `photoRequest`, `wifiTransferReady`
+
+**Noise handshake messages** are routed separately (not via `MessageType`) as top-level JSON with `"type": "noise_hs"`. See [End-to-End Encryption](#end-to-end-encryption) section.
 
 **Store-and-forward for direct messages**: Undelivered messages (status `pending` or `failed`) are persisted in the `messages` table. `StoreAndForwardService` monitors peer discovery events and retries queued messages when a peer is rediscovered, incrementing `retry_count` and updating `last_attempt_at` on each attempt.
 
@@ -295,6 +302,7 @@ Each relay node:
 | `positionId` | int | Maps to a fixed list of position labels |
 | `interestIds` | List\<int\> | Maps to a fixed interest label set; no free-text interests |
 | `hopCount` | int | 0 = direct; >0 = relayed |
+| `pk` | hex string | X25519 public key for Noise_XK E2EE handshake |
 | Primary thumbnail | JPEG bytes | ≤30 KB; screened for NSFW before broadcast |
 
 Position IDs and interest IDs are defined in `lib/core/constants/profile_constants.dart`. Using integer IDs keeps the broadcast payload compact and prevents injection of arbitrary text into the mesh.
@@ -357,7 +365,8 @@ NsfwDetectionService.classify(thumbnailBytes)
 - **Reply-to**: `SendTextMessage` and `SendPhotoMessage` accept optional `replyToMessageId`
 - **Read receipts**: `MarkMessagesRead` emits BLE read-receipt; `ReadReceiptReceived` updates message status to `read`
 - Wi-Fi Direct integration: `WifiTransferReadyReceived` triggers Nearby browsing; `NearbyPayloadCompleted` handles received photos; `_transferToBleId` map resolves Nearby userIds to BLE device IDs
-- Key events: `SendTextMessage`, `SendPhotoMessage`, `BleMessageReceived`, `PhotoPreviewReceived`, `RequestFullPhoto`, `PhotoRequestReceived`, `CancelPhotoTransfer`, `WifiTransferReadyReceived`, `NearbyPayloadCompleted`, `RegisterPendingOutgoingPhoto`, `SendReaction`, `ReactionReceived`, `MarkMessagesRead`, `ReadReceiptReceived`
+- **E2EE handshake gate**: Chat input is blocked while `isE2eeHandshaking` is true; a "Initiating secure connection…" banner is shown. Messages cannot be sent without an active session (`isE2eeActive`)
+- Key events: `SendTextMessage`, `SendPhotoMessage`, `BleMessageReceived`, `PhotoPreviewReceived`, `RequestFullPhoto`, `PhotoRequestReceived`, `CancelPhotoTransfer`, `WifiTransferReadyReceived`, `NearbyPayloadCompleted`, `RegisterPendingOutgoingPhoto`, `SendReaction`, `ReactionReceived`, `MarkMessagesRead`, `ReadReceiptReceived`, `E2eeSessionEstablished`, `E2eePeerKeyArrived`
 
 **`BleStatusBloc`** (`lib/services/ble/ble_status_bloc.dart`)
 - Tracks Bluetooth adapter state (enabled / disabled / unavailable)
@@ -385,8 +394,9 @@ NsfwDetectionService.classify(thumbnailBytes)
 | `blocked_users` | Locally blocked peer IDs |
 | `anchor_drops` | History of sent/received anchor drop signals |
 | `message_reactions` | Emoji reactions on messages (sender, emoji, timestamp) |
+| `peer_public_keys` | Cached X25519 public keys for peers (used for E2EE Noise_XK handshake) |
 
-**Schema version**: 8
+**Schema version**: 9
 
 | Migration | Change |
 |---|---|
@@ -397,6 +407,7 @@ NsfwDetectionService.classify(thumbnailBytes)
 | v5 → v6 | Add `message_reactions` table |
 | v6 → v7 | Add `retry_count` and `last_attempt_at` to `messages` (store-and-forward) |
 | v7 → v8 | Add `reply_to_message_id` to `messages` (reply-to) |
+| v8 → v9 | Add `peer_public_keys` table (E2EE key storage) |
 
 All writes go through repositories; Blocs never access the database directly.
 
@@ -522,10 +533,7 @@ Primary thumbnails are capped at 30 KB and compressed by `ImageService` before b
 
 ### Message Security
 
-| Status | Detail |
-|---|---|
-| v1 (current) | BLE GATT messages are **not encrypted**; anyone with Anchor in range could theoretically intercept |
-| v2 (planned) | End-to-end encryption using public key pairs generated at first launch; keys exchanged during BLE discovery |
+All chat messages are **end-to-end encrypted** using the Noise_XK protocol. See the [End-to-End Encryption](#end-to-end-encryption) section for full details.
 
 ### User Controls
 
@@ -639,11 +647,117 @@ void setupDependencies(BleConfig config) {
 
 ---
 
+## End-to-End Encryption
+
+### Protocol
+
+Anchor uses **Noise_XK** — a 3-message handshake that gives mutual authentication (receiver's static key is known ahead of time from BLE/LAN profile exchange) plus forward secrecy via ephemeral X25519 key pairs.
+
+```
+Initiator (I)                   Responder (R)
+     |                                  |
+     |-- msg1: e, es ------------------>|   (I's ephemeral key + encrypt with R's static key)
+     |<-- msg2: e, ee, se --------------|   (R's ephemeral key + two shared secrets)
+     |-- msg3: s, se ------------------>|   (I's static key, authenticated)
+     |                                  |
+     |  Both derive identical session keys (send_k, recv_k)
+     |  All subsequent messages use XChaCha20-Poly1305
+```
+
+- **Session keys**: ephemeral, in-memory only — forward secrecy per BLE/LAN connection
+- **Nonces**: 24-byte random (XChaCha20 keyspace: collision probability negligible)
+- **AEAD**: Poly1305 authenticates every message; tampered packets are silently dropped
+
+### Key Files
+
+| File | Purpose |
+|---|---|
+| `lib/services/encryption/encryption_service.dart` | Key gen/storage, session management, handshake lifecycle |
+| `lib/services/encryption/noise_handshake.dart` | Pure Noise_XK state machine (`NoiseHandshakeProcessor`) |
+| `lib/services/encryption/encryption_models.dart` | `NoiseSession`, `EncryptedPayload`, `HandshakeResult`, `HandshakeMessageOut` |
+| `lib/services/transport/transport_manager.dart` | Routes inbound and outbound handshake messages across BLE and LAN transports |
+
+### Key Exchange
+
+**BLE**: The device's X25519 public key is serialized as `pk` in the `fff1` GATT characteristic (JSON field alongside `userId`, `name`, etc.). It is read during every GATT profile read and passed through `DiscoveredPeer.publicKeyHex`.
+
+**LAN**: The public key is included as `pk` in the `anchor_hello` UDP beacon. `TransportManager.broadcastProfile()` injects the key from `EncryptionService` into `BroadcastPayload` before forwarding to LAN and Wi-Fi Aware transports.
+
+**Storage**: `TransportManager` calls `encryptionService.storePeerPublicKey(canonicalId, pk)` whenever a peer's key arrives (from either transport). Keys are persisted in the `peer_public_keys` DB table (schema v9).
+
+### Canonical Peer IDs
+
+E2EE sessions are keyed by **canonical peer ID** — the conversation's `peerId` field:
+- LAN-primary peers: their LAN UUID (from UDP beacon)
+- BLE-only peers: their BLE device ID
+
+`TransportManager` maintains `_peerIdAlias[bleId] = lanId` and `_bleIdForCanonical[lanId] = bleId` maps so handshake messages can be translated and routed to the correct transport regardless of which ID the peer was discovered under.
+
+### Handshake Routing (TransportManager)
+
+`TransportManager._subscribeToHandshakeRouting()` wires up the full handshake pipeline:
+
+```
+BLE noiseHandshakeStream  ──┐
+                             ├──► _processIncomingHandshake()
+LAN noiseHandshakeStream  ──┘       │
+                                    ▼
+                        encryptionService.processHandshakeMessage(canonicalId, step, payload)
+                                    │
+                             (on step 3 complete)
+                                    ▼
+                        E2eeSessionEstablished event → ChatBloc
+
+outboundHandshakeStream  ──────► _routeOutboundHandshake()
+                                    │
+                         ┌──────────┴──────────┐
+                     LAN transport?         BLE transport?
+                         │                       │
+              lanService.sendHandshakeMessage  bleService.sendHandshakeMessage(bleId)
+```
+
+### Wire Formats
+
+**Handshake message** (BLE fff3 / LAN TCP frame):
+```json
+{"type": "noise_hs", "step": 1, "payload": "<base64>", "sender_id": "..."}
+```
+
+**Encrypted chat message** (v=1 signals ciphertext):
+```json
+{"type": "message", "sender_id": "...", "message_type": 0, "message_id": "...",
+ "timestamp": "...", "v": 1, "n": "<24-byte nonce base64>", "c": "<ciphertext+tag base64>"}
+```
+Inner plaintext (encrypted, JSON):
+```json
+{"content": "hello", "reply_to_id": null}
+```
+
+Messages without `v` or with `v=0` are treated as plaintext (backward compatibility).
+
+### UI Indicators
+
+- Chat header: green "🔒 End-to-end encrypted" when `ChatState.isE2eeActive`
+- Chat header: spinner + "Securing…" while `ChatState.isE2eeHandshaking` (input disabled)
+- Message bubble: green 🔒 icon when `ReceivedMessage.isEncrypted = true`
+- Users **cannot send messages** before a session is established (enforced in ChatBloc)
+
+### Security Properties
+
+| Property | Detail |
+|---|---|
+| Private key storage | `flutter_secure_storage` (iOS Keychain / Android Keystore); never in DB or logs |
+| Session key storage | In-memory only; cleared on `dispose()` |
+| Forward secrecy | Ephemeral DH per session; session compromise doesn't reveal past messages |
+| Authentication | Poly1305 AEAD tag on every message; tampered messages dropped silently |
+| Nonce | 24-byte random (XChaCha20); collision probability negligible |
+
+---
+
 ## Future Enhancements (Planned)
 
 | Feature | Notes |
 |---|---|
-| End-to-end encryption | RSA key pair per device; keys exchanged during BLE discovery |
 | Group chat | Broadcast messages to multiple peers; group formation via QR/event code |
 | Voice messages | Record, compress, chunk, transfer over BLE or Wi-Fi Direct |
 | Photo albums | Multiple photos per message; gallery view |

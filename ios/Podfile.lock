@@ -20,6 +20,8 @@ PODS:
   - flutter_nearby_connections_plus (0.0.1):
     - Flutter
     - SwiftyJSON (~> 4.0)
+  - flutter_secure_storage (6.0.0):
+    - Flutter
   - image_compression_flutter (1.0.0):
     - Flutter
   - image_picker_ios (0.0.1):
@@ -113,6 +115,7 @@ DEPENDENCIES:
   - flutter_local_notifications (from `.symlinks/plugins/flutter_local_notifications/ios`)
   - flutter_native_splash (from `.symlinks/plugins/flutter_native_splash/ios`)
   - flutter_nearby_connections_plus (from `.symlinks/plugins/flutter_nearby_connections_plus/ios`)
+  - flutter_secure_storage (from `.symlinks/plugins/flutter_secure_storage/ios`)
   - image_compression_flutter (from `.symlinks/plugins/image_compression_flutter/ios`)
   - image_picker_ios (from `.symlinks/plugins/image_picker_ios/ios`)
   - path_provider_foundation (from `.symlinks/plugins/path_provider_foundation/darwin`)
@@ -150,6 +153,8 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/flutter_native_splash/ios"
   flutter_nearby_connections_plus:
     :path: ".symlinks/plugins/flutter_nearby_connections_plus/ios"
+  flutter_secure_storage:
+    :path: ".symlinks/plugins/flutter_secure_storage/ios"
   image_compression_flutter:
     :path: ".symlinks/plugins/image_compression_flutter/ios"
   image_picker_ios:
@@ -176,6 +181,7 @@ SPEC CHECKSUMS:
   flutter_local_notifications: a5a732f069baa862e728d839dd2ebb904737effb
   flutter_native_splash: c32d145d68aeda5502d5f543ee38c192065986cf
   flutter_nearby_connections_plus: a040585e4557e3d4857a92afe4e7736a767e9892
+  flutter_secure_storage: 1ed9476fba7e7a782b22888f956cce43e2c62f13
   image_compression_flutter: d5024f18de4d279a6accdf7543d4874ac0927239
   image_picker_ios: 7fe1ff8e34c1790d6fff70a32484959f563a928a
   libwebp: 02b23773aedb6ff1fd38cec7a77b81414c6842a8

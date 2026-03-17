@@ -48,6 +48,14 @@ dependencies:
   wifi_aware_p2p:
     path: /Users/nblaurenciana/Documents/GitHub/wifi_aware_p2p
 
+  # End-to-End Encryption
+  # cryptography: X25519 DH, ChaCha20-Poly1305 AEAD, HMAC-SHA256, HKDF
+  # Used to implement Noise_XK handshake + XChaCha20-Poly1305 session encryption.
+  cryptography: ^2.7.0
+  # flutter_secure_storage: stores long-term X25519 private key in platform keychain
+  # (Android Keystore / iOS Secure Enclave-backed Keychain).
+  flutter_secure_storage: ^9.2.2
+
   # Audio
   audioplayers: ^6.1.0
 

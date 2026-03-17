@@ -428,6 +428,8 @@ class GattServer {
         'photo_count': _ownFullPhotoSizes.length,
         'full_photo_sizes': _ownFullPhotoSizes,
       },
+      // E2EE: include our X25519 public key so the peer can initiate Noise_XK.
+      if (payload.publicKeyHex != null) 'pk': payload.publicKeyHex,
     };
     return Uint8List.fromList(utf8.encode(jsonEncode(json)));
   }

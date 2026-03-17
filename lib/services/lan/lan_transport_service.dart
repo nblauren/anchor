@@ -122,6 +122,15 @@ abstract class LanTransportService {
   /// Stream of received emoji reactions.
   Stream<ble.ReactionReceived> get reactionReceivedStream;
 
+  // ==================== Noise_XK Handshake ====================
+
+  /// Send an outbound Noise_XK handshake step to a LAN peer.
+  Future<bool> sendHandshakeMessage(String peerId, int step, Uint8List payload);
+
+  /// Stream of incoming Noise_XK handshake frames received via LAN TCP.
+  /// TransportManager subscribes to this and routes to EncryptionService.
+  Stream<ble.NoiseHandshakeReceived> get noiseHandshakeStream;
+
   // ==================== Utilities ====================
 
   /// Whether a peer is currently reachable (i.e. has been seen recently).

@@ -33,6 +33,8 @@ class MockLanTransportService implements LanTransportService {
       StreamController<ble.AnchorDropReceived>.broadcast();
   final _reactionReceivedController =
       StreamController<ble.ReactionReceived>.broadcast();
+  final _noiseHandshakeController =
+      StreamController<ble.NoiseHandshakeReceived>.broadcast();
   final _availabilityController = StreamController<bool>.broadcast();
 
   @override
@@ -61,6 +63,7 @@ class MockLanTransportService implements LanTransportService {
     await _photoRequestReceivedController.close();
     await _anchorDropReceivedController.close();
     await _reactionReceivedController.close();
+    await _noiseHandshakeController.close();
     await _availabilityController.close();
     _initialized = false;
   }
@@ -151,6 +154,15 @@ class MockLanTransportService implements LanTransportService {
   @override
   Stream<ble.ReactionReceived> get reactionReceivedStream =>
       _reactionReceivedController.stream;
+
+  @override
+  Future<bool> sendHandshakeMessage(
+          String peerId, int step, Uint8List payload) async =>
+      false;
+
+  @override
+  Stream<ble.NoiseHandshakeReceived> get noiseHandshakeStream =>
+      _noiseHandshakeController.stream;
 
   @override
   bool isPeerReachable(String peerId) => false;

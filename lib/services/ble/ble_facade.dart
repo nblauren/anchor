@@ -8,6 +8,7 @@ import 'package:bluetooth_low_energy/bluetooth_low_energy.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/utils/logger.dart';
+import '../encryption/encryption.dart';
 import 'ble_config.dart';
 import 'ble_models.dart';
 import 'ble_service_interface.dart';
@@ -39,9 +40,18 @@ import 'transfer/photo_transfer_handler.dart';
 class BleFacade implements BleServiceInterface {
   BleFacade({
     required this.config,
+    this.encryptionService,
   });
 
   final BleConfig config;
+
+  /// Optional E2EE service.  When provided, messages are encrypted with
+  /// Noise_XK / XChaCha20-Poly1305.  When null, encryption is skipped
+  /// (backward-compatible plaintext mode).
+  final EncryptionService? encryptionService;
+
+  final _noiseHandshakeController =
+      StreamController<NoiseHandshakeReceived>.broadcast();
 
   // Managers
   late final CentralManager _central;
@@ -117,7 +127,6 @@ class BleFacade implements BleServiceInterface {
   // All GATT writes go through _writeQueue with priority levels.
   // GATT server state, cached data, and advertising are now managed by GattServer.
 
-
   // ==================== Lifecycle ====================
 
   @override
@@ -184,6 +193,7 @@ class BleFacade implements BleServiceInterface {
         connectionManager: _connectionManager,
         writeQueue: _writeQueue,
         config: config,
+        encryptionService: encryptionService,
       );
       _photoTransfer.getOwnUserId = () => _gattServer.ownUserId;
       _photoTransfer.onProgress = _photoProgressController.add;
@@ -270,6 +280,7 @@ class BleFacade implements BleServiceInterface {
     await _connectionManager.dispose();
     await _gattServer.dispose();
 
+    await _noiseHandshakeController.close();
     await _centralStateSubscription?.cancel();
     await _charNotifiedSubscription?.cancel();
 
@@ -333,8 +344,7 @@ class BleFacade implements BleServiceInterface {
 
       // Binary thumbnail chunk (preview consent flow): first byte is 0x03
       if (data[0] == 0x03) {
-        _photoTransfer.handleBinaryThumbnailChunk(
-            data, centralUuid.toString());
+        _photoTransfer.handleBinaryThumbnailChunk(data, centralUuid.toString());
         return;
       }
 
@@ -368,6 +378,8 @@ class BleFacade implements BleServiceInterface {
         _meshRelay.handlePeerAnnounce(json, fromPeerId);
       } else if (type == 'neighbor_list') {
         _meshRelay.handleNeighborList(json);
+      } else if (type == 'noise_hs') {
+        _handleNoiseHandshake(json, fromPeerId);
       } else if (type == 'drop_anchor') {
         _handleDropAnchor(fromPeerId);
       } else if (type == 'reaction') {
@@ -429,13 +441,64 @@ class BleFacade implements BleServiceInterface {
         destinationId == ownUserId;
 
     if (isForUs) {
+      // E2EE decryption: if v == 1, decrypt ciphertext using the active session.
+      // v == 0 (or absent) = plaintext / old client — deliver as-is.
+      final enc = encryptionService;
+      final encPayload = enc?.parseEncryptedFields(json);
+
+      String content;
+      String? replyToId = json['reply_to_id'] as String?;
+
+      if (encPayload != null && enc != null) {
+        // Decrypt the inner envelope asynchronously, then emit.
+        enc.decrypt(fromPeerId, encPayload).then((plaintextBytes) {
+          if (plaintextBytes == null) {
+            // Decryption failed — drop the message (auth error / no session).
+            Logger.warning(
+              'E2EE decrypt failed for message from ${fromPeerId.substring(0, min(8, fromPeerId.length))} — dropped',
+              'E2EE',
+            );
+            return;
+          }
+          try {
+            final inner =
+                jsonDecode(utf8.decode(plaintextBytes)) as Map<String, dynamic>;
+            final decryptedContent = inner['content'] as String? ?? '';
+            final decryptedReplyTo = inner['reply_to_id'] as String?;
+            final messageType =
+                MessageType.values[json['message_type'] as int? ?? 0];
+            final message = ReceivedMessage(
+              fromPeerId: fromPeerId,
+              messageId: messageId,
+              type: messageType,
+              content: decryptedContent,
+              timestamp: DateTime.now(),
+              replyToId: decryptedReplyTo,
+              isEncrypted: true,
+            );
+            _messageReceivedController.add(message);
+            Logger.info(
+              'BleService: Decrypted message from '
+                  '${fromPeerId.substring(0, min(8, fromPeerId.length))} 🔒',
+              'E2EE',
+            );
+          } catch (e) {
+            Logger.error('E2EE inner envelope parse failed', e, null, 'E2EE');
+          }
+        });
+        return; // Async path — return early; emission happens in the callback above.
+      }
+
+      // Plaintext path (no encryption or old client)
+      content = json['content'] as String? ?? '';
       final message = ReceivedMessage(
         fromPeerId: fromPeerId,
         messageId: messageId,
         type: MessageType.values[json['message_type'] as int? ?? 0],
-        content: json['content'] as String? ?? '',
+        content: content,
         timestamp: DateTime.now(),
-        replyToId: json['reply_to_id'] as String?,
+        replyToId: replyToId,
+        isEncrypted: false,
       );
       _messageReceivedController.add(message);
       Logger.info(
@@ -447,6 +510,71 @@ class BleFacade implements BleServiceInterface {
       // Not for us — attempt to relay toward the destination
       _meshRelay.maybeRelayMessage(json, fromPeerId);
     }
+  }
+
+  // ── Noise_XK handshake dispatch ───────────────────────────────────────────
+
+  /// Route incoming Noise_XK handshake messages to [EncryptionService].
+  ///
+  /// Wire JSON:
+  ///   { "type": "noise_hs", "step": 1|2|3, "payload": "<base64>", "sender_id": "..." }
+  void _handleNoiseHandshake(Map<String, dynamic> json, String fromPeerId) {
+    final step = json['step'] as int?;
+    final payloadB64 = json['payload'] as String?;
+    if (step == null || payloadB64 == null) {
+      Logger.warning('Malformed noise_hs message from $fromPeerId', 'E2EE');
+      return;
+    }
+    _noiseHandshakeController.add(NoiseHandshakeReceived(
+      fromPeerId: fromPeerId,
+      step: step,
+      payload: Uint8List.fromList(base64.decode(payloadB64)),
+    ));
+  }
+
+  @override
+  Stream<NoiseHandshakeReceived> get noiseHandshakeStream =>
+      _noiseHandshakeController.stream;
+
+  /// Send an outbound Noise handshake message to a peer via BLE fff3.
+  ///
+  /// Called by TransportManager to send an outbound Noise_XK handshake step
+  /// to a BLE peer. [peerId] must be the BLE peripheral UUID.
+  @override
+  Future<void> sendHandshakeMessage(
+      String peerId, int step, Uint8List payload) async {
+    var conn = _connectionManager.getConnection(peerId);
+    if (conn == null || !conn.canSendMessages) {
+      final peripheral = _connectionManager.getPeripheral(peerId);
+      if (peripheral != null) {
+        conn = await _connectionManager.connect(peerId, peripheral);
+      }
+    }
+    if (conn == null || !conn.canSendMessages) {
+      Logger.warning(
+          'Cannot send handshake step $step — peer $peerId not connected',
+          'E2EE');
+      return;
+    }
+    final json = <String, dynamic>{
+      'type': 'noise_hs',
+      'step': step,
+      'payload': base64.encode(payload),
+      'sender_id': _gattServer.ownUserId,
+    };
+    final data = Uint8List.fromList(utf8.encode(jsonEncode(json)));
+    await _writeQueue
+        .enqueue(
+      peerId: peerId,
+      peripheral: conn.peripheral,
+      characteristic: conn.messagingChar!,
+      data: data,
+      priority: WritePriority.userMessage,
+    )
+        .catchError((Object e) {
+      Logger.error('Handshake write failed for $peerId', e, null, 'E2EE');
+      return false;
+    });
   }
 
   /// Returns the app userId for a given BLE peripheral UUID, or null if
@@ -491,7 +619,6 @@ class BleFacade implements BleServiceInterface {
 
     _peerDiscoveredController.add(peer);
   }
-
 
   // ==================== Status ====================
 
@@ -573,7 +700,32 @@ class BleFacade implements BleServiceInterface {
   @override
   Future<void> broadcastProfile(BroadcastPayload payload) async {
     _ensureInitialized();
-    await _gattServer.broadcastProfile(payload);
+    // Embed our X25519 public key in the profile so peers can store it
+    // for Noise_XK handshake initiation when they open a chat with us.
+    final myPublicKeyHex = encryptionService?.localPublicKeyHex;
+    if (myPublicKeyHex == null) {
+      Logger.warning(
+          'broadcastProfile: E2EE public key not ready — profile will NOT include pk',
+          'E2EE');
+    } else {
+      Logger.debug(
+          'broadcastProfile: embedding pk ${myPublicKeyHex.substring(0, 8)}…',
+          'E2EE');
+    }
+    final payloadWithKey = myPublicKeyHex != null
+        ? BroadcastPayload(
+            userId: payload.userId,
+            name: payload.name,
+            age: payload.age,
+            bio: payload.bio,
+            position: payload.position,
+            interests: payload.interests,
+            thumbnailBytes: payload.thumbnailBytes,
+            thumbnailsList: payload.thumbnailsList,
+            publicKeyHex: myPublicKeyHex,
+          )
+        : payload;
+    await _gattServer.broadcastProfile(payloadWithKey);
   }
 
   @override
@@ -627,8 +779,8 @@ class BleFacade implements BleServiceInterface {
   // ==================== Scanner/ProfileReader Callbacks ====================
 
   /// Called by BleScanner when a peer is discovered via advertisement.
-  void _onScannerPeerDiscovered(String peerId, String name, int? age, int rssi,
-      Peripheral peripheral) {
+  void _onScannerPeerDiscovered(
+      String peerId, String name, int? age, int rssi, Peripheral peripheral) {
     // Preserve age, bio and thumbnail already fetched via GATT in a prior scan
     // cycle. Advertisement packets can be truncated (31-byte limit).
     final existing = _visiblePeers[peerId];
@@ -652,6 +804,10 @@ class BleFacade implements BleServiceInterface {
       thumbnailBytes: existing?.thumbnailBytes,
       rssi: rssi,
       timestamp: DateTime.now(),
+      // Preserve the E2EE public key fetched during the previous profile read.
+      // Without this, every scan cycle would overwrite _visiblePeers with a
+      // peer that has publicKeyHex = null, breaking key storage in TransportManager.
+      publicKeyHex: existing?.publicKeyHex,
     );
     _emitPeer(peer);
   }
@@ -665,7 +821,7 @@ class BleFacade implements BleServiceInterface {
   }
 
   /// Called by ProfileReader when a profile is read from a peer.
-  void _onProfileReadResult(ProfileReadResult result) {
+  Future<void> _onProfileReadResult(ProfileReadResult result) async {
     final peerId = result.peerId;
     final json = result.profileJson;
     final existingPeer = _visiblePeers[peerId];
@@ -674,6 +830,11 @@ class BleFacade implements BleServiceInterface {
     _refreshPeerTimeout(peerId);
 
     final userId = json['userId'] as String?;
+
+    // Extract E2EE public key now; store it AFTER _emitPeer so that
+    // TransportManager._migrateIfNeeded (triggered by _emitPeer) sets
+    // _bleIdForCanonical before peerKeyStoredStream fires.
+    final peerPublicKeyHex = json['pk'] as String?;
 
     // Record userId → BLE peerId mapping so incoming messages (which carry
     // the sender's app userId) can be routed to the correct peer.
@@ -733,14 +894,6 @@ class BleFacade implements BleServiceInterface {
         newInterests == existingPeer.interests &&
         newPhotoCount == existingPeer.fullPhotoCount;
 
-    if (unchanged) {
-      Logger.debug(
-        'BleService: Profile unchanged for "${existingPeer.name}", skipping emit',
-        'BLE',
-      );
-      return;
-    }
-
     final updatedPeer = DiscoveredPeer(
       peerId: peerId,
       name: newName,
@@ -755,11 +908,23 @@ class BleFacade implements BleServiceInterface {
       isRelayed: existingPeer.isRelayed,
       hopCount: existingPeer.hopCount,
       fullPhotoCount: newPhotoCount,
+      // Include E2EE public key so TransportManager stores it under the
+      // canonical peer ID (after _migrateIfNeeded resolves BLE UUID → LAN UUID).
+      publicKeyHex: peerPublicKeyHex?.length == 64 ? peerPublicKeyHex : null,
     );
 
     _emitPeer(updatedPeer);
+
+    // Store the peer's E2EE public key directly — the DiscoveredPeer relay
+    // path (peer.publicKeyHex → TransportManager) can be null if the key is
+    // absent from the profile, but we always have the raw JSON here.
+    if (peerPublicKeyHex != null && peerPublicKeyHex.length == 64) {
+      encryptionService?.storePeerPublicKey(peerId, peerPublicKeyHex);
+    }
+
     Logger.info(
-      'BleService: Updated profile for "${updatedPeer.name}"',
+      'BleService: Updated profile for "${updatedPeer.name}"'
+      '${peerPublicKeyHex != null ? " (pk=${peerPublicKeyHex.substring(0, 8)}…)" : ""}',
       'BLE',
     );
   }
@@ -946,7 +1111,8 @@ class BleFacade implements BleServiceInterface {
         // Direct connection unavailable — try mesh relay as fallback.
         // The peer may be reachable through an intermediate node (e.g.
         // A→B→C when C moved out of A's direct range).
-        if (_meshRelay.enabled && _connectionManager.activeConnectionCount > 0) {
+        if (_meshRelay.enabled &&
+            _connectionManager.activeConnectionCount > 0) {
           final data = _serializeMessagePayload(
             payload,
             destinationUserId: destinationUserId,
@@ -970,8 +1136,9 @@ class BleFacade implements BleServiceInterface {
         return false;
       }
 
-      final data = _serializeMessagePayload(
+      final data = await _serializeMessagePayloadEncrypted(
         payload,
+        peerId: peerId,
         destinationUserId: destinationUserId,
       );
       final success = await _writeQueue.enqueue(
@@ -1039,7 +1206,8 @@ class BleFacade implements BleServiceInterface {
 
       if (conn == null || !conn.canSendMessages) {
         // Direct connection unavailable — try mesh relay
-        if (_meshRelay.enabled && _connectionManager.activeConnectionCount > 0) {
+        if (_meshRelay.enabled &&
+            _connectionManager.activeConnectionCount > 0) {
           final relayed = _meshRelay.originateMessage(
             data,
             destinationUserId ?? '',
@@ -1192,6 +1360,16 @@ class BleFacade implements BleServiceInterface {
     );
   }
 
+  /// Serialize a [MessagePayload] to bytes for writing to fff3.
+  ///
+  /// When an E2EE session exists for [peerId] (and [encryptionService] is
+  /// injected), the message content is encrypted with XChaCha20-Poly1305.
+  /// The outer JSON carries `v:1, n:<nonce>, c:<ciphertext>` and the
+  /// plaintext `content` field is OMITTED.
+  ///
+  /// Old clients (no E2EE) omit `v` and carry plaintext `content` as before.
+  /// Synchronous serialization (used for mesh relay path — no E2EE for relayed
+  /// messages since we don't know the final hop's session state).
   Uint8List _serializeMessagePayload(MessagePayload payload,
       {String? destinationUserId}) {
     final ownUserId = _gattServer.ownUserId;
@@ -1213,6 +1391,57 @@ class BleFacade implements BleServiceInterface {
       json['relay_path'] = <String>[ownUserId];
     }
     return Uint8List.fromList(utf8.encode(jsonEncode(json)));
+  }
+
+  /// Async serialization with optional E2EE encryption.
+  ///
+  /// When [EncryptionService] has an active session for [peerId], the message
+  /// content is encrypted with XChaCha20-Poly1305 before serialisation.
+  /// Outer JSON: `{ ..., "v":1, "n":"<nonce>", "c":"<ciphertext>" }`.
+  /// Plaintext `content` is OMITTED from the outer JSON when encrypted.
+  ///
+  /// Fallback: if encryption fails or no session exists, sends unencrypted
+  /// with `"v":0` (or omits `v`) so old clients still understand the message.
+  Future<Uint8List> _serializeMessagePayloadEncrypted(
+    MessagePayload payload, {
+    required String peerId,
+    String? destinationUserId,
+  }) async {
+    final ownUserId = _gattServer.ownUserId;
+    final enc = encryptionService;
+
+    // Attempt to encrypt if we have an active E2EE session
+    if (enc != null && enc.hasSession(peerId)) {
+      // Build the inner plaintext envelope (the part we want to keep secret)
+      final innerMap = <String, dynamic>{
+        'content': payload.content,
+        if (payload.replyToId != null) 'reply_to_id': payload.replyToId,
+      };
+      final innerBytes = Uint8List.fromList(utf8.encode(jsonEncode(innerMap)));
+
+      final encrypted = await enc.encrypt(peerId, innerBytes);
+      if (encrypted != null) {
+        final json = <String, dynamic>{
+          'type': 'message',
+          'sender_id': ownUserId,
+          'message_type': payload.type.index,
+          'message_id': payload.messageId,
+          'timestamp': DateTime.now().toIso8601String(),
+          ...enc.encryptedFields(encrypted), // adds v, n, c
+        };
+        if (_meshRelay.enabled) {
+          json['origin_id'] = ownUserId;
+          json['destination_id'] = destinationUserId ?? '';
+          json['ttl'] = config.meshTtl;
+          json['relay_path'] = <String>[ownUserId];
+        }
+        return Uint8List.fromList(utf8.encode(jsonEncode(json)));
+      }
+    }
+
+    // No session or encryption failed — fall back to plaintext
+    return _serializeMessagePayload(payload,
+        destinationUserId: destinationUserId);
   }
 
   // ==================== Photo Transfer (delegated to PhotoTransferHandler) ====================
@@ -1302,7 +1531,6 @@ class BleFacade implements BleServiceInterface {
   Future<void> setBatterySaverMode(bool enabled) async {
     _scanner.setBatterySaverMode(enabled);
     Logger.info(
-        'BleService: Battery saver ${enabled ? 'enabled' : 'disabled'}',
-        'BLE');
+        'BleService: Battery saver ${enabled ? 'enabled' : 'disabled'}', 'BLE');
   }
 }
