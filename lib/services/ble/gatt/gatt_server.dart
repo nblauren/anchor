@@ -57,6 +57,16 @@ class GattServer {
   bool _isBroadcasting = false;
   Timer? _peripheralRetryTimer;
 
+  /// Monotonically increasing profile version. Incremented each time
+  /// [broadcastProfile] is called with a changed payload. Advertised in the
+  /// BLE local name so scanners can skip GATT reads for unchanged profiles.
+  int _profileVersion = 0;
+
+  /// Snapshot of the last payload identity used to detect real changes.
+  /// We compare the fields that are included in the GATT profile (fff1) and
+  /// thumbnail size — if they haven't changed, the version stays the same.
+  String? _lastPayloadFingerprint;
+
   // Cached data for GATT server read requests
   Uint8List _profileData = Uint8List(0);
   Uint8List _thumbnailData = Uint8List(0);
@@ -84,6 +94,7 @@ class GattServer {
   bool get peripheralPoweredOn => _peripheralPoweredOn;
   BroadcastPayload? get pendingPayload => _pendingPayload;
   String get ownUserId => _pendingPayload?.userId ?? '';
+  int get profileVersion => _profileVersion;
 
   /// Start listening to peripheral state changes.
   void startListening() {
@@ -241,6 +252,21 @@ class GattServer {
       return;
     }
     _pendingPayload = payload;
+
+    // Increment profile version only when the payload actually changes.
+    final thumbLen = payload.thumbnailBytes?.length ?? 0;
+    final fingerprint =
+        '${payload.userId}|${payload.name}|${payload.age}|${payload.bio}'
+        '|${payload.position}|${payload.interests}|$thumbLen'
+        '|${payload.publicKeyHex}';
+    if (fingerprint != _lastPayloadFingerprint) {
+      _profileVersion++;
+      _lastPayloadFingerprint = fingerprint;
+      Logger.info(
+        'GattServer: Profile version bumped to $_profileVersion',
+        'BLE',
+      );
+    }
 
     // fff2 — PRIMARY thumbnail only (small, fast, sent to every connecting peer).
     _thumbnailData = payload.thumbnailBytes ?? Uint8List(0);
@@ -423,12 +449,16 @@ class GattServer {
     }
   }
 
-  /// Encode local name: "A:<name>:<age>"
+  /// Encode local name: "A:<name>:<age>:<profileVersion>"
+  ///
+  /// The version suffix lets scanners skip GATT profile reads for peers whose
+  /// profile hasn't changed since the last read. Kept short (1-3 digits) to
+  /// stay within the BLE advertisement size budget.
   String _encodeLocalName(BroadcastPayload payload) {
     final name =
         payload.name.length > 8 ? payload.name.substring(0, 8) : payload.name;
     final age = payload.age ?? 0;
-    return 'A:$name:$age';
+    return 'A:$name:$age:$_profileVersion';
   }
 
   /// Encode profile metadata as compact JSON for the profile characteristic.
@@ -455,6 +485,8 @@ class GattServer {
       },
       // E2EE: include our X25519 public key so the peer can initiate Noise_XK.
       if (payload.publicKeyHex != null) 'pk': payload.publicKeyHex,
+      // Profile version for change detection — scanners skip re-reads when unchanged.
+      'pv': _profileVersion,
     };
     return Uint8List.fromList(utf8.encode(jsonEncode(json)));
   }

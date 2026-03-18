@@ -219,8 +219,6 @@ class MeshRelayService {
     _lastAnnouncedAt[peer.peerId] = now;
 
     final ownUserId = getOwnUserId?.call() ?? '';
-    final thumbnailB64 =
-        peer.thumbnailBytes != null ? base64Encode(peer.thumbnailBytes!) : null;
 
     final msgId = const Uuid().v4();
     final json = <String, dynamic>{
@@ -231,7 +229,9 @@ class MeshRelayService {
       'name': peer.name,
       if (peer.age != null) 'age': peer.age,
       if (peer.bio != null) 'bio': peer.bio,
-      if (thumbnailB64 != null) 'thumbnail_b64': thumbnailB64,
+      // Thumbnail omitted — base64 thumbnail easily exceeds the 512-byte BLE
+      // attribute value limit, causing Android IllegalArgumentException.
+      // Peers fetch thumbnails via GATT profile read instead.
       'ttl': _config.meshTtl - 1,
       'relay_path': <String>[ownUserId],
     };

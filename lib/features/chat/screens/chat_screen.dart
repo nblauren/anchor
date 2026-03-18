@@ -7,13 +7,15 @@ import 'package:image_picker/image_picker.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/transport_badge.dart';
 import '../../../data/local_database/database.dart';
-import '../../discovery/bloc/discovery_bloc.dart';
-import '../../discovery/bloc/discovery_event.dart';
+import '../../discovery/bloc/anchor_drop_bloc.dart';
 import '../../transport/bloc/transport_bloc.dart';
 import '../../transport/bloc/transport_state.dart';
 import '../bloc/chat_bloc.dart';
+import '../bloc/chat_e2ee_bloc.dart';
 import '../bloc/chat_event.dart';
 import '../bloc/chat_state.dart';
+import '../bloc/photo_transfer_bloc.dart';
+import '../bloc/reaction_bloc.dart';
 import '../widgets/message_bubble_widget.dart';
 
 const _kReactionEmojis = ['❤️', '👍', '😂', '😮', '😢', '🔥'];
@@ -51,6 +53,8 @@ class _ChatScreenState extends State<ChatScreen> {
   final _focusNode = FocusNode();
   final _imagePicker = ImagePicker();
   late final ChatBloc _chatBloc;
+  late final ChatE2eeBloc _e2eeBloc;
+  late final ReactionBloc _reactionBloc;
   bool _anchorDropped = false;
   final _messageKeys = <String, GlobalKey>{};
 
@@ -58,22 +62,27 @@ class _ChatScreenState extends State<ChatScreen> {
   void initState() {
     super.initState();
     _chatBloc = context.read<ChatBloc>();
+    _e2eeBloc = context.read<ChatE2eeBloc>();
+    _reactionBloc = context.read<ReactionBloc>();
     // Open conversation for this peer (marks messages as read automatically)
     _chatBloc.add(OpenConversation(
       peerId: widget.peerId,
       peerName: widget.peerName,
     ));
 
+    // Initiate E2EE handshake via dedicated bloc
+    context.read<ChatE2eeBloc>().add(InitiateE2eeHandshake(widget.peerId));
+
     // Reflect any anchor already dropped on this peer from the discovery screen.
     try {
       final dropped = context
-          .read<DiscoveryBloc>()
+          .read<AnchorDropBloc>()
           .state
           .droppedAnchorPeerIds
           .contains(widget.peerId);
       if (dropped) _anchorDropped = true;
     } catch (_) {
-      // DiscoveryBloc may not be in the tree from all entry points.
+      // AnchorDropBloc may not be in the tree from all entry points.
     }
 
     _scrollController.addListener(() {
@@ -90,6 +99,8 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void dispose() {
     _chatBloc.add(const CloseConversation());
+    _e2eeBloc.add(const ResetE2ee());
+    _reactionBloc.add(const ClearReactions());
     _messageController.dispose();
     _scrollController.dispose();
     _focusNode.dispose();
@@ -127,8 +138,8 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _dropAnchor() {
     try {
-      context.read<DiscoveryBloc>().add(
-            DropAnchorOnPeer(peerId: widget.peerId, peerName: widget.peerName),
+      context.read<AnchorDropBloc>().add(
+            DropAnchor(peerId: widget.peerId, peerName: widget.peerName),
           );
     } catch (_) {
       // DiscoveryBloc may not be in the widget tree from all entry points
@@ -284,7 +295,7 @@ class _ChatScreenState extends State<ChatScreen> {
   ) {
     final ownUserId = context.read<ChatBloc>().ownUserId;
     final currentReactions =
-        context.read<ChatBloc>().state.reactions[message.id] ?? [];
+        context.read<ReactionBloc>().state.reactions[message.id] ?? [];
 
     showModalBottomSheet<void>(
       context: context,
@@ -319,13 +330,13 @@ class _ChatScreenState extends State<ChatScreen> {
                       onTap: () {
                         Navigator.pop(ctx);
                         if (alreadyReacted) {
-                          context.read<ChatBloc>().add(RemoveReaction(
+                          context.read<ReactionBloc>().add(RemoveReaction(
                                 messageId: message.id,
                                 peerId: peerId,
                                 emoji: emoji,
                               ));
                         } else {
-                          context.read<ChatBloc>().add(SendReaction(
+                          context.read<ReactionBloc>().add(SendReaction(
                                 messageId: message.id,
                                 peerId: peerId,
                                 emoji: emoji,
@@ -372,7 +383,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _requestFullPhoto(String messageId, String photoId, String peerId) {
-    context.read<ChatBloc>().add(RequestFullPhoto(
+    context.read<PhotoTransferBloc>().add(RequestFullPhoto(
           messageId: messageId,
           photoId: photoId,
           peerId: peerId,
@@ -393,10 +404,41 @@ class _ChatScreenState extends State<ChatScreen> {
           );
           context.read<ChatBloc>().add(const ClearChatError());
         }
+        // Load reactions when conversation opens
+        if (state.currentConversation != null &&
+            state.status == ChatStatus.loaded) {
+          final reactionBloc = context.read<ReactionBloc>();
+          reactionBloc.activePeerName = state.currentConversation!.peerName;
+          reactionBloc.activeMessages = state.messages;
+          reactionBloc.add(LoadReactions(state.currentConversation!.id));
+        }
+        // Keep activeMessages in sync
+        if (state.currentConversation != null) {
+          context.read<ReactionBloc>().activeMessages = state.messages;
+        }
       },
       builder: (context, state) {
+        return BlocBuilder<ChatE2eeBloc, ChatE2eeState>(
+          builder: (context, e2eeState) {
+            return _buildChatBody(context, state, e2eeState);
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildChatBody(
+    BuildContext context,
+    ChatState state,
+    ChatE2eeState e2eeState,
+  ) {
         final conversation = state.currentConversation;
         final ownUserId = context.read<ChatBloc>().ownUserId;
+        final reactionState = context.watch<ReactionBloc>().state;
+        final transferState = context.watch<PhotoTransferBloc>().state;
+        // Bridge E2EE state from dedicated bloc
+        final isE2eeActive = e2eeState.isActive;
+        final isE2eeHandshaking = e2eeState.isHandshaking;
 
         return Scaffold(
           appBar: AppBar(
@@ -434,7 +476,7 @@ class _ChatScreenState extends State<ChatScreen> {
                               ),
                             ],
                           )
-                        else if (state.isE2eeActive)
+                        else if (isE2eeActive)
                           // E2EE lock indicator + transport badge — visible when
                           // Noise_XK session is established.
                           GestureDetector(
@@ -475,7 +517,7 @@ class _ChatScreenState extends State<ChatScreen> {
                               },
                             ),
                           )
-                        else if (state.isE2eeHandshaking)
+                        else if (isE2eeHandshaking)
                           const Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
@@ -616,7 +658,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                   onRetry: () => _retryMessage(message.id),
                                   isRelayedPeer: widget.isRelayedPeer,
                                   transferInfo:
-                                      state.getTransferProgress(message.id),
+                                      transferState.getTransferProgress(message.id),
                                   onRequestFullPhoto: isSentByMe
                                       ? null
                                       : (photoId) => _requestFullPhoto(
@@ -625,26 +667,26 @@ class _ChatScreenState extends State<ChatScreen> {
                                             state.currentConversation!.peerId,
                                           ),
                                   onCancelTransfer:
-                                      state.getTransferProgress(message.id) !=
+                                      transferState.getTransferProgress(message.id) !=
                                               null
-                                          ? () => context.read<ChatBloc>().add(
+                                          ? () => context.read<PhotoTransferBloc>().add(
                                                 CancelPhotoTransfer(message.id),
                                               )
                                           : null,
-                                  reactions: state.reactions[message.id] ?? [],
+                                  reactions: reactionState.reactions[message.id] ?? [],
                                   onReact: state.isBlocked
                                       ? null
                                       : (emoji) {
                                           final peerId = state
                                               .currentConversation!.peerId;
                                           final ownReacted =
-                                              (state.reactions[message.id] ??
+                                              (reactionState.reactions[message.id] ??
                                                       [])
                                                   .any((r) =>
                                                       r.senderId == ownUserId &&
                                                       r.emoji == emoji);
                                           if (ownReacted) {
-                                            context.read<ChatBloc>().add(
+                                            context.read<ReactionBloc>().add(
                                                   RemoveReaction(
                                                     messageId: message.id,
                                                     peerId: peerId,
@@ -652,7 +694,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                                   ),
                                                 );
                                           } else {
-                                            context.read<ChatBloc>().add(
+                                            context.read<ReactionBloc>().add(
                                                   SendReaction(
                                                     messageId: message.id,
                                                     peerId: peerId,
@@ -686,15 +728,13 @@ class _ChatScreenState extends State<ChatScreen> {
               // Message input — only shown once E2EE session is established.
               if (state.isBlocked)
                 _buildBlockedBanner()
-              else if (!state.isE2eeActive)
-                _buildSecureConnectionBanner(state.isE2eeHandshaking)
+              else if (!isE2eeActive)
+                _buildSecureConnectionBanner(isE2eeHandshaking)
               else
                 _buildMessageInput(state),
             ],
           ),
         );
-      },
-    );
   }
 
   Widget _buildAvatar(String name, Uint8List? thumbnail) {

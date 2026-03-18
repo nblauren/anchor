@@ -341,10 +341,22 @@ class TransportManager {
 
   Future<void> start() async {
     if (_lanSubscribed) {
-      await _lanService.start();
+      try {
+        await _lanService.start();
+      } catch (e) {
+        Logger.warning('TransportManager: LAN start failed: $e', 'Transport');
+      }
     }
     if (_wifiAwareSubscribed) {
-      await _wifiAwareService.start();
+      // Fire-and-forget: don't block BLE advertising if Wi-Fi Aware hangs.
+      // Wi-Fi Aware startSession() can block indefinitely on some Android
+      // devices, which would prevent broadcastProfile() from ever being called.
+      unawaited(_wifiAwareService.start().catchError((e) {
+        Logger.warning(
+          'TransportManager: Wi-Fi Aware start failed: $e',
+          'Transport',
+        );
+      }));
     }
     // BLE start is handled by BleConnectionBloc — don't double-start here.
   }
@@ -353,6 +365,29 @@ class TransportManager {
     await _lanService.stop();
     await _wifiAwareService.stop();
     await _bleService.stop();
+
+    // Clear in-memory ID maps so stale BLE UUIDs from the previous session
+    // don't cause messages to route to the wrong peer after restart.
+    // iOS may assign different Central/Peripheral UUIDs across sessions.
+    _peerIdAlias.clear();
+    _bleIdForCanonical.clear();
+    _userIdToCurrentPeerId.clear();
+    _peerTransports.clear();
+    _peerBestTransport.clear();
+  }
+
+  /// Clear stale ID alias maps without stopping transports.
+  ///
+  /// Called when the BLE adapter restarts (e.g. Bluetooth toggled off/on)
+  /// so that stale Central/Peripheral UUID mappings from the previous
+  /// session don't cause messages to route to the wrong peer.
+  void clearIdMaps() {
+    _peerIdAlias.clear();
+    _bleIdForCanonical.clear();
+    _userIdToCurrentPeerId.clear();
+    _peerTransports.clear();
+    _peerBestTransport.clear();
+    Logger.info('TransportManager: cleared all ID maps', 'Transport');
   }
 
   Future<void> dispose() async {
@@ -1283,8 +1318,9 @@ class TransportManager {
   void _processIncomingHandshake(ble.NoiseHandshakeReceived msg) {
     final enc = _encryptionService;
     if (enc == null) return;
+    final rawId = msg.fromPeerId;
     // Translate BLE UUID → canonical (LAN UUID for dual-transport peers).
-    var canonicalId = _peerIdAlias[msg.fromPeerId] ?? msg.fromPeerId;
+    var canonicalId = _peerIdAlias[rawId] ?? rawId;
     // If the peerId is a BLE Central UUID (not found in _peerTransports), try
     // to resolve it to a known Peripheral UUID via BleService's userId mapping.
     // This is critical for cross-platform (Android → iOS) where the Central
@@ -1301,6 +1337,41 @@ class TransportManager {
         canonicalId = finalCanonical;
       }
     }
+
+    // For steps 2 and 3, verify the resolved ID matches a pending handshake.
+    // If not, the peerId may have been migrated (Central→Peripheral or
+    // transport upgrade) — try the raw BLE ID and common aliases as fallback.
+    if (msg.step >= 2 && !enc.hasPendingHandshake(canonicalId)) {
+      // Try the raw BLE ID directly
+      if (enc.hasPendingHandshake(rawId)) {
+        Logger.info(
+          'TransportManager: handshake step ${msg.step} — canonical '
+          '$canonicalId has no pending, falling back to raw $rawId',
+          'Transport',
+        );
+        canonicalId = rawId;
+      } else {
+        // Try reverse: maybe the pending handshake is under the BLE ID that
+        // maps to this canonical via _bleIdForCanonical
+        final bleId = _bleIdForCanonical[canonicalId];
+        if (bleId != null && enc.hasPendingHandshake(bleId)) {
+          Logger.info(
+            'TransportManager: handshake step ${msg.step} — falling back to '
+            'bleId $bleId for canonical $canonicalId',
+            'Transport',
+          );
+          canonicalId = bleId;
+        }
+      }
+    }
+
+    Logger.debug(
+      'TransportManager: processing handshake step ${msg.step} from '
+      'raw=$rawId, canonical=$canonicalId, '
+      'hasPending=${enc.hasPendingHandshake(canonicalId)}',
+      'Transport',
+    );
+
     enc.processHandshakeMessage(canonicalId, msg.step, msg.payload).then(
       (result) {
         if (result.sessionEstablished) {

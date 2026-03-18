@@ -62,6 +62,13 @@ class BleScanner {
   /// Per-peer last-emit time — for dedup window.
   final Map<String, DateTime> _lastEmit = {};
 
+  // ==================== Profile Version Tracking ====================
+
+  /// Per-peer last-known profile version from the advertisement local name.
+  /// When a scan result carries the same version as the last successful
+  /// profile read, the GATT profile read is skipped entirely.
+  final Map<String, int> _peerProfileVersions = {};
+
   // ==================== Service UUID ====================
 
   static final _serviceUuid =
@@ -151,16 +158,25 @@ class BleScanner {
     _recalculateTiming(visiblePeerCount: visiblePeerCount);
   }
 
+  /// Record the profile version from a successful GATT profile read.
+  /// Future scan cycles will skip the profile read if the advertised
+  /// version matches.
+  void recordProfileVersion(String peerId, int version) {
+    _peerProfileVersions[peerId] = version;
+  }
+
   /// Clear scan dedup state for a peer (e.g. when peer is lost).
   void clearPeer(String peerId) {
     _lastEmit.remove(peerId);
     _lastRssi.remove(peerId);
+    _peerProfileVersions.remove(peerId);
   }
 
   /// Clear all state. Called on BLE service stop.
   void clear() {
     _lastEmit.clear();
     _lastRssi.clear();
+    _peerProfileVersions.clear();
     _lastImmediateScanAt = null;
   }
 
@@ -178,7 +194,12 @@ class BleScanner {
     try {
       Logger.info('BleScanner: Scan cycle starting...', 'BLE');
 
-      await _central.startDiscovery(serviceUUIDs: [_serviceUuid]);
+      // Scan without a service UUID filter so we also discover Android
+      // devices whose 128-bit UUID may be dropped or moved to the scan
+      // response by the Android BLE stack (31-byte advertising limit).
+      // Our _onDeviceDiscovered callback filters by service UUID *or*
+      // "A:" local-name prefix, so non-Anchor devices are discarded cheaply.
+      await _central.startDiscovery();
 
       // Stop after scan duration and schedule next cycle
       _scanRestartTimer?.cancel();
@@ -239,6 +260,7 @@ class BleScanner {
 
     final name = decoded?.name ?? 'Anchor User';
     final age = decoded?.age;
+    final profileVersion = decoded?.profileVersion;
 
     // Register the peripheral for later on-demand connection
     _connectionManager.registerPeripheral(deviceId, peripheral);
@@ -246,20 +268,31 @@ class BleScanner {
     // Notify the BLE service about the discovery
     onPeerDiscovered?.call(deviceId, name, age, rssi, peripheral);
 
+    // Skip GATT profile read if the advertised profile version matches
+    // the version from the last successful read. This avoids a GATT
+    // connection + fff1 read (~200-400B) every scan cycle for unchanged peers.
+    if (profileVersion != null &&
+        _peerProfileVersions[deviceId] == profileVersion) {
+      return;
+    }
+
     // Request profile read in the background
     onPeerNeedsProfile?.call(deviceId, peripheral);
   }
 
-  /// Decode local name "A:<name>:<age>"
-  ({String name, int? age})? _decodeLocalName(String advName) {
+  /// Decode local name "A:<name>:<age>[:<profileVersion>]"
+  ({String name, int? age, int? profileVersion})? _decodeLocalName(
+      String advName) {
     if (!advName.startsWith('A:')) return null;
     final parts = advName.split(':');
     if (parts.length < 2) return null;
     final name = parts[1];
     final age = parts.length >= 3 ? int.tryParse(parts[2]) : null;
+    final profileVersion = parts.length >= 4 ? int.tryParse(parts[3]) : null;
     return (
       name: name.isEmpty ? 'Anchor User' : name,
       age: (age == null || age == 0) ? null : age,
+      profileVersion: profileVersion,
     );
   }
 

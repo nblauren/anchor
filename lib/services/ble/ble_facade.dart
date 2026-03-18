@@ -410,17 +410,49 @@ class BleFacade implements BleServiceInterface {
   /// emit [PeerIdChanged] and migrate the conversation.
   String _resolveSenderPeerId(Map<String, dynamic> json, UUID centralUuid) {
     final senderId = json['sender_id'] as String?;
+    final centralId = centralUuid.toString();
     if (senderId != null &&
         senderId.isNotEmpty &&
         _userIdToPeerId.containsKey(senderId)) {
-      return _userIdToPeerId[senderId]!;
+      final resolved = _userIdToPeerId[senderId]!;
+      if (resolved != centralId) {
+        Logger.debug(
+          'Resolved sender $senderId: central ${centralId.substring(0, min(8, centralId.length))} '
+          '→ peripheral ${resolved.substring(0, min(8, resolved.length))}',
+          'BLE',
+        );
+      }
+      return resolved;
+    }
+
+    // Fallback: _userIdToPeerId may not be populated yet (profile not read),
+    // but we may have a visible peer whose userId matches. Check _visiblePeers
+    // to avoid creating "Unknown" conversations under Central UUIDs.
+    if (senderId != null && senderId.isNotEmpty) {
+      for (final entry in _visiblePeers.entries) {
+        if (entry.value.userId == senderId) {
+          // Found the peer — populate _userIdToPeerId for future lookups
+          _userIdToPeerId[senderId] = entry.key;
+          Logger.info(
+            'Resolved sender $senderId via visiblePeers: '
+            'central ${centralId.substring(0, min(8, centralId.length))} '
+            '→ ${entry.key.substring(0, min(8, entry.key.length))}',
+            'BLE',
+          );
+          return entry.key;
+        }
+      }
     }
 
     // We don't know this userId → peripheral mapping yet.  Record the
-    // central UUID → userId so _updatePeerFromProfile can migrate later.
-    final centralId = centralUuid.toString();
+    // central UUID → userId so _onProfileReadResult can migrate later.
     if (senderId != null && senderId.isNotEmpty) {
       _centralUuidToUserId[centralId] = senderId;
+      Logger.debug(
+        'Unresolved sender $senderId — using central UUID '
+        '${centralId.substring(0, min(8, centralId.length))}',
+        'BLE',
+      );
     }
     return centralId;
   }
@@ -684,7 +716,13 @@ class BleFacade implements BleServiceInterface {
       'sender_id': _gattServer.ownUserId,
     };
     final data = Uint8List.fromList(utf8.encode(jsonEncode(json)));
-    await _writeQueue
+    Logger.info(
+      'sendHandshakeMessage step $step: writing ${data.length}B via fff3 to '
+      '${resolvedId.substring(0, min(8, resolvedId.length))} '
+      '(original=$peerId)',
+      'E2EE',
+    );
+    final sent = await _writeQueue
         .enqueue(
       peerId: resolvedId,
       peripheral: conn.peripheral,
@@ -696,6 +734,11 @@ class BleFacade implements BleServiceInterface {
       Logger.error('Handshake write failed for $resolvedId', e, null, 'E2EE');
       return false;
     });
+    Logger.info(
+      'sendHandshakeMessage step $step: write result=$sent for '
+      '${resolvedId.substring(0, min(8, resolvedId.length))}',
+      'E2EE',
+    );
   }
 
   @override
@@ -1097,9 +1140,17 @@ class BleFacade implements BleServiceInterface {
       encryptionService?.storePeerPublicKey(peerId, peerPublicKeyHex);
     }
 
+    // Record the profile version from the GATT read so the scanner can
+    // skip future reads when the advertised version hasn't changed.
+    final profileVersion = json['pv'] as int?;
+    if (profileVersion != null) {
+      _scanner.recordProfileVersion(peerId, profileVersion);
+    }
+
     Logger.info(
       'BleService: Updated profile for "${updatedPeer.name}"'
-      '${peerPublicKeyHex != null ? " (pk=${peerPublicKeyHex.substring(0, 8)}…)" : ""}',
+      '${peerPublicKeyHex != null ? " (pk=${peerPublicKeyHex.substring(0, 8)}…)" : ""}'
+      '${profileVersion != null ? " (pv=$profileVersion)" : ""}',
       'BLE',
     );
   }

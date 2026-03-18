@@ -3,8 +3,13 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../injection.dart';
 import '../../chat/bloc/chat_bloc.dart';
-import '../../chat/bloc/chat_state.dart';
+import '../../chat/bloc/chat_e2ee_bloc.dart';
+import '../../chat/bloc/conversation_list_bloc.dart';
+import '../../chat/bloc/photo_transfer_bloc.dart';
+import '../../chat/bloc/reaction_bloc.dart';
 import '../../chat/screens/chat_list_screen.dart';
+import '../../discovery/bloc/anchor_drop_bloc.dart';
+import '../../discovery/bloc/discovery_filter_cubit.dart';
 import '../../discovery/screens/discovery_screen.dart';
 import '../../profile/bloc/profile_bloc.dart';
 import '../../profile/bloc/profile_state.dart';
@@ -36,9 +41,32 @@ class _HomeScreenState extends State<HomeScreen> {
           );
         }
 
-        return BlocProvider<ChatBloc>(
+        return MultiBlocProvider(
           key: ValueKey(ownUserId),
-          create: (context) => getIt<ChatBloc>(param1: ownUserId),
+          providers: [
+            BlocProvider<ChatBloc>(
+              create: (context) => getIt<ChatBloc>(param1: ownUserId),
+            ),
+            BlocProvider<ConversationListBloc>(
+              create: (context) => getIt<ConversationListBloc>(param1: ownUserId),
+            ),
+            BlocProvider<ChatE2eeBloc>(
+              create: (context) => getIt<ChatE2eeBloc>(),
+            ),
+            BlocProvider<ReactionBloc>(
+              create: (context) => getIt<ReactionBloc>(param1: ownUserId),
+            ),
+            BlocProvider<PhotoTransferBloc>(
+              create: (context) => getIt<PhotoTransferBloc>(param1: ownUserId),
+            ),
+            BlocProvider<AnchorDropBloc>(
+              create: (context) => getIt<AnchorDropBloc>()
+                ..add(const LoadAnchorDropHistory()),
+            ),
+            BlocProvider<DiscoveryFilterCubit>(
+              create: (context) => DiscoveryFilterCubit(),
+            ),
+          ],
           child: Scaffold(
             body: IndexedStack(
               index: _currentIndex,
@@ -48,9 +76,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 ProfileViewScreen(),
               ],
             ),
-            bottomNavigationBar: BlocBuilder<ChatBloc, ChatState>(
-              builder: (context, chatState) {
-                final unreadCount = chatState.totalUnreadCount;
+            bottomNavigationBar: BlocBuilder<ConversationListBloc, ConversationListState>(
+              builder: (context, convListState) {
+                final unreadCount = convListState.totalUnreadCount;
                 return BottomNavigationBar(
                   currentIndex: _currentIndex,
                   onTap: _onTabTapped,

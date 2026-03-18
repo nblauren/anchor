@@ -143,48 +143,6 @@ class FetchPeerFullPhotos extends DiscoveryEvent {
   List<Object?> get props => [peerId];
 }
 
-/// User tapped the ⚓ button to drop anchor on a peer
-class DropAnchorOnPeer extends DiscoveryEvent {
-  const DropAnchorOnPeer({required this.peerId, required this.peerName});
-  final String peerId;
-  final String peerName;
-
-  @override
-  List<Object?> get props => [peerId, peerName];
-}
-
-/// A peer dropped anchor on us (received via BLE)
-class AnchorDropSignalReceived extends DiscoveryEvent {
-  const AnchorDropSignalReceived({required this.fromPeerId});
-  final String fromPeerId;
-
-  @override
-  List<Object?> get props => [fromPeerId];
-}
-
-/// Toggle a position ID in the local-only multi-select position filter.
-class TogglePositionFilter extends DiscoveryEvent {
-  const TogglePositionFilter(this.positionId);
-  final int positionId;
-
-  @override
-  List<Object?> get props => [positionId];
-}
-
-/// Toggle an interest ID in the local-only multi-select interest filter.
-class ToggleInterestFilter extends DiscoveryEvent {
-  const ToggleInterestFilter(this.interestId);
-  final int interestId;
-
-  @override
-  List<Object?> get props => [interestId];
-}
-
-/// Clear all active discovery filters.
-class ClearFilters extends DiscoveryEvent {
-  const ClearFilters();
-}
-
 /// A peer's BLE peripheral UUID changed due to MAC rotation.
 /// Triggers DB migration (conversations, blocks, drops) and removes the stale
 /// peer from the in-memory discovery list.

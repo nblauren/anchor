@@ -7,10 +7,14 @@ import '../../../core/theme/app_theme.dart';
 import '../../../injection.dart';
 import '../../../services/database_service.dart';
 import '../../chat/bloc/chat_bloc.dart';
-import '../../chat/bloc/chat_event.dart';
-import '../../chat/bloc/chat_state.dart';
+import '../../chat/bloc/chat_e2ee_bloc.dart';
+import '../../chat/bloc/conversation_list_bloc.dart';
+import '../../chat/bloc/photo_transfer_bloc.dart';
+import '../../chat/bloc/reaction_bloc.dart';
+import '../bloc/anchor_drop_bloc.dart';
 import '../bloc/discovery_bloc.dart';
 import '../bloc/discovery_event.dart';
+import '../bloc/discovery_filter_cubit.dart';
 import '../bloc/discovery_state.dart';
 import '../widgets/peer_grid_tile.dart';
 import '../widgets/radar_view.dart';
@@ -78,9 +82,9 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
     context.read<DiscoveryBloc>().add(const LoadMockPeers());
   }
 
-  String _peerCountLabel(DiscoveryState state) {
-    final direct = state.visiblePeers.where((p) => !p.isRelayed).length;
-    final relayed = state.visiblePeers.where((p) => p.isRelayed).length;
+  String _peerCountLabel(List<DiscoveredPeer> peers) {
+    final direct = peers.where((p) => !p.isRelayed).length;
+    final relayed = peers.where((p) => p.isRelayed).length;
     if (relayed == 0) {
       return '$direct nearby';
     }
@@ -90,6 +94,9 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
   Future<void> _openPeerDetail(DiscoveredPeer peer) async {
     final discoveryBloc = context.read<DiscoveryBloc>();
     final chatBloc = context.read<ChatBloc>();
+    final photoTransferBloc = context.read<PhotoTransferBloc>();
+    final anchorDropBloc = context.read<AnchorDropBloc>();
+    final convListBloc = context.read<ConversationListBloc>();
 
     await Navigator.of(context).push(
       MaterialPageRoute(
@@ -97,6 +104,11 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
           providers: [
             BlocProvider.value(value: discoveryBloc),
             BlocProvider.value(value: chatBloc),
+            BlocProvider.value(value: photoTransferBloc),
+            BlocProvider.value(value: context.read<ChatE2eeBloc>()),
+            BlocProvider.value(value: context.read<ReactionBloc>()),
+            BlocProvider.value(value: anchorDropBloc),
+            BlocProvider.value(value: convListBloc),
           ],
           child: PeerDetailScreen(peer: peer),
         ),
@@ -105,7 +117,7 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
 
     // Reload conversations when returning so unread badges reflect any chat opened
     if (mounted) {
-      context.read<ChatBloc>().add(const LoadConversations());
+      context.read<ConversationListBloc>().add(const LoadConversations());
     }
   }
 
@@ -118,7 +130,7 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (_) => BlocProvider.value(
-        value: context.read<DiscoveryBloc>(),
+        value: context.read<DiscoveryFilterCubit>(),
         child: const _FilterSheet(),
       ),
     );
@@ -126,110 +138,122 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return BlocConsumer<DiscoveryBloc, DiscoveryState>(
-      listenWhen: (prev, curr) =>
-          curr.errorMessage != null ||
-          (curr.incomingAnchorDropName != null &&
-              curr.incomingAnchorDropName != prev.incomingAnchorDropName),
-      listener: (context, state) {
-        if (state.incomingAnchorDropName != null) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                '${state.incomingAnchorDropName} dropped anchor on you!',
-              ),
-              duration: const Duration(seconds: 3),
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-        }
-        if (state.errorMessage != null) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(state.errorMessage!)),
-          );
-          context.read<DiscoveryBloc>().add(const ClearDiscoveryError());
-        }
-      },
-      builder: (context, state) {
-        return Scaffold(
-          appBar: AppBar(
-            centerTitle: false,
-            title: const Text('Discover'),
-            actions: [
-              // Anchor drops page
-              IconButton(
-                key: const Key('discovery_anchor_drops_btn'),
-                icon: const Icon(Icons.anchor_rounded),
-                tooltip: 'Anchor Drops',
-                onPressed: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => MultiBlocProvider(
-                        providers: [
-                          BlocProvider.value(
-                              value: context.read<DiscoveryBloc>()),
-                          BlocProvider.value(value: context.read<ChatBloc>()),
-                        ],
-                        child: AnchorDropsScreen(
-                          anchorDropRepository:
-                              getIt<DatabaseService>().anchorDropRepository,
-                        ),
-                      ),
-                    ),
-                  );
-                },
-              ),
-              // View mode toggle: Grid / Radar
-              IconButton(
-                key: const Key('discovery_view_toggle_btn'),
-                icon: Icon(
-                  _viewMode == _ViewMode.grid
-                      ? Icons.radar
-                      : Icons.grid_view_rounded,
+    return MultiBlocListener(
+      listeners: [
+        // Discovery error listener
+        BlocListener<DiscoveryBloc, DiscoveryState>(
+          listenWhen: (prev, curr) => curr.errorMessage != null,
+          listener: (context, state) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(state.errorMessage!)),
+            );
+            context.read<DiscoveryBloc>().add(const ClearDiscoveryError());
+          },
+        ),
+        // Anchor drop incoming notification listener
+        BlocListener<AnchorDropBloc, AnchorDropState>(
+          listenWhen: (prev, curr) =>
+              curr.incomingAnchorDropName != null &&
+              curr.incomingAnchorDropName != prev.incomingAnchorDropName,
+          listener: (context, state) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  '${state.incomingAnchorDropName} dropped anchor on you!',
                 ),
-                tooltip: _viewMode == _ViewMode.grid
-                    ? 'Switch to Radar'
-                    : 'Switch to Grid',
-                onPressed: () => _setViewMode(
-                  _viewMode == _ViewMode.grid
-                      ? _ViewMode.radar
-                      : _ViewMode.grid,
-                ),
+                duration: const Duration(seconds: 3),
+                behavior: SnackBarBehavior.floating,
               ),
-              // Filter button (grid mode only)
-              if (_viewMode == _ViewMode.grid)
-                Stack(
-                  children: [
-                    IconButton(
-                      key: const Key('discovery_filter_btn'),
-                      icon: const Icon(Icons.tune_rounded),
-                      tooltip: 'Filter',
-                      onPressed: () => _showFilterSheet(context, state),
-                    ),
-                    if (state.hasActiveFilters)
-                      Positioned(
-                        right: 8,
-                        top: 8,
-                        child: Container(
-                          width: 8,
-                          height: 8,
-                          decoration: const BoxDecoration(
-                            color: AppTheme.primaryLight,
-                            shape: BoxShape.circle,
+            );
+          },
+        ),
+      ],
+      child: BlocBuilder<DiscoveryBloc, DiscoveryState>(
+        builder: (context, state) {
+          final filterState = context.watch<DiscoveryFilterCubit>().state;
+          return Scaffold(
+            appBar: AppBar(
+              centerTitle: false,
+              title: const Text('Discover'),
+              actions: [
+                // Anchor drops page
+                IconButton(
+                  key: const Key('discovery_anchor_drops_btn'),
+                  icon: const Icon(Icons.anchor_rounded),
+                  tooltip: 'Anchor Drops',
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => MultiBlocProvider(
+                          providers: [
+                            BlocProvider.value(
+                                value: context.read<DiscoveryBloc>()),
+                            BlocProvider.value(value: context.read<ChatBloc>()),
+                            BlocProvider.value(value: context.read<PhotoTransferBloc>()),
+                            BlocProvider.value(value: context.read<ChatE2eeBloc>()),
+                            BlocProvider.value(value: context.read<ReactionBloc>()),
+                          ],
+                          child: AnchorDropsScreen(
+                            anchorDropRepository:
+                                getIt<DatabaseService>().anchorDropRepository,
                           ),
                         ),
                       ),
-                  ],
+                    );
+                  },
                 ),
-            ],
-          ),
-          body: _buildBody(state),
-        );
-      },
+                // View mode toggle: Grid / Radar
+                IconButton(
+                  key: const Key('discovery_view_toggle_btn'),
+                  icon: Icon(
+                    _viewMode == _ViewMode.grid
+                        ? Icons.radar
+                        : Icons.grid_view_rounded,
+                  ),
+                  tooltip: _viewMode == _ViewMode.grid
+                      ? 'Switch to Radar'
+                      : 'Switch to Grid',
+                  onPressed: () => _setViewMode(
+                    _viewMode == _ViewMode.grid
+                        ? _ViewMode.radar
+                        : _ViewMode.grid,
+                  ),
+                ),
+                // Filter button (grid mode only)
+                if (_viewMode == _ViewMode.grid)
+                  Stack(
+                    children: [
+                      IconButton(
+                        key: const Key('discovery_filter_btn'),
+                        icon: const Icon(Icons.tune_rounded),
+                        tooltip: 'Filter',
+                        onPressed: () => _showFilterSheet(context, state),
+                      ),
+                      if (filterState.hasActiveFilters)
+                        Positioned(
+                          right: 8,
+                          top: 8,
+                          child: Container(
+                            width: 8,
+                            height: 8,
+                            decoration: const BoxDecoration(
+                              color: AppTheme.primaryLight,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+              ],
+            ),
+            body: _buildBody(state, filterState),
+          );
+        },
+      ),
     );
   }
 
-  Widget _buildBody(DiscoveryState state) {
+  Widget _buildBody(DiscoveryState state, DiscoveryFilterState filterState) {
     if (state.status == DiscoveryStatus.loading) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -246,6 +270,8 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
       return _buildEmptyState();
     }
 
+    final filteredPeers = filterState.applyTo(state.visiblePeers);
+
     return RefreshIndicator(
       onRefresh: _onRefresh,
       child: LayoutBuilder(
@@ -253,24 +279,27 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
           // Responsive column count: 2 for phones, 3 for tablets
           final crossAxisCount = constraints.maxWidth > 600 ? 5 : 3;
 
-          return BlocBuilder<ChatBloc, ChatState>(
-            builder: (context, chatState) {
+          return BlocBuilder<ConversationListBloc, ConversationListState>(
+            builder: (context, convListState) {
               // Build a map of peerId → unreadCount from chat conversations
               final unreadByPeer = <String, int>{
-                for (final conv in chatState.conversations)
+                for (final conv in convListState.conversations)
                   if (conv.unreadCount > 0)
                     conv.conversation.peerId: conv.unreadCount,
               };
 
+              final anchorDropState =
+                  context.watch<AnchorDropBloc>().state;
+
               final hasRelayedPeers =
-                  state.visiblePeers.any((p) => p.isRelayed);
+                  filteredPeers.any((p) => p.isRelayed);
 
               return CustomScrollView(
                 slivers: [
                   // Active filter strip
-                  if (state.hasActiveFilters)
+                  if (filterState.hasActiveFilters)
                     SliverToBoxAdapter(
-                      child: _buildActiveFilterStrip(context, state),
+                      child: _buildActiveFilterStrip(context, filterState),
                     ),
                   // Tip card: shown once when relayed peers appear
                   if (hasRelayedPeers && !_meshTipDismissed)
@@ -282,17 +311,18 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                     sliver: SliverGrid(
                       delegate: SliverChildBuilderDelegate(
                         (context, index) {
-                          final peer = state.visiblePeers[index];
+                          final peer = filteredPeers[index];
                           return PeerGridTile(
                             key: ValueKey(peer.peerId),
                             peer: peer,
                             unreadCount: unreadByPeer[peer.peerId] ?? 0,
                             onTap: () => _openPeerDetail(peer),
-                            anchorDropped: state.droppedAnchorPeerIds
+                            anchorDropped: anchorDropState
+                                .droppedAnchorPeerIds
                                 .contains(peer.peerId),
                           );
                         },
-                        childCount: state.visiblePeers.length,
+                        childCount: filteredPeers.length,
                       ),
                       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: crossAxisCount,
@@ -331,8 +361,9 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
     );
   }
 
-  Widget _buildActiveFilterStrip(BuildContext context, DiscoveryState state) {
-    final bloc = context.read<DiscoveryBloc>();
+  Widget _buildActiveFilterStrip(
+      BuildContext context, DiscoveryFilterState filterState) {
+    final cubit = context.read<DiscoveryFilterCubit>();
     return Container(
       color: AppTheme.primaryLight.withAlpha(20),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -345,21 +376,21 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
             child: Wrap(
               spacing: 6,
               children: [
-                for (final id in state.filterPositionIds)
+                for (final id in filterState.filterPositionIds)
                   _FilterChip(
                     label: ProfileConstants.positionMap[id] ?? '?',
-                    onRemove: () => bloc.add(TogglePositionFilter(id)),
+                    onRemove: () => cubit.togglePosition(id),
                   ),
-                for (final id in state.filterInterestIds)
+                for (final id in filterState.filterInterestIds)
                   _FilterChip(
                     label: ProfileConstants.interestMap[id] ?? '?',
-                    onRemove: () => bloc.add(ToggleInterestFilter(id)),
+                    onRemove: () => cubit.toggleInterest(id),
                   ),
               ],
             ),
           ),
           TextButton(
-            onPressed: () => bloc.add(const ClearFilters()),
+            onPressed: () => cubit.clearAll(),
             style: TextButton.styleFrom(
               foregroundColor: AppTheme.primaryLight,
               padding: EdgeInsets.zero,
@@ -601,9 +632,9 @@ class _FilterSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return BlocBuilder<DiscoveryBloc, DiscoveryState>(
+    return BlocBuilder<DiscoveryFilterCubit, DiscoveryFilterState>(
       builder: (context, state) {
-        final bloc = context.read<DiscoveryBloc>();
+        final cubit = context.read<DiscoveryFilterCubit>();
 
         return DraggableScrollableSheet(
           expand: false,
@@ -645,7 +676,7 @@ class _FilterSheet extends StatelessWidget {
                   if (state.hasActiveFilters)
                     TextButton(
                       onPressed: () {
-                        bloc.add(const ClearFilters());
+                        cubit.clearAll();
                         Navigator.pop(context);
                       },
                       child: const Text('Clear all'),
@@ -671,7 +702,7 @@ class _FilterSheet extends StatelessWidget {
                   FilterChip(
                     label: const Text('Any'),
                     selected: state.filterPositionIds.isEmpty,
-                    onSelected: (_) => bloc.add(const ClearFilters()),
+                    onSelected: (_) => cubit.clearAll(),
                     selectedColor: AppTheme.primaryLight.withAlpha(51),
                     labelStyle: TextStyle(
                       color: state.filterPositionIds.isEmpty
@@ -695,7 +726,7 @@ class _FilterSheet extends StatelessWidget {
                     return FilterChip(
                       label: Text(e.value),
                       selected: selected,
-                      onSelected: (_) => bloc.add(TogglePositionFilter(e.key)),
+                      onSelected: (_) => cubit.togglePosition(e.key),
                       selectedColor: AppTheme.primaryLight.withAlpha(51),
                       labelStyle: TextStyle(
                         color: selected
@@ -743,7 +774,7 @@ class _FilterSheet extends StatelessWidget {
                   return FilterChip(
                     label: Text(e.value),
                     selected: selected,
-                    onSelected: (_) => bloc.add(ToggleInterestFilter(e.key)),
+                    onSelected: (_) => cubit.toggleInterest(e.key),
                     selectedColor: AppTheme.primaryLight.withAlpha(51),
                     checkmarkColor: AppTheme.primaryLight,
                     backgroundColor: AppTheme.darkCard,

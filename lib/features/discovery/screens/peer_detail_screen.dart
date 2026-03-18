@@ -5,7 +5,11 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../chat/bloc/chat_bloc.dart';
+import '../../chat/bloc/chat_e2ee_bloc.dart';
+import '../../chat/bloc/photo_transfer_bloc.dart';
+import '../../chat/bloc/reaction_bloc.dart';
 import '../../chat/screens/chat_screen.dart';
+import '../bloc/anchor_drop_bloc.dart';
 import '../bloc/discovery_bloc.dart';
 import '../bloc/discovery_event.dart';
 import '../bloc/discovery_state.dart';
@@ -39,7 +43,7 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         final dropped = context
-            .read<DiscoveryBloc>()
+            .read<AnchorDropBloc>()
             .state
             .droppedAnchorPeerIds
             .contains(_peer.peerId);
@@ -104,8 +108,8 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
   }
 
   void _dropAnchor() {
-    context.read<DiscoveryBloc>().add(
-          DropAnchorOnPeer(peerId: _peer.peerId, peerName: _peer.name),
+    context.read<AnchorDropBloc>().add(
+          DropAnchor(peerId: _peer.peerId, peerName: _peer.name),
         );
     setState(() => _anchorDropped = true);
     ScaffoldMessenger.of(context).showSnackBar(
@@ -119,11 +123,19 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
 
   Future<void> _openChat() async {
     final chatBloc = context.read<ChatBloc>();
+    final e2eeBloc = context.read<ChatE2eeBloc>();
+    final photoTransferBloc = context.read<PhotoTransferBloc>();
+    final reactionBloc = context.read<ReactionBloc>();
 
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => BlocProvider.value(
-          value: chatBloc,
+        builder: (_) => MultiBlocProvider(
+          providers: [
+            BlocProvider.value(value: chatBloc),
+            BlocProvider.value(value: e2eeBloc),
+            BlocProvider.value(value: photoTransferBloc),
+            BlocProvider.value(value: reactionBloc),
+          ],
           child: ChatScreen(
             peerId: _peer.peerId,
             peerName: _peer.name,

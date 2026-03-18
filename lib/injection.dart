@@ -2,15 +2,23 @@ import 'package:get_it/get_it.dart';
 
 import 'core/utils/logger.dart';
 import 'features/chat/bloc/chat_bloc.dart';
+import 'features/chat/bloc/chat_e2ee_bloc.dart';
+import 'features/chat/bloc/conversation_list_bloc.dart';
+import 'features/chat/bloc/photo_transfer_bloc.dart';
+import 'features/chat/bloc/reaction_bloc.dart';
+import 'features/discovery/bloc/anchor_drop_bloc.dart';
 import 'features/discovery/bloc/discovery_bloc.dart';
 import 'features/profile/bloc/profile_bloc.dart';
 import 'features/transport/bloc/transport_bloc.dart';
+import 'services/profile_broadcast_service.dart';
 import 'services/ble/ble.dart';
+import 'services/chat_event_bus.dart';
 import 'services/database_service.dart';
 import 'services/encryption/encryption.dart';
 import 'services/image_service.dart';
 import 'services/audio_service.dart';
 import 'services/lan/lan.dart';
+import 'services/message_send_service.dart';
 import 'services/nearby/nearby.dart';
 import 'services/notification_service.dart';
 import 'services/nsfw_detection_service.dart';
@@ -152,14 +160,31 @@ Future<void> initializeDependencies({
   // Initialize store-and-forward (no-op if no profile yet — safe to call early)
   await getIt<StoreAndForwardService>().initialize();
 
+  // Chat event bus (singleton — shared across chat-related blocs)
+  getIt.registerLazySingleton<ChatEventBus>(() => ChatEventBus());
+
+  // Message send service (singleton — owns the FIFO send queue)
+  getIt.registerLazySingleton<MessageSendService>(() => MessageSendService(
+    transportManager: getIt<TransportManager>(),
+    imageService: getIt<ImageService>(),
+    chatRepository: getIt<DatabaseService>().chatRepository,
+    retryQueue: getIt<TransportRetryQueue>(),
+  ));
+
+  // Profile broadcast service (extracted from ProfileBloc)
+  getIt.registerLazySingleton<ProfileBroadcastService>(
+    () => ProfileBroadcastService(
+      transportManager: getIt<TransportManager>(),
+    ),
+  );
+
   // Blocs (factories - new instance each time)
   getIt.registerFactory<ProfileBloc>(
     () => ProfileBloc(
       databaseService: getIt<DatabaseService>(),
       imageService: getIt<ImageService>(),
-      bleService: getIt<BleServiceInterface>(),
       nsfwDetectionService: getIt<NsfwDetectionService>(),
-      transportManager: getIt<TransportManager>(),
+      profileBroadcastService: getIt<ProfileBroadcastService>(),
     ),
   );
 
@@ -167,7 +192,16 @@ Future<void> initializeDependencies({
     () => DiscoveryBloc(
       peerRepository: getIt<DatabaseService>().peerRepository,
       transportManager: getIt<TransportManager>(),
+      notificationService: getIt<NotificationService>(),
+    ),
+  );
+
+  // AnchorDropBloc for ⚓ drop anchor feature
+  getIt.registerFactory<AnchorDropBloc>(
+    () => AnchorDropBloc(
       anchorDropRepository: getIt<DatabaseService>().anchorDropRepository,
+      peerRepository: getIt<DatabaseService>().peerRepository,
+      transportManager: getIt<TransportManager>(),
       notificationService: getIt<NotificationService>(),
     ),
   );
@@ -177,14 +211,61 @@ Future<void> initializeDependencies({
     (ownUserId, _) => ChatBloc(
       chatRepository: getIt<DatabaseService>().chatRepository,
       peerRepository: getIt<DatabaseService>().peerRepository,
-      imageService: getIt<ImageService>(),
       transportManager: getIt<TransportManager>(),
       notificationService: getIt<NotificationService>(),
       ownUserId: ownUserId,
-      highSpeedTransferService: getIt<HighSpeedTransferService>(),
+      messageSendService: getIt<MessageSendService>(),
+      chatEventBus: getIt<ChatEventBus>(),
       storeAndForwardService: getIt<StoreAndForwardService>(),
       encryptionService: getIt<EncryptionService>(),
       retryQueue: getIt<TransportRetryQueue>(),
+    ),
+  );
+
+  // PhotoTransferBloc for photo transfer progress and state
+  getIt.registerFactoryParam<PhotoTransferBloc, String, void>(
+    (ownUserId, _) => PhotoTransferBloc(
+      chatRepository: getIt<DatabaseService>().chatRepository,
+      peerRepository: getIt<DatabaseService>().peerRepository,
+      imageService: getIt<ImageService>(),
+      transportManager: getIt<TransportManager>(),
+      notificationService: getIt<NotificationService>(),
+      chatEventBus: getIt<ChatEventBus>(),
+      messageSendService: getIt<MessageSendService>(),
+      ownUserId: ownUserId,
+      highSpeedTransferService: getIt<HighSpeedTransferService>(),
+      encryptionService: getIt<EncryptionService>(),
+    ),
+  );
+
+  // ConversationListBloc for conversation list management
+  getIt.registerFactoryParam<ConversationListBloc, String, void>(
+    (ownUserId, _) => ConversationListBloc(
+      chatRepository: getIt<DatabaseService>().chatRepository,
+      notificationService: getIt<NotificationService>(),
+      chatEventBus: getIt<ChatEventBus>(),
+      messageSendService: getIt<MessageSendService>(),
+      ownUserId: ownUserId,
+      storeAndForwardService: getIt<StoreAndForwardService>(),
+      retryQueue: getIt<TransportRetryQueue>(),
+    ),
+  );
+
+  // ChatE2eeBloc for E2EE handshake state per conversation
+  getIt.registerFactory<ChatE2eeBloc>(
+    () => ChatE2eeBloc(
+      encryptionService: getIt<EncryptionService>(),
+    ),
+  );
+
+  // ReactionBloc for emoji reactions per conversation
+  getIt.registerFactoryParam<ReactionBloc, String, void>(
+    (ownUserId, _) => ReactionBloc(
+      chatRepository: getIt<DatabaseService>().chatRepository,
+      peerRepository: getIt<DatabaseService>().peerRepository,
+      transportManager: getIt<TransportManager>(),
+      notificationService: getIt<NotificationService>(),
+      ownUserId: ownUserId,
     ),
   );
 
@@ -214,6 +295,8 @@ Future<void> initializeDependencies({
 
 /// Dispose all dependencies
 Future<void> disposeDependencies() async {
+  getIt<MessageSendService>().dispose();
+  getIt<ChatEventBus>().dispose();
   await getIt<EncryptionService>().dispose();
   await getIt<StoreAndForwardService>().dispose();
   await getIt<TransportRetryQueue>().dispose();

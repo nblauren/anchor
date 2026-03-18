@@ -5,6 +5,9 @@ import '../../../core/theme/app_theme.dart';
 import '../../../data/local_database/database.dart';
 import '../../../data/repositories/anchor_drop_repository.dart';
 import '../../chat/bloc/chat_bloc.dart';
+import '../../chat/bloc/chat_e2ee_bloc.dart';
+import '../../chat/bloc/photo_transfer_bloc.dart';
+import '../../chat/bloc/reaction_bloc.dart';
 import '../bloc/discovery_bloc.dart';
 import '../bloc/discovery_state.dart';
 import 'peer_detail_screen.dart';
@@ -60,6 +63,9 @@ class _AnchorDropsScreenState extends State<AnchorDropsScreen> {
             providers: [
               BlocProvider.value(value: context.read<DiscoveryBloc>()),
               BlocProvider.value(value: context.read<ChatBloc>()),
+              BlocProvider.value(value: context.read<PhotoTransferBloc>()),
+              BlocProvider.value(value: context.read<ChatE2eeBloc>()),
+              BlocProvider.value(value: context.read<ReactionBloc>()),
             ],
             child: PeerDetailScreen(peer: peer),
           ),

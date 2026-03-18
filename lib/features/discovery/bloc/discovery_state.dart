@@ -184,10 +184,6 @@ class DiscoveryState extends Equatable {
     this.errorMessage,
     this.lastRefreshed,
     this.isScanning = false,
-    this.droppedAnchorPeerIds = const {},
-    this.incomingAnchorDropName,
-    this.filterPositionIds = const {},
-    this.filterInterestIds = const {},
     this.activeTransport = TransportType.ble,
   });
 
@@ -196,26 +192,11 @@ class DiscoveryState extends Equatable {
   final String? errorMessage;
   final DateTime? lastRefreshed;
   final bool isScanning;
-  /// Peer IDs we have dropped anchor on this session (for ⚓ button highlight)
-  final Set<String> droppedAnchorPeerIds;
-  /// Set briefly when a peer drops anchor on us — used to show a SnackBar
-  final String? incomingAnchorDropName;
   /// Which transport layer is currently active.
   final TransportType activeTransport;
 
-  // ── Local-only discovery filters (no BLE impact) ─────────────────────────
-
-  /// When non-empty, only show peers whose position matches one of these IDs (or no position set).
-  final Set<int> filterPositionIds;
-  /// When non-empty, only show peers that share at least one of these interest IDs.
-  final Set<int> filterInterestIds;
-
-  bool get hasActiveFilters =>
-      filterPositionIds.isNotEmpty || filterInterestIds.isNotEmpty;
-
   /// Visible peers (excluding blocked), online first then offline.
   /// Deduplicates by peerId in case a MAC rotation briefly produces two entries.
-  /// Applies local position + interest filters when set.
   /// Insertion order is preserved within each group so RSSI fluctuations
   /// do not cause tiles to shuffle. New peers are prepended by the bloc,
   /// so recently discovered peers naturally appear first.
@@ -223,25 +204,11 @@ class DiscoveryState extends Equatable {
     final seen = <String>{};
     final filtered = peers
         .where((p) => !p.isBlocked && seen.add(p.peerId))
-        .where(_passesFilters)
         .toList();
 
     final online = filtered.where((p) => p.isOnline).toList();
     final offline = filtered.where((p) => !p.isOnline).toList();
     return [...online, ...offline];
-  }
-
-  bool _passesFilters(DiscoveredPeer p) {
-    if (filterPositionIds.isNotEmpty && p.position != null &&
-        !filterPositionIds.contains(p.position)) {
-      return false;
-    }
-    if (filterInterestIds.isNotEmpty && p.interestIds.isNotEmpty) {
-      if (!p.interestIds.any((id) => filterInterestIds.contains(id))) {
-        return false;
-      }
-    }
-    return true;
   }
 
   /// Peers seen recently (within last 60 seconds)
@@ -266,10 +233,6 @@ class DiscoveryState extends Equatable {
     String? errorMessage,
     DateTime? lastRefreshed,
     bool? isScanning,
-    Set<String>? droppedAnchorPeerIds,
-    Object? incomingAnchorDropName = _sentinel,
-    Set<int>? filterPositionIds,
-    Set<int>? filterInterestIds,
     TransportType? activeTransport,
   }) {
     return DiscoveryState(
@@ -278,12 +241,6 @@ class DiscoveryState extends Equatable {
       errorMessage: errorMessage,
       lastRefreshed: lastRefreshed ?? this.lastRefreshed,
       isScanning: isScanning ?? this.isScanning,
-      droppedAnchorPeerIds: droppedAnchorPeerIds ?? this.droppedAnchorPeerIds,
-      incomingAnchorDropName: incomingAnchorDropName == _sentinel
-          ? this.incomingAnchorDropName
-          : incomingAnchorDropName as String?,
-      filterPositionIds: filterPositionIds ?? this.filterPositionIds,
-      filterInterestIds: filterInterestIds ?? this.filterInterestIds,
       activeTransport: activeTransport ?? this.activeTransport,
     );
   }
@@ -295,13 +252,6 @@ class DiscoveryState extends Equatable {
         errorMessage,
         lastRefreshed,
         isScanning,
-        droppedAnchorPeerIds,
-        incomingAnchorDropName,
-        filterPositionIds,
-        filterInterestIds,
         activeTransport,
       ];
 }
-
-/// Sentinel for distinguishing "not provided" from explicit null in copyWith
-const _sentinel = Object();

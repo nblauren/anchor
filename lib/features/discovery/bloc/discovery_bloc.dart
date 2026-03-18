@@ -6,8 +6,6 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../core/utils/logger.dart';
-import '../../../data/local_database/database.dart';
-import '../../../data/repositories/anchor_drop_repository.dart';
 import '../../../data/repositories/peer_repository.dart';
 import '../../../services/ble/ble.dart' as ble;
 import '../../../services/notification_service.dart';
@@ -24,33 +22,23 @@ class _ApplyDebouncedState extends DiscoveryEvent {
   List<Object?> get props => [newState];
 }
 
-/// Private event to clear the in-app anchor drop notification
-class _ClearAnchorDropNotification extends DiscoveryEvent {
-  @override
-  List<Object?> get props => [];
-}
-
 /// Manages the peer discovery grid.
 ///
 /// Listens to [BleServiceInterface.peerDiscoveredStream] and
 /// [BleServiceInterface.peerLostStream] to keep the grid up-to-date.
-/// All filtering (position, interests) is done locally — no network required.
 /// Peers are sorted by RSSI (closest first) and state updates are debounced
 /// to avoid excessive rebuilds in high-density environments.
 ///
 /// Also handles:
 ///   - Blocking/unblocking peers (stored in [PeerRepository])
-///   - Drop Anchor ⚓ signals (sent/received via [BleServiceInterface])
 ///   - Full profile photo fetch (on-demand via fff4 characteristic)
 class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
   DiscoveryBloc({
     required PeerRepository peerRepository,
     required TransportManager transportManager,
-    required AnchorDropRepository anchorDropRepository,
     NotificationService? notificationService,
   })  : _peerRepository = peerRepository,
         _transportManager = transportManager,
-        _anchorDropRepository = anchorDropRepository,
         _notificationService = notificationService,
         super(const DiscoveryState()) {
     on<LoadDiscoveredPeers>(_onLoadDiscoveredPeers);
@@ -65,11 +53,6 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
     on<LoadMockPeers>(_onLoadMockPeers);
     on<ClearDiscoveryError>(_onClearError);
     on<FetchPeerFullPhotos>(_onFetchPeerFullPhotos);
-    on<DropAnchorOnPeer>(_onDropAnchorOnPeer);
-    on<AnchorDropSignalReceived>(_onAnchorDropSignalReceived);
-    on<_ClearAnchorDropNotification>(
-      (event, emit) => emit(state.copyWith(incomingAnchorDropName: null)),
-    );
     on<_ApplyDebouncedState>((event, emit) {
       // Merge debounced state into current state instead of replacing wholesale.
       // This prevents stale snapshots from re-adding peers that were removed
@@ -95,16 +78,8 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
 
       emit(state.copyWith(peers: merged));
     });
-    on<TogglePositionFilter>(_onTogglePositionFilter);
-    on<ToggleInterestFilter>(_onToggleInterestFilter);
     on<PeerIdChangedEvent>(_onPeerIdChanged);
     on<PeerTransportChangedEvent>(_onPeerTransportChanged);
-    on<ClearFilters>(
-      (event, emit) => emit(state.copyWith(
-        filterPositionIds: const {},
-        filterInterestIds: const {},
-      )),
-    );
 
     // Subscribe to transport manager streams (Wi-Fi Aware or BLE)
     _peerDiscoveredSubscription = _transportManager.peerDiscoveredStream.listen(
@@ -113,10 +88,6 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
 
     _peerLostSubscription = _transportManager.peerLostStream.listen(
       (peerId) => add(PeerLost(peerId)),
-    );
-
-    _anchorDropSubscription = _transportManager.anchorDropReceivedStream.listen(
-      (drop) => add(AnchorDropSignalReceived(fromPeerId: drop.fromPeerId)),
     );
 
     _peerIdChangedSubscription =
@@ -142,13 +113,11 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
 
   final PeerRepository _peerRepository;
   final TransportManager _transportManager;
-  final AnchorDropRepository _anchorDropRepository;
   final NotificationService? _notificationService;
   Timer? _debounceTimer;
   bool _pendingUpdate = false;
   StreamSubscription<ble.DiscoveredPeer>? _peerDiscoveredSubscription;
   StreamSubscription<String>? _peerLostSubscription;
-  StreamSubscription<ble.AnchorDropReceived>? _anchorDropSubscription;
   StreamSubscription<ble.PeerIdChanged>? _peerIdChangedSubscription;
   StreamSubscription<PeerTransportChanged>? _peerTransportChangedSubscription;
 
@@ -219,15 +188,10 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
       final entries = await _peerRepository.getAllPeers(includeBlocked: false);
       final peers = entries.map(DiscoveredPeer.fromEntry).toList();
 
-      // Restore anchor drop badges from DB (persists across restarts).
-      final sentDropPeerIds =
-          await _anchorDropRepository.getSentPeerIdsSince(hours: 24);
-
       emit(state.copyWith(
         status: DiscoveryStatus.loaded,
         peers: peers,
         lastRefreshed: DateTime.now(),
-        droppedAnchorPeerIds: sentDropPeerIds,
       ));
     } catch (e) {
       Logger.error('Failed to load peers', e, null, 'DiscoveryBloc');
@@ -548,76 +512,6 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
     await _transportManager.fetchFullProfilePhotos(event.peerId);
   }
 
-  /// User tapped the ⚓ button — send a drop anchor signal via BLE
-  Future<void> _onDropAnchorOnPeer(
-    DropAnchorOnPeer event,
-    Emitter<DiscoveryState> emit,
-  ) async {
-    try {
-      // Record locally and update UI immediately — BLE send is best-effort
-      await _anchorDropRepository.recordDrop(
-        peerId: event.peerId,
-        peerName: event.peerName,
-        direction: AnchorDropDirection.sent,
-      );
-
-      final updated = Set<String>.from(state.droppedAnchorPeerIds)
-        ..add(event.peerId);
-      emit(state.copyWith(droppedAnchorPeerIds: updated));
-
-      // Best-effort send — peer may not be reachable right now
-      _transportManager.sendDropAnchor(event.peerId);
-
-      Logger.info('DiscoveryBloc: Anchor dropped on ${event.peerName}', 'Discovery');
-    } catch (e) {
-      Logger.error('DiscoveryBloc: Failed to drop anchor', e, null, 'Discovery');
-    }
-  }
-
-  /// Received an anchor drop signal from a peer — record and notify
-  Future<void> _onAnchorDropSignalReceived(
-    AnchorDropSignalReceived event,
-    Emitter<DiscoveryState> emit,
-  ) async {
-    try {
-      // Resolve peer name from known peers
-      final peer = state.peers
-          .where((p) => p.peerId == event.fromPeerId)
-          .firstOrNull;
-      final peerName = peer?.name ?? 'Someone';
-
-      // Discard if blocked
-      if (peer?.isBlocked == true) return;
-
-      // Record in database
-      await _anchorDropRepository.recordDrop(
-        peerId: event.fromPeerId,
-        peerName: peerName,
-        direction: AnchorDropDirection.received,
-      );
-
-      // Show system notification
-      await _notificationService?.showAnchorDropNotification(
-        fromPeerId: event.fromPeerId,
-        fromName: peerName,
-      );
-
-      // Update state for in-app SnackBar
-      emit(state.copyWith(incomingAnchorDropName: '$peerName \u2693'));
-
-      // Clear after a moment so the same name can re-trigger
-      Future.delayed(const Duration(seconds: 2), () {
-        if (!isClosed) {
-          add(_ClearAnchorDropNotification());
-        }
-      });
-
-      Logger.info('DiscoveryBloc: Received anchor drop from $peerName', 'Discovery');
-    } catch (e) {
-      Logger.error('DiscoveryBloc: Failed to handle anchor drop', e, null, 'Discovery');
-    }
-  }
-
   /// Handle BLE MAC rotation: migrate DB records and remove stale peer from UI.
   Future<void> _onPeerIdChanged(
     PeerIdChangedEvent event,
@@ -636,16 +530,7 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
       final updatedPeers =
           state.peers.where((p) => p.peerId != event.oldPeerId).toList();
 
-      // 3. Migrate droppedAnchorPeerIds
-      final updatedDropped = Set<String>.from(state.droppedAnchorPeerIds);
-      if (updatedDropped.remove(event.oldPeerId)) {
-        updatedDropped.add(event.newPeerId);
-      }
-
-      emit(state.copyWith(
-        peers: updatedPeers,
-        droppedAnchorPeerIds: updatedDropped,
-      ));
+      emit(state.copyWith(peers: updatedPeers));
 
       Logger.info(
         'DiscoveryBloc: Migrated peer ${event.oldPeerId} → ${event.newPeerId}',
@@ -769,40 +654,11 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
     );
   }
 
-  // ── Local filter handlers ─────────────────────────────────────────────────
-
-  void _onTogglePositionFilter(
-    TogglePositionFilter event,
-    Emitter<DiscoveryState> emit,
-  ) {
-    final updated = Set<int>.from(state.filterPositionIds);
-    if (updated.contains(event.positionId)) {
-      updated.remove(event.positionId);
-    } else {
-      updated.add(event.positionId);
-    }
-    emit(state.copyWith(filterPositionIds: updated));
-  }
-
-  void _onToggleInterestFilter(
-    ToggleInterestFilter event,
-    Emitter<DiscoveryState> emit,
-  ) {
-    final updated = Set<int>.from(state.filterInterestIds);
-    if (updated.contains(event.interestId)) {
-      updated.remove(event.interestId);
-    } else {
-      updated.add(event.interestId);
-    }
-    emit(state.copyWith(filterInterestIds: updated));
-  }
-
   @override
   Future<void> close() {
     _debounceTimer?.cancel();
     _peerDiscoveredSubscription?.cancel();
     _peerLostSubscription?.cancel();
-    _anchorDropSubscription?.cancel();
     _peerIdChangedSubscription?.cancel();
     _peerTransportChangedSubscription?.cancel();
     return super.close();

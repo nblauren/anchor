@@ -1,11 +1,7 @@
 import 'package:equatable/equatable.dart';
 
 import '../../../data/local_database/database.dart';
-import '../../../data/repositories/chat_repository.dart';
 import '../../../services/transport/transport_enums.dart';
-
-/// Preset emoji set for reactions.
-const kReactionEmojis = ['❤️', '👍', '😂', '😮', '😢', '🔥'];
 
 enum ChatStatus {
   initial,
@@ -92,111 +88,64 @@ class PendingOutgoingPhoto extends Equatable {
 class ChatState extends Equatable {
   const ChatState({
     this.status = ChatStatus.initial,
-    this.conversations = const [],
     this.currentConversation,
     this.messages = const [],
     this.errorMessage,
     this.hasMoreMessages = true,
-    this.photoTransfers = const {},
     this.isBlocked = false,
-    this.pendingOutgoingPhotos = const {},
-    this.reactions = const {},
     this.replyingToMessage,
     this.quotedMessages = const {},
-    this.isE2eeActive = false,
-    this.isE2eeHandshaking = false,
   });
 
   final ChatStatus status;
-  final List<ConversationWithPeer> conversations;
   final CurrentConversation? currentConversation;
   final List<MessageEntry> messages;
   final String? errorMessage;
   final bool hasMoreMessages;
-  final Map<String, PhotoTransferInfo> photoTransfers; // messageId -> progress
   final bool isBlocked;
-  /// Outgoing photos awaiting a [photo_request] from the receiver.
-  /// Keyed by [photoId].
-  final Map<String, PendingOutgoingPhoto> pendingOutgoingPhotos;
-  /// Emoji reactions keyed by messageId. Each list contains one entry per
-  /// (senderId, emoji) pair that has been added.
-  final Map<String, List<ReactionEntry>> reactions;
   /// The message currently being replied to, shown in the reply bar. null = not replying.
   final MessageEntry? replyingToMessage;
   /// Quoted messages keyed by message ID. Used to render reply previews inside bubbles.
   /// Populated from [Messages.replyToMessageId] when loading messages.
   final Map<String, MessageEntry> quotedMessages;
 
-  /// True when a Noise_XK session is established with the current peer.
-  /// Drives the 🔒 lock icon and "End-to-end encrypted" label in the header.
-  final bool isE2eeActive;
-
-  /// True while the Noise_XK handshake is in progress (awaiting round-trip).
-  final bool isE2eeHandshaking;
-
-  /// Total unread count across all conversations
-  int get totalUnreadCount =>
-      conversations.fold(0, (sum, conv) => sum + conv.unreadCount);
-
   /// Check if we're in a conversation
   bool get isInConversation => currentConversation != null;
 
-  /// Get transfer progress for a specific message
-  PhotoTransferInfo? getTransferProgress(String messageId) => photoTransfers[messageId];
-
   ChatState copyWith({
     ChatStatus? status,
-    List<ConversationWithPeer>? conversations,
     CurrentConversation? currentConversation,
     List<MessageEntry>? messages,
     String? errorMessage,
     bool? hasMoreMessages,
-    Map<String, PhotoTransferInfo>? photoTransfers,
     bool? isBlocked,
-    Map<String, PendingOutgoingPhoto>? pendingOutgoingPhotos,
-    Map<String, List<ReactionEntry>>? reactions,
     bool clearCurrentConversation = false,
     MessageEntry? replyingToMessage,
     bool clearReplyingToMessage = false,
     Map<String, MessageEntry>? quotedMessages,
-    bool? isE2eeActive,
-    bool? isE2eeHandshaking,
   }) {
     return ChatState(
       status: status ?? this.status,
-      conversations: conversations ?? this.conversations,
       currentConversation:
           clearCurrentConversation ? null : (currentConversation ?? this.currentConversation),
       messages: messages ?? this.messages,
       errorMessage: errorMessage,
       hasMoreMessages: hasMoreMessages ?? this.hasMoreMessages,
-      photoTransfers: photoTransfers ?? this.photoTransfers,
       isBlocked: isBlocked ?? this.isBlocked,
-      pendingOutgoingPhotos:
-          pendingOutgoingPhotos ?? this.pendingOutgoingPhotos,
-      reactions: reactions ?? this.reactions,
       replyingToMessage: clearReplyingToMessage ? null : (replyingToMessage ?? this.replyingToMessage),
       quotedMessages: quotedMessages ?? this.quotedMessages,
-      isE2eeActive: isE2eeActive ?? this.isE2eeActive,
-      isE2eeHandshaking: isE2eeHandshaking ?? this.isE2eeHandshaking,
     );
   }
 
   @override
   List<Object?> get props => [
         status,
-        conversations,
         currentConversation,
         messages,
         errorMessage,
         hasMoreMessages,
-        photoTransfers,
         isBlocked,
-        pendingOutgoingPhotos,
-        reactions,
         replyingToMessage,
         quotedMessages,
-        isE2eeActive,
-        isE2eeHandshaking,
       ];
 }

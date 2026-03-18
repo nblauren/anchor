@@ -509,6 +509,18 @@ class ChatRepository {
         .write(MessagesCompanion(textContent: Value('{"photo_id":"$photoId"}')));
   }
 
+  /// Find a [photoPreview] message whose JSON textContent contains the given
+  /// [photoId]. Used by [PhotoTransferBloc] to match incoming full photos to
+  /// their preview bubble.
+  Future<MessageEntry?> findPreviewByPhotoId(String photoId) async {
+    return (_db.select(_db.messages)
+          ..where((t) =>
+              t.contentType.equalsValue(MessageContentType.photoPreview) &
+              t.textContent.like('%$photoId%'))
+          ..limit(1))
+        .getSingleOrNull();
+  }
+
   /// Find a sent photo message by its stored [photoId] (set via [updateMessagePhotoId]).
   /// Used to recover [PendingOutgoingPhoto] data after session restarts.
   Future<MessageEntry?> findMessageByPhotoId(String photoId) async {

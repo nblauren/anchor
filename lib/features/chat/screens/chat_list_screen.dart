@@ -6,12 +6,15 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../data/local_database/database.dart';
 import '../../../data/repositories/chat_repository.dart';
+import '../../discovery/bloc/anchor_drop_bloc.dart';
 import '../../discovery/bloc/discovery_bloc.dart';
 import '../../discovery/bloc/discovery_state.dart';
 import '../../discovery/screens/peer_detail_screen.dart';
 import '../bloc/chat_bloc.dart';
-import '../bloc/chat_event.dart';
-import '../bloc/chat_state.dart';
+import '../bloc/chat_e2ee_bloc.dart';
+import '../bloc/conversation_list_bloc.dart';
+import '../bloc/photo_transfer_bloc.dart';
+import '../bloc/reaction_bloc.dart';
 import 'chat_screen.dart';
 
 /// Screen showing list of all conversations
@@ -26,7 +29,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
   @override
   void initState() {
     super.initState();
-    context.read<ChatBloc>().add(const LoadConversations());
+    context.read<ConversationListBloc>().add(const LoadConversations());
   }
 
   Future<void> _openConversation(ConversationWithPeer conv) async {
@@ -36,13 +39,23 @@ class _ChatListScreenState extends State<ChatListScreen> {
     final peer =
         conv.peer != null ? DiscoveredPeer.fromEntry(conv.peer!) : null;
     final chatBloc = context.read<ChatBloc>();
+    final e2eeBloc = context.read<ChatE2eeBloc>();
+    final reactionBloc = context.read<ReactionBloc>();
+    final photoTransferBloc = context.read<PhotoTransferBloc>();
     final discoveryBloc = context.read<DiscoveryBloc>();
+    final anchorDropBloc = context.read<AnchorDropBloc>();
 
     await Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => BlocProvider.value(
-          value: chatBloc,
+        builder: (_) => MultiBlocProvider(
+          providers: [
+            BlocProvider.value(value: chatBloc),
+            BlocProvider.value(value: e2eeBloc),
+            BlocProvider.value(value: reactionBloc),
+            BlocProvider.value(value: photoTransferBloc),
+            BlocProvider.value(value: anchorDropBloc),
+          ],
           child: ChatScreen(
             peerId: peerId,
             peerName: peerName,
@@ -54,6 +67,9 @@ class _ChatListScreenState extends State<ChatListScreen> {
                           providers: [
                             BlocProvider.value(value: discoveryBloc),
                             BlocProvider.value(value: chatBloc),
+                            BlocProvider.value(value: photoTransferBloc),
+                            BlocProvider.value(value: reactionBloc),
+                            BlocProvider.value(value: anchorDropBloc),
                           ],
                           child: PeerDetailScreen(peer: peer),
                         ),
@@ -67,12 +83,12 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
     // Refresh parent bloc so unread badges update after returning from chat
     if (mounted) {
-      context.read<ChatBloc>().add(const LoadConversations());
+      context.read<ConversationListBloc>().add(const LoadConversations());
     }
   }
 
   void _deleteConversation(String conversationId) {
-    context.read<ChatBloc>().add(DeleteConversation(conversationId));
+    context.read<ConversationListBloc>().add(DeleteConversation(conversationId));
   }
 
   @override
@@ -81,9 +97,9 @@ class _ChatListScreenState extends State<ChatListScreen> {
       appBar: AppBar(
         title: const Text('Messages'),
       ),
-      body: BlocBuilder<ChatBloc, ChatState>(
+      body: BlocBuilder<ConversationListBloc, ConversationListState>(
         builder: (context, state) {
-          if (state.status == ChatStatus.loading &&
+          if (state.status == ConversationListStatus.loading &&
               state.conversations.isEmpty) {
             return const Center(child: CircularProgressIndicator());
           }
@@ -94,7 +110,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
           return RefreshIndicator(
             onRefresh: () async {
-              context.read<ChatBloc>().add(const LoadConversations());
+              context.read<ConversationListBloc>().add(const LoadConversations());
             },
             child: ListView.builder(
               itemCount: state.conversations.length,

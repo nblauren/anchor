@@ -204,17 +204,28 @@ class EncryptionService {
   void migratePeerId(String oldPeerId, String newPeerId) {
     if (oldPeerId == newPeerId && !_sessions.containsKey(newPeerId)) return;
 
-    // Migrate established session.
+    // Migrate established session — but do NOT overwrite an existing session
+    // under newPeerId.  This happens when both devices initiate handshakes
+    // concurrently (one via Central UUID, one via Peripheral UUID) and the
+    // Central→Peripheral migration would clobber the already-active session.
     final session = _sessions.remove(oldPeerId);
     if (session != null) {
-      _sessions[newPeerId] = NoiseSession(
-        peerId: newPeerId,
-        sendKey: session.sendKey,
-        receiveKey: session.receiveKey,
-        establishedAt: session.establishedAt,
-      );
-      Logger.info('Migrated E2EE session $oldPeerId → $newPeerId', 'E2EE');
-      _sessionEstablishedController.add(newPeerId);
+      if (_sessions.containsKey(newPeerId)) {
+        Logger.info(
+          'Dropped migrated E2EE session $oldPeerId → $newPeerId '
+          '(session already exists under $newPeerId)',
+          'E2EE',
+        );
+      } else {
+        _sessions[newPeerId] = NoiseSession(
+          peerId: newPeerId,
+          sendKey: session.sendKey,
+          receiveKey: session.receiveKey,
+          establishedAt: session.establishedAt,
+        );
+        Logger.info('Migrated E2EE session $oldPeerId → $newPeerId', 'E2EE');
+        _sessionEstablishedController.add(newPeerId);
+      }
     }
 
     // Migrate pending handshake (covers the mid-handshake race where Central
