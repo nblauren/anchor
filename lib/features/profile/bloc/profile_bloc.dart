@@ -1,17 +1,19 @@
 import 'dart:io';
-import 'dart:typed_data';
+import 'dart:math';
+import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import 'package:drift/drift.dart' show Value;
+import 'package:path_provider/path_provider.dart';
 
 import '../../../core/constants/profile_constants.dart';
 import '../../../core/utils/logger.dart';
-import '../../../services/ble/ble.dart' as ble;
 import '../../../services/database_service.dart';
 import '../../../services/image_service.dart' show ImageService, resolvePhotoPath;
 import '../../../services/nsfw_detection_service.dart';
-import '../../../services/transport/transport.dart';
+import '../../../services/profile_broadcast_service.dart';
 import 'profile_event.dart';
 import 'profile_state.dart';
 
@@ -33,13 +35,12 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
   ProfileBloc({
     required DatabaseService databaseService,
     required ImageService imageService,
-    required ble.BleServiceInterface bleService,
     required NsfwDetectionService nsfwDetectionService,
-    required TransportManager transportManager,
+    required ProfileBroadcastService profileBroadcastService,
   })  : _databaseService = databaseService,
         _imageService = imageService,
         _nsfwService = nsfwDetectionService,
-        _transportManager = transportManager,
+        _profileBroadcastService = profileBroadcastService,
         super(const ProfileState()) {
     on<LoadProfile>(_onLoadProfile);
     on<CreateProfile>(_onCreateProfile);
@@ -53,12 +54,13 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
     on<BroadcastProfile>(_onBroadcastProfile);
     on<ClearError>(_onClearError);
     on<DismissNsfwWarning>(_onDismissNsfwWarning);
+    on<QuickSetupProfile>(_onQuickSetupProfile);
   }
 
   final DatabaseService _databaseService;
   final ImageService _imageService;
   final NsfwDetectionService _nsfwService;
-  final TransportManager _transportManager;
+  final ProfileBroadcastService _profileBroadcastService;
 
   /// Runs NSFW check on [absolutePath]. If the photo fails the check, emits
   /// [ProfileState.nsfwBlockedPhotoId] = [photoId] and returns false.
@@ -476,67 +478,108 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
     BroadcastProfile event,
     Emitter<ProfileState> emit,
   ) async {
-    if (state.profileId == null || state.name == null) {
-      Logger.warning('Cannot broadcast - no profile', 'ProfileBloc');
-      return;
-    }
+    await _profileBroadcastService.broadcast(state);
+  }
+
+  /// Debug-only: create a complete profile with random data and a placeholder
+  /// solid-color image so the developer can skip the full setup flow.
+  Future<void> _onQuickSetupProfile(
+    QuickSetupProfile event,
+    Emitter<ProfileState> emit,
+  ) async {
+    if (!kDebugMode) return;
+
+    emit(state.copyWith(status: ProfileStatus.saving));
 
     try {
-      // Collect thumbnails for all profile photos (up to maxPhotos) in display order
-      final sortedPhotos = state.sortedPhotos;
-      final List<Uint8List> allThumbnails = [];
+      final rng = Random();
 
-      Logger.info(
-        'BroadcastProfile: photos=${sortedPhotos.length}',
-        'ProfileBloc',
+      const names = ['Alex', 'Jordan', 'Sam', 'Riley', 'Casey', 'Drew', 'Morgan', 'Kai'];
+      const bios = [
+        'Just here for a good time',
+        'Love the ocean and good company',
+        'First cruise, looking to meet new people',
+        'Dance floor enthusiast',
+        'Adventure seeker and cocktail lover',
+      ];
+
+      final name = names[rng.nextInt(names.length)];
+      final age = 21 + rng.nextInt(20); // 21–40
+      final bio = bios[rng.nextInt(bios.length)];
+      final position = rng.nextInt(ProfileConstants.maxPositionId + 1);
+
+      // Pick 2–5 random interests
+      final allInterestIds = ProfileConstants.interestMap.keys.toList()..shuffle(rng);
+      final interestCount = 2 + rng.nextInt(4);
+      final interests = allInterestIds.take(interestCount).toList();
+
+      // Create profile
+      final profile = await _databaseService.profileRepository.createProfile(
+        name: name,
+        age: age,
+        bio: bio,
+        position: position,
+        interests: ProfileConstants.encodeInterests(interests),
       );
 
-      for (final photo in sortedPhotos) {
-        final resolvedPath = await resolvePhotoPath(photo.thumbnailPath);
-        if (resolvedPath != null) {
-          final bytes = await File(resolvedPath).readAsBytes();
-          allThumbnails.add(bytes);
-          Logger.info(
-            'BroadcastProfile: photo ${photo.orderIndex} thumbnail=${bytes.length}B',
-            'ProfileBloc',
-          );
-        }
-      }
+      // Generate a solid-color placeholder image (200x200 PNG)
+      final color = ui.Color.fromARGB(
+        255,
+        100 + rng.nextInt(156),
+        100 + rng.nextInt(156),
+        100 + rng.nextInt(156),
+      );
+      final recorder = ui.PictureRecorder();
+      final canvas = ui.Canvas(recorder);
+      canvas.drawRect(
+        const ui.Rect.fromLTWH(0, 0, 200, 200),
+        ui.Paint()..color = color,
+      );
+      final picture = recorder.endRecording();
+      final image = await picture.toImage(200, 200);
+      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      final pngBytes = byteData!.buffer.asUint8List();
 
-      // Create broadcast payload — position/interests are optional compact IDs
-      final payload = ble.BroadcastPayload(
-        userId: state.profileId!,
-        name: state.name!,
-        age: state.age,
-        bio: state.bio,
-        position: state.position,
-        interests: state.interestIds.isNotEmpty
-            ? ProfileConstants.encodeInterests(state.interestIds)
-            : null,
-        thumbnailBytes: allThumbnails.isNotEmpty ? allThumbnails.first : null,
-        thumbnailsList: allThumbnails.isNotEmpty ? allThumbnails : null,
+      // Save to file
+      final docsDir = await getApplicationDocumentsDirectory();
+      final photoDir = Directory('${docsDir.path}/profile_photos');
+      if (!photoDir.existsSync()) photoDir.createSync(recursive: true);
+      final photoFile = File('${photoDir.path}/quick_setup.png');
+      await photoFile.writeAsBytes(pngBytes);
+
+      // Store relative path (consistent with ImageService convention)
+      const relativePath = 'profile_photos/quick_setup.png';
+
+      // Add photo to DB
+      final photo = await _databaseService.profileRepository.addPhoto(
+        userId: profile.id,
+        photoPath: relativePath,
+        thumbnailPath: relativePath, // same file for thumbnail in debug
+        isPrimary: true,
       );
 
-      // Initialize TransportManager on first broadcast (Wi-Fi Aware needs profile)
-      // This is idempotent — subsequent calls are no-ops.
-      await _transportManager.initialize(
-        ownUserId: state.profileId!,
-        profile: payload,
-      );
-      await _transportManager.start();
+      final newPhoto = ProfilePhoto.fromEntry(photo);
 
-      // Broadcast via TransportManager (BLE + Wi-Fi Aware if available)
-      await _transportManager.broadcastProfile(payload);
+      emit(state.copyWith(
+        status: ProfileStatus.saved,
+        profileId: profile.id,
+        name: profile.name,
+        age: profile.age,
+        bio: profile.bio,
+        position: profile.position,
+        interestIds: ProfileConstants.parseInterests(profile.interests),
+        photos: [newPhoto],
+      ));
 
-      Logger.info(
-        'Profile broadcast via TransportManager (${allThumbnails.length} photos, '
-        'primary: ${allThumbnails.isNotEmpty ? allThumbnails.first.length : 0}B, '
-        'transport: ${_transportManager.activeTransport})',
-        'ProfileBloc',
-      );
+      Logger.info('Quick setup profile created: ${profile.id}', 'ProfileBloc');
+
+      add(const BroadcastProfile());
     } catch (e) {
-      Logger.error('Failed to broadcast profile', e, null, 'ProfileBloc');
-      // Don't emit error - broadcasting failure shouldn't block user
+      Logger.error('Quick setup failed', e, null, 'ProfileBloc');
+      emit(state.copyWith(
+        status: ProfileStatus.error,
+        errorMessage: 'Quick setup failed',
+      ));
     }
   }
 

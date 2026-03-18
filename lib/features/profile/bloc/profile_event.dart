@@ -121,3 +121,9 @@ class BroadcastProfile extends ProfileEvent {
 class DismissNsfwWarning extends ProfileEvent {
   const DismissNsfwWarning();
 }
+
+/// Debug-only: auto-create a complete profile with random data and a
+/// placeholder photo so the developer can skip the 7-step setup flow.
+class QuickSetupProfile extends ProfileEvent {
+  const QuickSetupProfile();
+}

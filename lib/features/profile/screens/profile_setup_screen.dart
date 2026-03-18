@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -44,6 +45,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
 
   int? _selectedPosition;
   List<int> _selectedInterestIds = [];
+  bool _isQuickSetup = false;
 
   /// Total pages: 5 info steps + Photos + Preview = 7 for create,
   /// or 3 (single info + photos + preview) for edit.
@@ -199,6 +201,13 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   Widget build(BuildContext context) {
     return BlocConsumer<ProfileBloc, ProfileState>(
       listener: (context, state) {
+        // Quick setup — profile + photo already created, go straight to home.
+        if (state.status == ProfileStatus.saved && _isQuickSetup) {
+          _isQuickSetup = false;
+          widget.onComplete?.call();
+          return;
+        }
+
         // Profile created/saved — advance to photos page.
         if (state.status == ProfileStatus.saved &&
             !_profileCreated &&
@@ -254,6 +263,20 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                     onPressed: _previousPage,
                   )
                 : null,
+            actions: [
+              if (kDebugMode && !widget.isEditing)
+                TextButton(
+                  onPressed: state.status == ProfileStatus.saving
+                      ? null
+                      : () {
+                          setState(() => _isQuickSetup = true);
+                          context
+                              .read<ProfileBloc>()
+                              .add(const QuickSetupProfile());
+                        },
+                  child: const Text('Quick Setup'),
+                ),
+            ],
           ),
           body: SafeArea(
             child: Column(
