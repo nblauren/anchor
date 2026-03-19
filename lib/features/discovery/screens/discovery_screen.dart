@@ -78,18 +78,6 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
     await Future.delayed(const Duration(milliseconds: 500));
   }
 
-  void _loadMockData() {
-    context.read<DiscoveryBloc>().add(const LoadMockPeers());
-  }
-
-  String _peerCountLabel(List<DiscoveredPeer> peers) {
-    final direct = peers.where((p) => !p.isRelayed).length;
-    final relayed = peers.where((p) => p.isRelayed).length;
-    if (relayed == 0) {
-      return '$direct nearby';
-    }
-    return '$direct nearby · $relayed via mesh';
-  }
 
   Future<void> _openPeerDetail(DiscoveredPeer peer) async {
     final discoveryBloc = context.read<DiscoveryBloc>();

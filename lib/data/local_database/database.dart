@@ -22,8 +22,17 @@ enum MessageContentType {
 }
 
 /// Message delivery status
+///
+/// Lifecycle: pending → queued → sent → delivered → read
+///   - pending: saved to DB, not yet attempted
+///   - queued: scheduled for cross-session delivery (store-and-forward)
+///   - sent: successfully transmitted to the peer's transport
+///   - delivered: peer acknowledged receipt
+///   - read: peer opened the conversation and viewed the message
+///   - failed: delivery permanently failed (max retries exceeded)
 enum MessageStatus {
   pending,
+  queued,
   sent,
   delivered,
   read,
@@ -70,13 +79,15 @@ class UserPhotos extends Table {
   Set<Column> get primaryKey => {id};
 }
 
-/// Nearby users found via BLE
+/// Nearby users found via BLE, LAN, or Wi-Fi Aware.
+///
+/// [peerId] stores the peer's stable app-level userId (generated at profile
+/// creation). This is the canonical identity that never changes regardless of
+/// transport, BLE MAC rotation, or session restarts.
 @DataClassName('DiscoveredPeerEntry')
 class DiscoveredPeers extends Table {
+  /// Canonical peer identity — the peer's app-level userId (stable UUID).
   TextColumn get peerId => text()();
-  /// Stable application-level user ID from the peer's BLE profile.
-  /// Used to deduplicate when BLE MAC rotation assigns a new peerId.
-  TextColumn get userId => text().nullable()();
   TextColumn get name => text()();
   IntColumn get age => integer().nullable()();
   TextColumn get bio => text().nullable()();
@@ -88,6 +99,10 @@ class DiscoveredPeers extends Table {
   IntColumn get position => integer().nullable()();
   /// Comma-separated interest IDs received from peer. null / empty = not shared.
   TextColumn get interests => text().nullable()();
+  /// X25519 public key (32 bytes, hex-encoded, 64 chars) for E2EE.
+  TextColumn get publicKeyHex => text().nullable()();
+  /// Ed25519 signing public key (hex) for mesh announcement verification.
+  TextColumn get ed25519PublicKeyHex => text().nullable()();
 
   @override
   Set<Column> get primaryKey => {peerId};
@@ -150,27 +165,8 @@ class BlockedUsers extends Table {
   Set<Column> get primaryKey => {peerId};
 }
 
-/// Long-term X25519 public keys for peers.
-///
-/// Populated during GATT profile reads (fff1) when the peer's [BroadcastPayload]
-/// includes a `pk` field.  Keys are used to initiate Noise_XK handshakes and
-/// cached here to survive app restarts.
-///
-/// A key is updated (and any existing session invalidated) when a new value
-/// arrives for the same [peerId].
-@DataClassName('PeerPublicKeyEntry')
-class PeerPublicKeys extends Table {
-  /// BLE peripheral UUID (same as [DiscoveredPeers.peerId]).
-  TextColumn get peerId => text()();
-
-  /// Raw 32-byte X25519 public key, stored as hex string.
-  TextColumn get publicKeyHex => text()();
-
-  DateTimeColumn get receivedAt => dateTime()();
-
-  @override
-  Set<Column> get primaryKey => {peerId};
-}
+// PeerPublicKeys table removed — public keys are now stored directly on
+// DiscoveredPeers (publicKeyHex + ed25519PublicKeyHex columns).
 
 /// Emoji reactions on messages
 @DataClassName('ReactionEntry')
@@ -196,7 +192,6 @@ class MessageReactions extends Table {
   AnchorDrops,
   BlockedUsers,
   MessageReactions,
-  PeerPublicKeys,
 ])
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
@@ -205,54 +200,13 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 9;
+  int get schemaVersion => 1;
 
   @override
   MigrationStrategy get migration {
     return MigrationStrategy(
       onCreate: (Migrator m) async {
         await m.createAll();
-      },
-      onUpgrade: (Migrator m, int from, int to) async {
-        if (from < 2) {
-          // Migration from v1 to v2: complete schema change
-          await m.deleteTable('user_profiles');
-          await m.deleteTable('chat_messages');
-          await m.deleteTable('conversations');
-          await m.createAll();
-        }
-        if (from < 3) {
-          // Migration from v2 to v3: add anchor_drops table
-          await m.createTable(anchorDrops);
-        }
-        if (from < 4) {
-          // Migration from v3 to v4: add position + interests to own profile and peers
-          await m.addColumn(userProfiles, userProfiles.position);
-          await m.addColumn(userProfiles, userProfiles.interests);
-          await m.addColumn(discoveredPeers, discoveredPeers.position);
-          await m.addColumn(discoveredPeers, discoveredPeers.interests);
-        }
-        if (from < 5) {
-          // Migration from v4 to v5: add userId to discovered_peers for MAC rotation dedup
-          await m.addColumn(discoveredPeers, discoveredPeers.userId);
-        }
-        if (from < 6) {
-          // Migration from v5 to v6: add message_reactions table
-          await m.createTable(messageReactions);
-        }
-        if (from < 7) {
-          // Migration from v6 to v7: add store-and-forward retry columns
-          await m.addColumn(messages, messages.retryCount);
-          await m.addColumn(messages, messages.lastAttemptAt);
-        }
-        if (from < 8) {
-          // Migration from v7 to v8: add reply-to support
-          await m.addColumn(messages, messages.replyToMessageId);
-        }
-        if (from < 9) {
-          // Migration from v8 to v9: add peer_public_keys table for E2EE (Noise_XK)
-          await m.createTable(peerPublicKeys);
-        }
       },
       beforeOpen: (details) async {
         // Enable foreign keys

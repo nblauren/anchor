@@ -40,8 +40,11 @@ class MockHighSpeedTransferService implements HighSpeedTransferService {
     required String peerId,
     required Uint8List data,
     Duration timeout = const Duration(seconds: 15),
+    void Function()? onAdvertising,
   }) async {
     if (!simulateAvailable) return false;
+
+    onAdvertising?.call();
 
     _progressController.add(NearbyTransferProgress(
       transferId: transferId,

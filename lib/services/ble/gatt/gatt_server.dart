@@ -49,13 +49,17 @@ class GattServer {
   // where the responder can't discover the initiator's Peripheral).
   final Map<String, Central> _connectedCentrals = {};
 
+  // Centrals subscribed to fff3 notifications (bidirectional messaging).
+  // When a Central subscribes to fff3, we can push messages back to it
+  // without needing a separate reverse GATT connection.
+  final Map<String, Central> _fff3SubscribedCentrals = {};
+
   // State
   bool _isReady = false;
   bool _peripheralPoweredOn = false;
   bool _settingUp = false;
   bool _startCalled = false;
   bool _isBroadcasting = false;
-  Timer? _peripheralRetryTimer;
 
   /// Monotonically increasing profile version. Incremented each time
   /// [broadcastProfile] is called with a changed payload. Advertised in the
@@ -148,12 +152,20 @@ class GattServer {
         descriptors: [],
       );
 
-      // Messaging characteristic (fff3): centrals write to this to send messages.
+      // Messaging characteristic (fff3): bidirectional messaging.
+      // - WRITE / WRITE_WITHOUT_RESPONSE: Centrals write to send messages.
+      // - NOTIFY: Peripheral can push messages back to subscribed Centrals,
+      //   enabling bidirectional messaging over a single GATT connection.
+      //   This eliminates the need for a reverse connection in most cases
+      //   (the Central doesn't have to also discover the Peripheral's
+      //   advertisement and connect in the other direction).
+      // - fff5 is kept as a fallback for legacy clients and edge cases.
       _messagingChar = GATTCharacteristic.mutable(
         uuid: _messagingCharUuid,
         properties: [
           GATTCharacteristicProperty.write,
           GATTCharacteristicProperty.writeWithoutResponse,
+          GATTCharacteristicProperty.notify,
         ],
         permissions: [GATTCharacteristicPermission.write],
         descriptors: [],
@@ -209,17 +221,40 @@ class GattServer {
       _charWriteSubscription = _peripheral.characteristicWriteRequested
           .listen(_onWriteRequested);
 
-      // Handle thumbnail/full-photos notify subscriptions
+      // Handle notify subscription events for all characteristics.
       await _charNotifyStateSubscription?.cancel();
       _charNotifyStateSubscription =
           _peripheral.characteristicNotifyStateChanged.listen((args) {
+        final centralId = args.central.uuid.toString();
         if (args.characteristic.uuid == _thumbnailCharUuid) {
           _onThumbnailNotifyStateChanged(args);
         } else if (args.characteristic.uuid == _fullPhotosCharUuid) {
           _onFullPhotosNotifyStateChanged(args);
+        } else if (args.characteristic.uuid == _messagingCharUuid) {
+          // Track Centrals subscribing to fff3 notifications (bidirectional messaging).
+          if (args.state) {
+            _fff3SubscribedCentrals[centralId] = args.central;
+            Logger.info(
+              'GattServer: Central ${centralId.substring(0, min(8, centralId.length))} '
+              'subscribed to fff3 notify (bidirectional messaging)',
+              'BLE',
+            );
+          } else {
+            _fff3SubscribedCentrals.remove(centralId);
+            Logger.debug(
+              'GattServer: Central ${centralId.substring(0, min(8, centralId.length))} '
+              'unsubscribed from fff3 notify',
+              'BLE',
+            );
+          }
         } else if (args.characteristic.uuid == _reversePathCharUuid) {
           // Track Central when it subscribes to fff5 (reverse-path) notifications
-          _connectedCentrals[args.central.uuid.toString()] = args.central;
+          _connectedCentrals[centralId] = args.central;
+          Logger.debug(
+            'GattServer: Central ${centralId.substring(0, min(8, centralId.length))} '
+            '${args.state ? "subscribed to" : "unsubscribed from"} fff5 notify',
+            'BLE',
+          );
         }
       });
 
@@ -229,10 +264,9 @@ class GattServer {
       Logger.info('GattServer: GATT server ready', 'BLE');
     } catch (e) {
       Logger.error('GattServer: GATT server setup failed', e, null, 'BLE');
-      // Native call failed — peripheral not ready yet. Schedule retry so we
-      // try again rather than waiting indefinitely for a state-change event
-      // that may never arrive.
-      _schedulePeripheralRetry();
+      // Native call failed — peripheral not ready yet. Subscribe to state
+      // changes so we retry as soon as it becomes ready.
+      _waitForPeripheralReady();
     } finally {
       _settingUp = false;
     }
@@ -323,7 +357,8 @@ class GattServer {
 
   /// Remove all services and reset state. Called during stop().
   Future<void> teardown() async {
-    _peripheralRetryTimer?.cancel();
+    _peripheralReadySub?.cancel();
+    _peripheralReadySub = null;
     await stopAdvertising();
     try {
       await _peripheral.removeAllServices();
@@ -337,7 +372,8 @@ class GattServer {
 
   /// Dispose all subscriptions and timers.
   Future<void> dispose() async {
-    _peripheralRetryTimer?.cancel();
+    _peripheralReadySub?.cancel();
+    _peripheralReadySub = null;
     await _stateSubscription?.cancel();
     await _charReadSubscription?.cancel();
     await _charWriteSubscription?.cancel();
@@ -352,9 +388,9 @@ class GattServer {
 
     if (!_peripheralPoweredOn) return;
 
-    // Cancel any in-flight retry polling — state change event is authoritative.
-    _peripheralRetryTimer?.cancel();
-    _peripheralRetryTimer = null;
+    // Cancel any in-flight peripheral-ready subscription — state change is authoritative.
+    _peripheralReadySub?.cancel();
+    _peripheralReadySub = null;
 
     if (_startCalled && !_isReady) {
       // start() was called but GATT setup failed because peripheral wasn't
@@ -378,46 +414,53 @@ class GattServer {
     }
   }
 
-  /// Schedule a delayed retry for advertising when the peripheral state is
-  /// transiently 'unknown' at startup. Retries up to 5 times (every 2s).
-  void _schedulePeripheralRetry({int attempt = 1}) {
-    if (attempt > 5) {
-      Logger.warning(
-        'GattServer: Peripheral still not ready after 5 retries — '
-            'advertising will start when state changes to poweredOn',
-        'BLE',
-      );
+  /// Subscribe to peripheral state changes and wait for poweredOn.
+  ///
+  /// Replaces the old polling approach (5 retries × 2s) with an event-driven
+  /// listener that reacts immediately when the peripheral becomes ready,
+  /// regardless of how long it takes.
+  StreamSubscription? _peripheralReadySub;
+
+  void _waitForPeripheralReady() {
+    // Already ready — handle immediately.
+    if (_peripheral.state == BluetoothLowEnergyState.poweredOn) {
+      _onPeripheralBecameReady();
       return;
     }
-    _peripheralRetryTimer?.cancel();
-    _peripheralRetryTimer = Timer(const Duration(seconds: 2), () {
-      final currentState = _peripheral.state;
-      if (currentState == BluetoothLowEnergyState.poweredOn) {
-        Logger.info(
-          'GattServer: Peripheral now poweredOn (retry $attempt) — '
-              'starting advertising',
-          'BLE',
-        );
-        _peripheralPoweredOn = true;
-        if (_pendingPayload != null && !_isBroadcasting) {
-          if (!_isReady) {
-            setup().then((_) {
-              if (_pendingPayload != null && !_isBroadcasting) {
-                _startAdvertising(_pendingPayload!);
-              }
-            });
-          } else {
-            _startAdvertising(_pendingPayload!);
-          }
-        }
-      } else {
-        Logger.info(
-          'GattServer: Peripheral still $currentState (retry $attempt/5)',
-          'BLE',
-        );
-        _schedulePeripheralRetry(attempt: attempt + 1);
+
+    Logger.info(
+      'GattServer: Peripheral not ready (${_peripheral.state}) — '
+          'subscribing to state changes',
+      'BLE',
+    );
+
+    _peripheralReadySub?.cancel();
+    _peripheralReadySub = _peripheral.stateChanged.listen((e) {
+      if (e.state == BluetoothLowEnergyState.poweredOn) {
+        _peripheralReadySub?.cancel();
+        _peripheralReadySub = null;
+        _onPeripheralBecameReady();
       }
     });
+  }
+
+  void _onPeripheralBecameReady() {
+    Logger.info(
+      'GattServer: Peripheral now poweredOn — starting advertising',
+      'BLE',
+    );
+    _peripheralPoweredOn = true;
+    if (_pendingPayload != null && !_isBroadcasting) {
+      if (!_isReady) {
+        setup().then((_) {
+          if (_pendingPayload != null && !_isBroadcasting) {
+            _startAdvertising(_pendingPayload!);
+          }
+        });
+      } else {
+        _startAdvertising(_pendingPayload!);
+      }
+    }
   }
 
   // ==================== Internal: Advertising ====================
@@ -429,36 +472,66 @@ class GattServer {
         _isBroadcasting = false;
       }
 
+      // Keep the advertisement UNDER 31 bytes so the service UUID stays in
+      // the primary AD packet (not the scan response). This is critical for
+      // cross-platform discovery — Android scanners filtering by UUID only
+      // check the primary packet, and iOS strips overflow data in background.
+      //
+      // Budget breakdown:
+      //   Flags:                3 bytes
+      //   128-bit Service UUID: 18 bytes  (2 header + 16 UUID)
+      //   Short local name:     2 + N bytes (header + "A<version>")
+      //   Total:                23 + N → must keep N ≤ 8 to stay under 31
+      //
+      // We use a minimal name "A<profileVersion>" (e.g. "A3") instead of the
+      // old "A:Nicholas:28:3" which pushed the UUID to the scan response.
+      // Full profile data is available via GATT fff1 read after connection.
       final compactName = _encodeLocalName(payload);
 
       Logger.info(
-        'GattServer: Advertising with name="$compactName"',
+        'GattServer: Advertising with name="$compactName" '
+        '(${compactName.length} chars, est ${23 + 2 + compactName.length} bytes)',
         'BLE',
       );
 
-      await _peripheral.startAdvertising(Advertisement(
-        name: compactName,
-        serviceUUIDs: [_serviceUuid],
-      ));
+      try {
+        await _peripheral.startAdvertising(Advertisement(
+          name: compactName,
+          serviceUUIDs: [_serviceUuid],
+        ));
+      } catch (e) {
+        // On Android 13+ (API 33), BluetoothAdapter.setName() is deprecated
+        // and may fail — causing the entire startAdvertising call to throw.
+        // Fall back to advertising WITHOUT the local name.
+        Logger.warning(
+          'GattServer: Advertising with name failed ($e) — '
+              'retrying without name (service UUID only)',
+          'BLE',
+        );
+        await _peripheral.startAdvertising(Advertisement(
+          serviceUUIDs: [_serviceUuid],
+        ));
+      }
 
       _isBroadcasting = true;
-      Logger.info('GattServer: Advertising started', 'BLE');
+      Logger.info('GattServer: Advertising started successfully', 'BLE');
     } catch (e) {
       Logger.error('GattServer: Advertising failed', e, null, 'BLE');
       _isBroadcasting = false;
     }
   }
 
-  /// Encode local name: "A:<name>:<age>:<profileVersion>"
+  /// Encode local name: "A<profileVersion>" (e.g. "A3", "A17").
   ///
-  /// The version suffix lets scanners skip GATT profile reads for peers whose
-  /// profile hasn't changed since the last read. Kept short (1-3 digits) to
-  /// stay within the BLE advertisement size budget.
+  /// Minimal format to keep the advertisement under 31 bytes while still
+  /// allowing scanners to skip GATT reads for unchanged profiles. The full
+  /// profile (name, age, bio) is served via fff1 GATT read after connection.
+  ///
+  /// Old format was "A:<name>:<age>:<version>" which exceeded 31 bytes and
+  /// pushed the service UUID to the scan response, breaking UUID-filtered
+  /// discovery on Android and in iOS background mode.
   String _encodeLocalName(BroadcastPayload payload) {
-    final name =
-        payload.name.length > 8 ? payload.name.substring(0, 8) : payload.name;
-    final age = payload.age ?? 0;
-    return 'A:$name:$age:$_profileVersion';
+    return 'A$_profileVersion';
   }
 
   /// Encode profile metadata as compact JSON for the profile characteristic.
@@ -560,6 +633,14 @@ class GattServer {
       final centralUuid = args.central.uuid.toString();
       _connectedCentrals[centralUuid] = args.central;
 
+      Logger.debug(
+        'GattServer: [WRITE] ${data.length}B from '
+        'central=${centralUuid.substring(0, min(8, centralUuid.length))} '
+        '(marker=0x${data[0].toRadixString(16).padLeft(2, '0')}, '
+        'fff3sub=${_fff3SubscribedCentrals.containsKey(centralUuid)})',
+        'BLE',
+      );
+
       onWriteReceived?.call(data, args.central.uuid);
     } catch (e) {
       Logger.error('GattServer: Write receive failed', e, null, 'BLE');
@@ -602,14 +683,69 @@ class GattServer {
     }
   }
 
+  /// Send data to a specific connected Central via fff3 GATT notification.
+  ///
+  /// Used for bidirectional messaging: the Peripheral pushes messages back
+  /// to a Central over the same connection the Central uses to write to us.
+  /// Falls back to fff5 if the Central isn't subscribed to fff3 notify.
+  /// Returns true if the notification was sent successfully.
+  Future<bool> sendToCentralViaFff3(String centralUuidStr, Uint8List data) async {
+    final central = _fff3SubscribedCentrals[centralUuidStr];
+    if (central == null || _messagingChar == null) {
+      Logger.debug(
+        'GattServer: sendToCentralViaFff3 — central $centralUuidStr not '
+        'subscribed to fff3 notify, falling back to fff5',
+        'BLE',
+      );
+      // Fall back to fff5 reverse-path
+      return sendToCentral(centralUuidStr, data);
+    }
+    try {
+      await _peripheral.notifyCharacteristic(
+        central,
+        _messagingChar!,
+        value: data,
+      );
+      Logger.info(
+        'GattServer: Sent ${data.length}B via fff3 notify to central '
+        '${centralUuidStr.substring(0, min(8, centralUuidStr.length))}',
+        'BLE',
+      );
+      return true;
+    } catch (e) {
+      Logger.warning(
+        'GattServer: fff3 notify to $centralUuidStr failed: $e — '
+        'falling back to fff5',
+        'BLE',
+      );
+      // Fall back to fff5 reverse-path
+      return sendToCentral(centralUuidStr, data);
+    }
+  }
+
+  /// Whether a Central is subscribed to fff3 notifications.
+  bool isCentralSubscribedToFff3(String centralUuidStr) =>
+      _fff3SubscribedCentrals.containsKey(centralUuidStr);
+
   // ==================== Internal: Notify Push ====================
+
+  /// Delay between consecutive GATT notification chunks pushed to a Central.
+  /// Prevents Android BLE buffer overflow (which silently drops notifications)
+  /// and iOS prepare queue saturation (CBATTError code 9).
+  static const _interChunkDelay = Duration(milliseconds: 10);
 
   /// Push the primary thumbnail in MTU-sized chunks when a central subscribes
   /// to the thumbnail characteristic (fff2).
   void _onThumbnailNotifyStateChanged(
       GATTCharacteristicNotifyStateChangedEventArgs args) async {
     if (args.characteristic.uuid != _thumbnailCharUuid) return;
-    if (!args.state) return;
+    if (!args.state) {
+      Logger.debug(
+        'GattServer: Central unsubscribed from thumbnail (fff2)',
+        'BLE',
+      );
+      return;
+    }
 
     final data = _thumbnailData;
     if (data.isEmpty) return;
@@ -622,13 +758,15 @@ class GattServer {
       maxChunk = 500;
     }
 
+    final totalChunks = (data.length + maxChunk - 1) ~/ maxChunk;
     Logger.info(
       'GattServer: Central subscribed to thumbnail — pushing '
-          '${data.length}B in ≤${maxChunk}B chunks',
+          '${data.length}B in $totalChunks chunks (≤${maxChunk}B each)',
       'BLE',
     );
 
     var offset = 0;
+    var chunkIdx = 0;
     while (offset < data.length) {
       final end = min(offset + maxChunk, data.length);
       final chunk = data.sublist(offset, end);
@@ -639,16 +777,26 @@ class GattServer {
           value: chunk,
         );
         offset = end;
+        chunkIdx++;
+
+        // Inter-chunk delay to let the receiver's BLE stack process the
+        // notification before the next one arrives. Without this, Android
+        // receivers silently drop chunks when their internal buffer fills.
+        if (offset < data.length) {
+          await Future<void>.delayed(_interChunkDelay);
+        }
       } catch (e) {
         Logger.warning(
-          'GattServer: Thumbnail chunk failed at offset $offset: $e',
+          'GattServer: Thumbnail chunk $chunkIdx/$totalChunks failed '
+          'at offset $offset: $e',
           'BLE',
         );
         break;
       }
     }
     Logger.info(
-      'GattServer: Thumbnail push complete (${data.length}B sent)',
+      'GattServer: Thumbnail push complete '
+      '($chunkIdx/$totalChunks chunks, ${data.length}B sent)',
       'BLE',
     );
   }
@@ -658,7 +806,13 @@ class GattServer {
   void _onFullPhotosNotifyStateChanged(
       GATTCharacteristicNotifyStateChangedEventArgs args) async {
     if (args.characteristic.uuid != _fullPhotosCharUuid) return;
-    if (!args.state) return;
+    if (!args.state) {
+      Logger.debug(
+        'GattServer: Central unsubscribed from full-photos (fff4)',
+        'BLE',
+      );
+      return;
+    }
 
     final data = _fullPhotosData;
     if (data.isEmpty) return;
@@ -671,13 +825,15 @@ class GattServer {
       maxChunk = 500;
     }
 
+    final totalChunks = (data.length + maxChunk - 1) ~/ maxChunk;
     Logger.info(
       'GattServer: Central subscribed to full-photos — pushing '
-          '${data.length}B in ≤${maxChunk}B chunks',
+          '${data.length}B in $totalChunks chunks (≤${maxChunk}B each)',
       'BLE',
     );
 
     var offset = 0;
+    var chunkIdx = 0;
     while (offset < data.length) {
       final end = min(offset + maxChunk, data.length);
       final chunk = data.sublist(offset, end);
@@ -688,16 +844,24 @@ class GattServer {
           value: chunk,
         );
         offset = end;
+        chunkIdx++;
+
+        // Inter-chunk delay — same rationale as thumbnail push.
+        if (offset < data.length) {
+          await Future<void>.delayed(_interChunkDelay);
+        }
       } catch (e) {
         Logger.warning(
-          'GattServer: Full-photos chunk failed at offset $offset: $e',
+          'GattServer: Full-photos chunk $chunkIdx/$totalChunks failed '
+          'at offset $offset: $e',
           'BLE',
         );
         break;
       }
     }
     Logger.info(
-      'GattServer: Full-photos push complete (${data.length}B sent)',
+      'GattServer: Full-photos push complete '
+      '($chunkIdx/$totalChunks chunks, ${data.length}B sent)',
       'BLE',
     );
   }

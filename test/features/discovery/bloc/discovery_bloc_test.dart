@@ -1,12 +1,12 @@
 import 'dart:typed_data';
 
 import 'package:anchor/data/local_database/database.dart';
-import 'package:anchor/data/repositories/anchor_drop_repository.dart';
 import 'package:anchor/data/repositories/peer_repository.dart';
 import 'package:anchor/features/discovery/bloc/discovery_bloc.dart';
 import 'package:anchor/features/discovery/bloc/discovery_event.dart';
 import 'package:anchor/features/discovery/bloc/discovery_state.dart';
 import 'package:anchor/services/lan/mock_lan_transport_service.dart';
+import 'package:anchor/services/mesh/mesh.dart' hide PeerIdChangedEvent;
 import 'package:anchor/services/transport/transport_enums.dart';
 import 'package:anchor/services/transport/transport_manager.dart';
 import 'package:anchor/services/wifi_aware/mock_wifi_aware_transport_service.dart';
@@ -21,8 +21,6 @@ import '../../../helpers/test_fixtures.dart';
 
 class MockPeerRepository extends Mock implements PeerRepository {}
 
-class MockAnchorDropRepository extends Mock implements AnchorDropRepository {}
-
 
 // ── Test helpers ──────────────────────────────────────────────────────────────
 
@@ -30,10 +28,14 @@ class MockAnchorDropRepository extends Mock implements AnchorDropRepository {}
 /// [MockWifiAwareTransportService]. BLE events pushed through [fake] are
 /// forwarded to the TransportManager's unified streams.
 TransportManager buildTransportManager(FakeBleService fake) {
+  final peerRegistry = PeerRegistry();
+  final messageRouter = MessageRouter(peerRegistry: peerRegistry);
   return TransportManager(
     lanService: MockLanTransportService(),
     bleService: fake,
     wifiAwareService: MockWifiAwareTransportService(),
+    peerRegistry: peerRegistry,
+    messageRouter: messageRouter,
   );
 }
 
@@ -48,20 +50,17 @@ DiscoveredPeerEntry defaultEntry({
 void main() {
   setUpAll(() {
     // Register fallback values for mocktail any() matchers
-    registerFallbackValue(AnchorDropDirection.sent);
     registerFallbackValue(Uint8List(0));
   });
 
   late FakeBleService fakeBle;
   late TransportManager tm;
   late MockPeerRepository mockRepo;
-  late MockAnchorDropRepository mockAnchorRepo;
 
   setUp(() {
     fakeBle = FakeBleService();
     tm = buildTransportManager(fakeBle);
     mockRepo = MockPeerRepository();
-    mockAnchorRepo = MockAnchorDropRepository();
 
     // Default stubs — most tests reuse these
     when(() => mockRepo.getAllPeers(includeBlocked: false))
@@ -70,7 +69,6 @@ void main() {
     when(() => mockRepo.upsertPeer(
           peerId: any(named: 'peerId'),
           name: any(named: 'name'),
-          userId: any(named: 'userId'),
           age: any(named: 'age'),
           bio: any(named: 'bio'),
           position: any(named: 'position'),
@@ -83,20 +81,7 @@ void main() {
         ));
     when(() => mockRepo.blockPeer(any())).thenAnswer((_) async {});
     when(() => mockRepo.unblockPeer(any())).thenAnswer((_) async {});
-    when(() => mockRepo.migratePeerId(
-          oldPeerId: any(named: 'oldPeerId'),
-          newPeerId: any(named: 'newPeerId'),
-          userId: any(named: 'userId'),
-        )).thenAnswer((_) async {});
     when(() => mockRepo.getPeerById(any())).thenAnswer((_) async => null);
-    when(() => mockRepo.getPeerByUserId(any())).thenAnswer((_) async => null);
-    when(() => mockAnchorRepo.getSentPeerIdsSince(hours: any(named: 'hours')))
-        .thenAnswer((_) async => {});
-    when(() => mockAnchorRepo.recordDrop(
-          peerId: any(named: 'peerId'),
-          peerName: any(named: 'peerName'),
-          direction: any(named: 'direction'),
-        )).thenAnswer((_) async {});
   });
 
   tearDown(() async {
@@ -108,7 +93,6 @@ void main() {
     return DiscoveryBloc(
       peerRepository: mockRepo,
       transportManager: tm,
-      anchorDropRepository: mockAnchorRepo,
     );
   }
 
@@ -243,7 +227,6 @@ void main() {
       verifyNever(() => mockRepo.upsertPeer(
             peerId: any(named: 'peerId'),
             name: any(named: 'name'),
-            userId: any(named: 'userId'),
             age: any(named: 'age'),
             bio: any(named: 'bio'),
             position: any(named: 'position'),
@@ -270,7 +253,6 @@ void main() {
       verify(() => mockRepo.upsertPeer(
             peerId: 'direct-p',
             name: any(named: 'name'),
-            userId: any(named: 'userId'),
             age: any(named: 'age'),
             bio: any(named: 'bio'),
             position: any(named: 'position'),
@@ -308,10 +290,7 @@ void main() {
       status: DiscoveryStatus.loaded,
       peers: [TestFixtures.makePeer(peerId: 'p1', isOnline: true)],
     ),
-    act: (b) {
-      fakeBle.emitPeerLost('p1');
-    },
-    wait: const Duration(milliseconds: 100),
+    act: (b) => b.add(const PeerLost('p1')),
     expect: () => [
       isA<DiscoveryState>().having(
         (s) => s.peers.firstWhere((p) => p.peerId == 'p1').isOnline,
@@ -343,173 +322,6 @@ void main() {
     },
   );
 
-  // ── DropAnchorOnPeer ──────────────────────────────────────────────────────
-
-  blocTest<DiscoveryBloc, DiscoveryState>(
-    'DropAnchorOnPeer records drop and adds peerId to droppedAnchorPeerIds',
-    build: () => buildBloc(),
-    seed: () => DiscoveryState(
-      status: DiscoveryStatus.loaded,
-      peers: [TestFixtures.makePeer(peerId: 'p1', name: 'Alex')],
-    ),
-    act: (b) =>
-        b.add(const DropAnchorOnPeer(peerId: 'p1', peerName: 'Alex')),
-    expect: () => [
-      isA<DiscoveryState>().having(
-        (s) => s.droppedAnchorPeerIds.contains('p1'),
-        'p1 in droppedAnchorPeerIds',
-        isTrue,
-      ),
-    ],
-    verify: (_) {
-      verify(() => mockAnchorRepo.recordDrop(
-            peerId: 'p1',
-            peerName: 'Alex',
-            direction: AnchorDropDirection.sent,
-          )).called(1);
-    },
-  );
-
-  // ── AnchorDropSignalReceived ──────────────────────────────────────────────
-
-  blocTest<DiscoveryBloc, DiscoveryState>(
-    'AnchorDropSignalReceived sets incomingAnchorDropName',
-    build: () => buildBloc(),
-    seed: () => DiscoveryState(
-      status: DiscoveryStatus.loaded,
-      peers: [TestFixtures.makePeer(peerId: 'p1', name: 'Jordan')],
-    ),
-    act: (b) => b.add(const AnchorDropSignalReceived(fromPeerId: 'p1')),
-    expect: () => [
-      isA<DiscoveryState>().having(
-        (s) => s.incomingAnchorDropName,
-        'anchor drop name',
-        contains('Jordan'),
-      ),
-    ],
-  );
-
-  blocTest<DiscoveryBloc, DiscoveryState>(
-    'AnchorDropSignalReceived from blocked peer is silently discarded',
-    build: () => buildBloc(),
-    seed: () => DiscoveryState(
-      status: DiscoveryStatus.loaded,
-      peers: [TestFixtures.makePeer(peerId: 'bad-actor', isBlocked: true)],
-    ),
-    act: (b) => b.add(const AnchorDropSignalReceived(fromPeerId: 'bad-actor')),
-    expect: () => [], // no state change
-    verify: (_) {
-      verifyNever(() => mockAnchorRepo.recordDrop(
-            peerId: any(named: 'peerId'),
-            peerName: any(named: 'peerName'),
-            direction: any(named: 'direction'),
-          ));
-    },
-  );
-
-  // ── PeerIdChangedEvent ────────────────────────────────────────────────────
-
-  blocTest<DiscoveryBloc, DiscoveryState>(
-    'PeerIdChangedEvent removes old peer from list and calls repo migration',
-    build: () => buildBloc(),
-    seed: () => DiscoveryState(
-      status: DiscoveryStatus.loaded,
-      peers: [
-        TestFixtures.makePeer(peerId: 'old-peer', name: 'Migrating'),
-        TestFixtures.makePeer(peerId: 'stable-peer', name: 'Stable'),
-      ],
-    ),
-    act: (b) => b.add(const PeerIdChangedEvent(
-      oldPeerId: 'old-peer',
-      newPeerId: 'new-peer',
-      userId: 'user-1',
-    )),
-    expect: () => [
-      isA<DiscoveryState>().having(
-        (s) => s.peers.any((p) => p.peerId == 'old-peer'),
-        'old-peer removed',
-        isFalse,
-      ),
-    ],
-    verify: (_) {
-      verify(() => mockRepo.migratePeerId(
-            oldPeerId: 'old-peer',
-            newPeerId: 'new-peer',
-            userId: 'user-1',
-          )).called(1);
-    },
-  );
-
-  blocTest<DiscoveryBloc, DiscoveryState>(
-    'PeerIdChangedEvent migrates droppedAnchorPeerIds to new peer ID',
-    build: () => buildBloc(),
-    seed: () => DiscoveryState(
-      status: DiscoveryStatus.loaded,
-      droppedAnchorPeerIds: const {'old-peer'},
-      peers: [TestFixtures.makePeer(peerId: 'old-peer')],
-    ),
-    act: (b) => b.add(const PeerIdChangedEvent(
-      oldPeerId: 'old-peer',
-      newPeerId: 'new-peer',
-      userId: 'user-1',
-    )),
-    expect: () => [
-      isA<DiscoveryState>()
-          .having(
-            (s) => s.droppedAnchorPeerIds.contains('old-peer'),
-            'old-peer removed from drops',
-            isFalse,
-          )
-          .having(
-            (s) => s.droppedAnchorPeerIds.contains('new-peer'),
-            'new-peer in drops',
-            isTrue,
-          ),
-    ],
-  );
-
-  // ── Position / Interest filters ───────────────────────────────────────────
-
-  blocTest<DiscoveryBloc, DiscoveryState>(
-    'TogglePositionFilter adds positionId to filter set',
-    build: () => buildBloc(),
-    act: (b) => b.add(const TogglePositionFilter(2)),
-    expect: () => [
-      isA<DiscoveryState>().having(
-        (s) => s.filterPositionIds,
-        'filterPositionIds',
-        contains(2),
-      ),
-    ],
-  );
-
-  blocTest<DiscoveryBloc, DiscoveryState>(
-    'TogglePositionFilter removes positionId when already present',
-    build: () => buildBloc(),
-    seed: () => const DiscoveryState(filterPositionIds: {1, 2}),
-    act: (b) => b.add(const TogglePositionFilter(2)),
-    expect: () => [
-      isA<DiscoveryState>()
-          .having((s) => s.filterPositionIds, 'filterPositionIds', isNot(contains(2)))
-          .having((s) => s.filterPositionIds, 'still has 1', contains(1)),
-    ],
-  );
-
-  blocTest<DiscoveryBloc, DiscoveryState>(
-    'ClearFilters resets all filter sets',
-    build: () => buildBloc(),
-    seed: () => const DiscoveryState(
-      filterPositionIds: {1, 2},
-      filterInterestIds: {3, 7},
-    ),
-    act: (b) => b.add(const ClearFilters()),
-    expect: () => [
-      isA<DiscoveryState>()
-          .having((s) => s.filterPositionIds, 'positions', isEmpty)
-          .having((s) => s.filterInterestIds, 'interests', isEmpty),
-    ],
-  );
-
   // ── High-density simulation ───────────────────────────────────────────────
 
   // The debounce mechanism means rapid BLE stream events won't each emit —
@@ -527,8 +339,6 @@ void main() {
       );
       when(() => mockRepo.getAllPeers(includeBlocked: false))
           .thenAnswer((_) async => entries);
-      when(() => mockAnchorRepo.getSentPeerIdsSince(hours: any(named: 'hours')))
-          .thenAnswer((_) async => {});
       return buildBloc();
     },
     act: (b) => b.add(const LoadDiscoveredPeers()),

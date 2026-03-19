@@ -833,11 +833,6 @@ class $DiscoveredPeersTable extends DiscoveredPeers
   late final GeneratedColumn<String> peerId = GeneratedColumn<String>(
       'peer_id', aliasedName, false,
       type: DriftSqlType.string, requiredDuringInsert: true);
-  static const VerificationMeta _userIdMeta = const VerificationMeta('userId');
-  @override
-  late final GeneratedColumn<String> userId = GeneratedColumn<String>(
-      'user_id', aliasedName, true,
-      type: DriftSqlType.string, requiredDuringInsert: false);
   static const VerificationMeta _nameMeta = const VerificationMeta('name');
   @override
   late final GeneratedColumn<String> name = GeneratedColumn<String>(
@@ -892,10 +887,21 @@ class $DiscoveredPeersTable extends DiscoveredPeers
   late final GeneratedColumn<String> interests = GeneratedColumn<String>(
       'interests', aliasedName, true,
       type: DriftSqlType.string, requiredDuringInsert: false);
+  static const VerificationMeta _publicKeyHexMeta =
+      const VerificationMeta('publicKeyHex');
+  @override
+  late final GeneratedColumn<String> publicKeyHex = GeneratedColumn<String>(
+      'public_key_hex', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
+  static const VerificationMeta _ed25519PublicKeyHexMeta =
+      const VerificationMeta('ed25519PublicKeyHex');
+  @override
+  late final GeneratedColumn<String> ed25519PublicKeyHex =
+      GeneratedColumn<String>('ed25519_public_key_hex', aliasedName, true,
+          type: DriftSqlType.string, requiredDuringInsert: false);
   @override
   List<GeneratedColumn> get $columns => [
         peerId,
-        userId,
         name,
         age,
         bio,
@@ -904,7 +910,9 @@ class $DiscoveredPeersTable extends DiscoveredPeers
         rssi,
         isBlocked,
         position,
-        interests
+        interests,
+        publicKeyHex,
+        ed25519PublicKeyHex
       ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -922,10 +930,6 @@ class $DiscoveredPeersTable extends DiscoveredPeers
           peerId.isAcceptableOrUnknown(data['peer_id']!, _peerIdMeta));
     } else if (isInserting) {
       context.missing(_peerIdMeta);
-    }
-    if (data.containsKey('user_id')) {
-      context.handle(_userIdMeta,
-          userId.isAcceptableOrUnknown(data['user_id']!, _userIdMeta));
     }
     if (data.containsKey('name')) {
       context.handle(
@@ -971,6 +975,18 @@ class $DiscoveredPeersTable extends DiscoveredPeers
       context.handle(_interestsMeta,
           interests.isAcceptableOrUnknown(data['interests']!, _interestsMeta));
     }
+    if (data.containsKey('public_key_hex')) {
+      context.handle(
+          _publicKeyHexMeta,
+          publicKeyHex.isAcceptableOrUnknown(
+              data['public_key_hex']!, _publicKeyHexMeta));
+    }
+    if (data.containsKey('ed25519_public_key_hex')) {
+      context.handle(
+          _ed25519PublicKeyHexMeta,
+          ed25519PublicKeyHex.isAcceptableOrUnknown(
+              data['ed25519_public_key_hex']!, _ed25519PublicKeyHexMeta));
+    }
     return context;
   }
 
@@ -982,8 +998,6 @@ class $DiscoveredPeersTable extends DiscoveredPeers
     return DiscoveredPeerEntry(
       peerId: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}peer_id'])!,
-      userId: attachedDatabase.typeMapping
-          .read(DriftSqlType.string, data['${effectivePrefix}user_id']),
       name: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}name'])!,
       age: attachedDatabase.typeMapping
@@ -1002,6 +1016,11 @@ class $DiscoveredPeersTable extends DiscoveredPeers
           .read(DriftSqlType.int, data['${effectivePrefix}position']),
       interests: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}interests']),
+      publicKeyHex: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}public_key_hex']),
+      ed25519PublicKeyHex: attachedDatabase.typeMapping.read(
+          DriftSqlType.string,
+          data['${effectivePrefix}ed25519_public_key_hex']),
     );
   }
 
@@ -1013,11 +1032,8 @@ class $DiscoveredPeersTable extends DiscoveredPeers
 
 class DiscoveredPeerEntry extends DataClass
     implements Insertable<DiscoveredPeerEntry> {
+  /// Canonical peer identity — the peer's app-level userId (stable UUID).
   final String peerId;
-
-  /// Stable application-level user ID from the peer's BLE profile.
-  /// Used to deduplicate when BLE MAC rotation assigns a new peerId.
-  final String? userId;
   final String name;
   final int? age;
   final String? bio;
@@ -1031,9 +1047,14 @@ class DiscoveredPeerEntry extends DataClass
 
   /// Comma-separated interest IDs received from peer. null / empty = not shared.
   final String? interests;
+
+  /// X25519 public key (32 bytes, hex-encoded, 64 chars) for E2EE.
+  final String? publicKeyHex;
+
+  /// Ed25519 signing public key (hex) for mesh announcement verification.
+  final String? ed25519PublicKeyHex;
   const DiscoveredPeerEntry(
       {required this.peerId,
-      this.userId,
       required this.name,
       this.age,
       this.bio,
@@ -1042,14 +1063,13 @@ class DiscoveredPeerEntry extends DataClass
       this.rssi,
       required this.isBlocked,
       this.position,
-      this.interests});
+      this.interests,
+      this.publicKeyHex,
+      this.ed25519PublicKeyHex});
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
     map['peer_id'] = Variable<String>(peerId);
-    if (!nullToAbsent || userId != null) {
-      map['user_id'] = Variable<String>(userId);
-    }
     map['name'] = Variable<String>(name);
     if (!nullToAbsent || age != null) {
       map['age'] = Variable<int>(age);
@@ -1071,14 +1091,18 @@ class DiscoveredPeerEntry extends DataClass
     if (!nullToAbsent || interests != null) {
       map['interests'] = Variable<String>(interests);
     }
+    if (!nullToAbsent || publicKeyHex != null) {
+      map['public_key_hex'] = Variable<String>(publicKeyHex);
+    }
+    if (!nullToAbsent || ed25519PublicKeyHex != null) {
+      map['ed25519_public_key_hex'] = Variable<String>(ed25519PublicKeyHex);
+    }
     return map;
   }
 
   DiscoveredPeersCompanion toCompanion(bool nullToAbsent) {
     return DiscoveredPeersCompanion(
       peerId: Value(peerId),
-      userId:
-          userId == null && nullToAbsent ? const Value.absent() : Value(userId),
       name: Value(name),
       age: age == null && nullToAbsent ? const Value.absent() : Value(age),
       bio: bio == null && nullToAbsent ? const Value.absent() : Value(bio),
@@ -1094,6 +1118,12 @@ class DiscoveredPeerEntry extends DataClass
       interests: interests == null && nullToAbsent
           ? const Value.absent()
           : Value(interests),
+      publicKeyHex: publicKeyHex == null && nullToAbsent
+          ? const Value.absent()
+          : Value(publicKeyHex),
+      ed25519PublicKeyHex: ed25519PublicKeyHex == null && nullToAbsent
+          ? const Value.absent()
+          : Value(ed25519PublicKeyHex),
     );
   }
 
@@ -1102,7 +1132,6 @@ class DiscoveredPeerEntry extends DataClass
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return DiscoveredPeerEntry(
       peerId: serializer.fromJson<String>(json['peerId']),
-      userId: serializer.fromJson<String?>(json['userId']),
       name: serializer.fromJson<String>(json['name']),
       age: serializer.fromJson<int?>(json['age']),
       bio: serializer.fromJson<String?>(json['bio']),
@@ -1112,6 +1141,9 @@ class DiscoveredPeerEntry extends DataClass
       isBlocked: serializer.fromJson<bool>(json['isBlocked']),
       position: serializer.fromJson<int?>(json['position']),
       interests: serializer.fromJson<String?>(json['interests']),
+      publicKeyHex: serializer.fromJson<String?>(json['publicKeyHex']),
+      ed25519PublicKeyHex:
+          serializer.fromJson<String?>(json['ed25519PublicKeyHex']),
     );
   }
   @override
@@ -1119,7 +1151,6 @@ class DiscoveredPeerEntry extends DataClass
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return <String, dynamic>{
       'peerId': serializer.toJson<String>(peerId),
-      'userId': serializer.toJson<String?>(userId),
       'name': serializer.toJson<String>(name),
       'age': serializer.toJson<int?>(age),
       'bio': serializer.toJson<String?>(bio),
@@ -1129,12 +1160,13 @@ class DiscoveredPeerEntry extends DataClass
       'isBlocked': serializer.toJson<bool>(isBlocked),
       'position': serializer.toJson<int?>(position),
       'interests': serializer.toJson<String?>(interests),
+      'publicKeyHex': serializer.toJson<String?>(publicKeyHex),
+      'ed25519PublicKeyHex': serializer.toJson<String?>(ed25519PublicKeyHex),
     };
   }
 
   DiscoveredPeerEntry copyWith(
           {String? peerId,
-          Value<String?> userId = const Value.absent(),
           String? name,
           Value<int?> age = const Value.absent(),
           Value<String?> bio = const Value.absent(),
@@ -1143,10 +1175,11 @@ class DiscoveredPeerEntry extends DataClass
           Value<int?> rssi = const Value.absent(),
           bool? isBlocked,
           Value<int?> position = const Value.absent(),
-          Value<String?> interests = const Value.absent()}) =>
+          Value<String?> interests = const Value.absent(),
+          Value<String?> publicKeyHex = const Value.absent(),
+          Value<String?> ed25519PublicKeyHex = const Value.absent()}) =>
       DiscoveredPeerEntry(
         peerId: peerId ?? this.peerId,
-        userId: userId.present ? userId.value : this.userId,
         name: name ?? this.name,
         age: age.present ? age.value : this.age,
         bio: bio.present ? bio.value : this.bio,
@@ -1157,11 +1190,15 @@ class DiscoveredPeerEntry extends DataClass
         isBlocked: isBlocked ?? this.isBlocked,
         position: position.present ? position.value : this.position,
         interests: interests.present ? interests.value : this.interests,
+        publicKeyHex:
+            publicKeyHex.present ? publicKeyHex.value : this.publicKeyHex,
+        ed25519PublicKeyHex: ed25519PublicKeyHex.present
+            ? ed25519PublicKeyHex.value
+            : this.ed25519PublicKeyHex,
       );
   DiscoveredPeerEntry copyWithCompanion(DiscoveredPeersCompanion data) {
     return DiscoveredPeerEntry(
       peerId: data.peerId.present ? data.peerId.value : this.peerId,
-      userId: data.userId.present ? data.userId.value : this.userId,
       name: data.name.present ? data.name.value : this.name,
       age: data.age.present ? data.age.value : this.age,
       bio: data.bio.present ? data.bio.value : this.bio,
@@ -1174,6 +1211,12 @@ class DiscoveredPeerEntry extends DataClass
       isBlocked: data.isBlocked.present ? data.isBlocked.value : this.isBlocked,
       position: data.position.present ? data.position.value : this.position,
       interests: data.interests.present ? data.interests.value : this.interests,
+      publicKeyHex: data.publicKeyHex.present
+          ? data.publicKeyHex.value
+          : this.publicKeyHex,
+      ed25519PublicKeyHex: data.ed25519PublicKeyHex.present
+          ? data.ed25519PublicKeyHex.value
+          : this.ed25519PublicKeyHex,
     );
   }
 
@@ -1181,7 +1224,6 @@ class DiscoveredPeerEntry extends DataClass
   String toString() {
     return (StringBuffer('DiscoveredPeerEntry(')
           ..write('peerId: $peerId, ')
-          ..write('userId: $userId, ')
           ..write('name: $name, ')
           ..write('age: $age, ')
           ..write('bio: $bio, ')
@@ -1190,7 +1232,9 @@ class DiscoveredPeerEntry extends DataClass
           ..write('rssi: $rssi, ')
           ..write('isBlocked: $isBlocked, ')
           ..write('position: $position, ')
-          ..write('interests: $interests')
+          ..write('interests: $interests, ')
+          ..write('publicKeyHex: $publicKeyHex, ')
+          ..write('ed25519PublicKeyHex: $ed25519PublicKeyHex')
           ..write(')'))
         .toString();
   }
@@ -1198,7 +1242,6 @@ class DiscoveredPeerEntry extends DataClass
   @override
   int get hashCode => Object.hash(
       peerId,
-      userId,
       name,
       age,
       bio,
@@ -1207,13 +1250,14 @@ class DiscoveredPeerEntry extends DataClass
       rssi,
       isBlocked,
       position,
-      interests);
+      interests,
+      publicKeyHex,
+      ed25519PublicKeyHex);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       (other is DiscoveredPeerEntry &&
           other.peerId == this.peerId &&
-          other.userId == this.userId &&
           other.name == this.name &&
           other.age == this.age &&
           other.bio == this.bio &&
@@ -1222,12 +1266,13 @@ class DiscoveredPeerEntry extends DataClass
           other.rssi == this.rssi &&
           other.isBlocked == this.isBlocked &&
           other.position == this.position &&
-          other.interests == this.interests);
+          other.interests == this.interests &&
+          other.publicKeyHex == this.publicKeyHex &&
+          other.ed25519PublicKeyHex == this.ed25519PublicKeyHex);
 }
 
 class DiscoveredPeersCompanion extends UpdateCompanion<DiscoveredPeerEntry> {
   final Value<String> peerId;
-  final Value<String?> userId;
   final Value<String> name;
   final Value<int?> age;
   final Value<String?> bio;
@@ -1237,10 +1282,11 @@ class DiscoveredPeersCompanion extends UpdateCompanion<DiscoveredPeerEntry> {
   final Value<bool> isBlocked;
   final Value<int?> position;
   final Value<String?> interests;
+  final Value<String?> publicKeyHex;
+  final Value<String?> ed25519PublicKeyHex;
   final Value<int> rowid;
   const DiscoveredPeersCompanion({
     this.peerId = const Value.absent(),
-    this.userId = const Value.absent(),
     this.name = const Value.absent(),
     this.age = const Value.absent(),
     this.bio = const Value.absent(),
@@ -1250,11 +1296,12 @@ class DiscoveredPeersCompanion extends UpdateCompanion<DiscoveredPeerEntry> {
     this.isBlocked = const Value.absent(),
     this.position = const Value.absent(),
     this.interests = const Value.absent(),
+    this.publicKeyHex = const Value.absent(),
+    this.ed25519PublicKeyHex = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   DiscoveredPeersCompanion.insert({
     required String peerId,
-    this.userId = const Value.absent(),
     required String name,
     this.age = const Value.absent(),
     this.bio = const Value.absent(),
@@ -1264,13 +1311,14 @@ class DiscoveredPeersCompanion extends UpdateCompanion<DiscoveredPeerEntry> {
     this.isBlocked = const Value.absent(),
     this.position = const Value.absent(),
     this.interests = const Value.absent(),
+    this.publicKeyHex = const Value.absent(),
+    this.ed25519PublicKeyHex = const Value.absent(),
     this.rowid = const Value.absent(),
   })  : peerId = Value(peerId),
         name = Value(name),
         lastSeenAt = Value(lastSeenAt);
   static Insertable<DiscoveredPeerEntry> custom({
     Expression<String>? peerId,
-    Expression<String>? userId,
     Expression<String>? name,
     Expression<int>? age,
     Expression<String>? bio,
@@ -1280,11 +1328,12 @@ class DiscoveredPeersCompanion extends UpdateCompanion<DiscoveredPeerEntry> {
     Expression<bool>? isBlocked,
     Expression<int>? position,
     Expression<String>? interests,
+    Expression<String>? publicKeyHex,
+    Expression<String>? ed25519PublicKeyHex,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
       if (peerId != null) 'peer_id': peerId,
-      if (userId != null) 'user_id': userId,
       if (name != null) 'name': name,
       if (age != null) 'age': age,
       if (bio != null) 'bio': bio,
@@ -1294,13 +1343,15 @@ class DiscoveredPeersCompanion extends UpdateCompanion<DiscoveredPeerEntry> {
       if (isBlocked != null) 'is_blocked': isBlocked,
       if (position != null) 'position': position,
       if (interests != null) 'interests': interests,
+      if (publicKeyHex != null) 'public_key_hex': publicKeyHex,
+      if (ed25519PublicKeyHex != null)
+        'ed25519_public_key_hex': ed25519PublicKeyHex,
       if (rowid != null) 'rowid': rowid,
     });
   }
 
   DiscoveredPeersCompanion copyWith(
       {Value<String>? peerId,
-      Value<String?>? userId,
       Value<String>? name,
       Value<int?>? age,
       Value<String?>? bio,
@@ -1310,10 +1361,11 @@ class DiscoveredPeersCompanion extends UpdateCompanion<DiscoveredPeerEntry> {
       Value<bool>? isBlocked,
       Value<int?>? position,
       Value<String?>? interests,
+      Value<String?>? publicKeyHex,
+      Value<String?>? ed25519PublicKeyHex,
       Value<int>? rowid}) {
     return DiscoveredPeersCompanion(
       peerId: peerId ?? this.peerId,
-      userId: userId ?? this.userId,
       name: name ?? this.name,
       age: age ?? this.age,
       bio: bio ?? this.bio,
@@ -1323,6 +1375,8 @@ class DiscoveredPeersCompanion extends UpdateCompanion<DiscoveredPeerEntry> {
       isBlocked: isBlocked ?? this.isBlocked,
       position: position ?? this.position,
       interests: interests ?? this.interests,
+      publicKeyHex: publicKeyHex ?? this.publicKeyHex,
+      ed25519PublicKeyHex: ed25519PublicKeyHex ?? this.ed25519PublicKeyHex,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -1332,9 +1386,6 @@ class DiscoveredPeersCompanion extends UpdateCompanion<DiscoveredPeerEntry> {
     final map = <String, Expression>{};
     if (peerId.present) {
       map['peer_id'] = Variable<String>(peerId.value);
-    }
-    if (userId.present) {
-      map['user_id'] = Variable<String>(userId.value);
     }
     if (name.present) {
       map['name'] = Variable<String>(name.value);
@@ -1363,6 +1414,13 @@ class DiscoveredPeersCompanion extends UpdateCompanion<DiscoveredPeerEntry> {
     if (interests.present) {
       map['interests'] = Variable<String>(interests.value);
     }
+    if (publicKeyHex.present) {
+      map['public_key_hex'] = Variable<String>(publicKeyHex.value);
+    }
+    if (ed25519PublicKeyHex.present) {
+      map['ed25519_public_key_hex'] =
+          Variable<String>(ed25519PublicKeyHex.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -1373,7 +1431,6 @@ class DiscoveredPeersCompanion extends UpdateCompanion<DiscoveredPeerEntry> {
   String toString() {
     return (StringBuffer('DiscoveredPeersCompanion(')
           ..write('peerId: $peerId, ')
-          ..write('userId: $userId, ')
           ..write('name: $name, ')
           ..write('age: $age, ')
           ..write('bio: $bio, ')
@@ -1383,6 +1440,8 @@ class DiscoveredPeersCompanion extends UpdateCompanion<DiscoveredPeerEntry> {
           ..write('isBlocked: $isBlocked, ')
           ..write('position: $position, ')
           ..write('interests: $interests, ')
+          ..write('publicKeyHex: $publicKeyHex, ')
+          ..write('ed25519PublicKeyHex: $ed25519PublicKeyHex, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -3082,250 +3141,6 @@ class MessageReactionsCompanion extends UpdateCompanion<ReactionEntry> {
   }
 }
 
-class $PeerPublicKeysTable extends PeerPublicKeys
-    with TableInfo<$PeerPublicKeysTable, PeerPublicKeyEntry> {
-  @override
-  final GeneratedDatabase attachedDatabase;
-  final String? _alias;
-  $PeerPublicKeysTable(this.attachedDatabase, [this._alias]);
-  static const VerificationMeta _peerIdMeta = const VerificationMeta('peerId');
-  @override
-  late final GeneratedColumn<String> peerId = GeneratedColumn<String>(
-      'peer_id', aliasedName, false,
-      type: DriftSqlType.string, requiredDuringInsert: true);
-  static const VerificationMeta _publicKeyHexMeta =
-      const VerificationMeta('publicKeyHex');
-  @override
-  late final GeneratedColumn<String> publicKeyHex = GeneratedColumn<String>(
-      'public_key_hex', aliasedName, false,
-      type: DriftSqlType.string, requiredDuringInsert: true);
-  static const VerificationMeta _receivedAtMeta =
-      const VerificationMeta('receivedAt');
-  @override
-  late final GeneratedColumn<DateTime> receivedAt = GeneratedColumn<DateTime>(
-      'received_at', aliasedName, false,
-      type: DriftSqlType.dateTime, requiredDuringInsert: true);
-  @override
-  List<GeneratedColumn> get $columns => [peerId, publicKeyHex, receivedAt];
-  @override
-  String get aliasedName => _alias ?? actualTableName;
-  @override
-  String get actualTableName => $name;
-  static const String $name = 'peer_public_keys';
-  @override
-  VerificationContext validateIntegrity(Insertable<PeerPublicKeyEntry> instance,
-      {bool isInserting = false}) {
-    final context = VerificationContext();
-    final data = instance.toColumns(true);
-    if (data.containsKey('peer_id')) {
-      context.handle(_peerIdMeta,
-          peerId.isAcceptableOrUnknown(data['peer_id']!, _peerIdMeta));
-    } else if (isInserting) {
-      context.missing(_peerIdMeta);
-    }
-    if (data.containsKey('public_key_hex')) {
-      context.handle(
-          _publicKeyHexMeta,
-          publicKeyHex.isAcceptableOrUnknown(
-              data['public_key_hex']!, _publicKeyHexMeta));
-    } else if (isInserting) {
-      context.missing(_publicKeyHexMeta);
-    }
-    if (data.containsKey('received_at')) {
-      context.handle(
-          _receivedAtMeta,
-          receivedAt.isAcceptableOrUnknown(
-              data['received_at']!, _receivedAtMeta));
-    } else if (isInserting) {
-      context.missing(_receivedAtMeta);
-    }
-    return context;
-  }
-
-  @override
-  Set<GeneratedColumn> get $primaryKey => {peerId};
-  @override
-  PeerPublicKeyEntry map(Map<String, dynamic> data, {String? tablePrefix}) {
-    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
-    return PeerPublicKeyEntry(
-      peerId: attachedDatabase.typeMapping
-          .read(DriftSqlType.string, data['${effectivePrefix}peer_id'])!,
-      publicKeyHex: attachedDatabase.typeMapping
-          .read(DriftSqlType.string, data['${effectivePrefix}public_key_hex'])!,
-      receivedAt: attachedDatabase.typeMapping
-          .read(DriftSqlType.dateTime, data['${effectivePrefix}received_at'])!,
-    );
-  }
-
-  @override
-  $PeerPublicKeysTable createAlias(String alias) {
-    return $PeerPublicKeysTable(attachedDatabase, alias);
-  }
-}
-
-class PeerPublicKeyEntry extends DataClass
-    implements Insertable<PeerPublicKeyEntry> {
-  /// BLE peripheral UUID (same as [DiscoveredPeers.peerId]).
-  final String peerId;
-
-  /// Raw 32-byte X25519 public key, stored as hex string.
-  final String publicKeyHex;
-  final DateTime receivedAt;
-  const PeerPublicKeyEntry(
-      {required this.peerId,
-      required this.publicKeyHex,
-      required this.receivedAt});
-  @override
-  Map<String, Expression> toColumns(bool nullToAbsent) {
-    final map = <String, Expression>{};
-    map['peer_id'] = Variable<String>(peerId);
-    map['public_key_hex'] = Variable<String>(publicKeyHex);
-    map['received_at'] = Variable<DateTime>(receivedAt);
-    return map;
-  }
-
-  PeerPublicKeysCompanion toCompanion(bool nullToAbsent) {
-    return PeerPublicKeysCompanion(
-      peerId: Value(peerId),
-      publicKeyHex: Value(publicKeyHex),
-      receivedAt: Value(receivedAt),
-    );
-  }
-
-  factory PeerPublicKeyEntry.fromJson(Map<String, dynamic> json,
-      {ValueSerializer? serializer}) {
-    serializer ??= driftRuntimeOptions.defaultSerializer;
-    return PeerPublicKeyEntry(
-      peerId: serializer.fromJson<String>(json['peerId']),
-      publicKeyHex: serializer.fromJson<String>(json['publicKeyHex']),
-      receivedAt: serializer.fromJson<DateTime>(json['receivedAt']),
-    );
-  }
-  @override
-  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
-    serializer ??= driftRuntimeOptions.defaultSerializer;
-    return <String, dynamic>{
-      'peerId': serializer.toJson<String>(peerId),
-      'publicKeyHex': serializer.toJson<String>(publicKeyHex),
-      'receivedAt': serializer.toJson<DateTime>(receivedAt),
-    };
-  }
-
-  PeerPublicKeyEntry copyWith(
-          {String? peerId, String? publicKeyHex, DateTime? receivedAt}) =>
-      PeerPublicKeyEntry(
-        peerId: peerId ?? this.peerId,
-        publicKeyHex: publicKeyHex ?? this.publicKeyHex,
-        receivedAt: receivedAt ?? this.receivedAt,
-      );
-  PeerPublicKeyEntry copyWithCompanion(PeerPublicKeysCompanion data) {
-    return PeerPublicKeyEntry(
-      peerId: data.peerId.present ? data.peerId.value : this.peerId,
-      publicKeyHex: data.publicKeyHex.present
-          ? data.publicKeyHex.value
-          : this.publicKeyHex,
-      receivedAt:
-          data.receivedAt.present ? data.receivedAt.value : this.receivedAt,
-    );
-  }
-
-  @override
-  String toString() {
-    return (StringBuffer('PeerPublicKeyEntry(')
-          ..write('peerId: $peerId, ')
-          ..write('publicKeyHex: $publicKeyHex, ')
-          ..write('receivedAt: $receivedAt')
-          ..write(')'))
-        .toString();
-  }
-
-  @override
-  int get hashCode => Object.hash(peerId, publicKeyHex, receivedAt);
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      (other is PeerPublicKeyEntry &&
-          other.peerId == this.peerId &&
-          other.publicKeyHex == this.publicKeyHex &&
-          other.receivedAt == this.receivedAt);
-}
-
-class PeerPublicKeysCompanion extends UpdateCompanion<PeerPublicKeyEntry> {
-  final Value<String> peerId;
-  final Value<String> publicKeyHex;
-  final Value<DateTime> receivedAt;
-  final Value<int> rowid;
-  const PeerPublicKeysCompanion({
-    this.peerId = const Value.absent(),
-    this.publicKeyHex = const Value.absent(),
-    this.receivedAt = const Value.absent(),
-    this.rowid = const Value.absent(),
-  });
-  PeerPublicKeysCompanion.insert({
-    required String peerId,
-    required String publicKeyHex,
-    required DateTime receivedAt,
-    this.rowid = const Value.absent(),
-  })  : peerId = Value(peerId),
-        publicKeyHex = Value(publicKeyHex),
-        receivedAt = Value(receivedAt);
-  static Insertable<PeerPublicKeyEntry> custom({
-    Expression<String>? peerId,
-    Expression<String>? publicKeyHex,
-    Expression<DateTime>? receivedAt,
-    Expression<int>? rowid,
-  }) {
-    return RawValuesInsertable({
-      if (peerId != null) 'peer_id': peerId,
-      if (publicKeyHex != null) 'public_key_hex': publicKeyHex,
-      if (receivedAt != null) 'received_at': receivedAt,
-      if (rowid != null) 'rowid': rowid,
-    });
-  }
-
-  PeerPublicKeysCompanion copyWith(
-      {Value<String>? peerId,
-      Value<String>? publicKeyHex,
-      Value<DateTime>? receivedAt,
-      Value<int>? rowid}) {
-    return PeerPublicKeysCompanion(
-      peerId: peerId ?? this.peerId,
-      publicKeyHex: publicKeyHex ?? this.publicKeyHex,
-      receivedAt: receivedAt ?? this.receivedAt,
-      rowid: rowid ?? this.rowid,
-    );
-  }
-
-  @override
-  Map<String, Expression> toColumns(bool nullToAbsent) {
-    final map = <String, Expression>{};
-    if (peerId.present) {
-      map['peer_id'] = Variable<String>(peerId.value);
-    }
-    if (publicKeyHex.present) {
-      map['public_key_hex'] = Variable<String>(publicKeyHex.value);
-    }
-    if (receivedAt.present) {
-      map['received_at'] = Variable<DateTime>(receivedAt.value);
-    }
-    if (rowid.present) {
-      map['rowid'] = Variable<int>(rowid.value);
-    }
-    return map;
-  }
-
-  @override
-  String toString() {
-    return (StringBuffer('PeerPublicKeysCompanion(')
-          ..write('peerId: $peerId, ')
-          ..write('publicKeyHex: $publicKeyHex, ')
-          ..write('receivedAt: $receivedAt, ')
-          ..write('rowid: $rowid')
-          ..write(')'))
-        .toString();
-  }
-}
-
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -3339,7 +3154,6 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $BlockedUsersTable blockedUsers = $BlockedUsersTable(this);
   late final $MessageReactionsTable messageReactions =
       $MessageReactionsTable(this);
-  late final $PeerPublicKeysTable peerPublicKeys = $PeerPublicKeysTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -3352,8 +3166,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
         messages,
         anchorDrops,
         blockedUsers,
-        messageReactions,
-        peerPublicKeys
+        messageReactions
       ];
 }
 
@@ -3962,7 +3775,6 @@ typedef $$UserPhotosTableProcessedTableManager = ProcessedTableManager<
 typedef $$DiscoveredPeersTableCreateCompanionBuilder = DiscoveredPeersCompanion
     Function({
   required String peerId,
-  Value<String?> userId,
   required String name,
   Value<int?> age,
   Value<String?> bio,
@@ -3972,12 +3784,13 @@ typedef $$DiscoveredPeersTableCreateCompanionBuilder = DiscoveredPeersCompanion
   Value<bool> isBlocked,
   Value<int?> position,
   Value<String?> interests,
+  Value<String?> publicKeyHex,
+  Value<String?> ed25519PublicKeyHex,
   Value<int> rowid,
 });
 typedef $$DiscoveredPeersTableUpdateCompanionBuilder = DiscoveredPeersCompanion
     Function({
   Value<String> peerId,
-  Value<String?> userId,
   Value<String> name,
   Value<int?> age,
   Value<String?> bio,
@@ -3987,6 +3800,8 @@ typedef $$DiscoveredPeersTableUpdateCompanionBuilder = DiscoveredPeersCompanion
   Value<bool> isBlocked,
   Value<int?> position,
   Value<String?> interests,
+  Value<String?> publicKeyHex,
+  Value<String?> ed25519PublicKeyHex,
   Value<int> rowid,
 });
 
@@ -4023,9 +3838,6 @@ class $$DiscoveredPeersTableFilterComposer
   ColumnFilters<String> get peerId => $composableBuilder(
       column: $table.peerId, builder: (column) => ColumnFilters(column));
 
-  ColumnFilters<String> get userId => $composableBuilder(
-      column: $table.userId, builder: (column) => ColumnFilters(column));
-
   ColumnFilters<String> get name => $composableBuilder(
       column: $table.name, builder: (column) => ColumnFilters(column));
 
@@ -4052,6 +3864,13 @@ class $$DiscoveredPeersTableFilterComposer
 
   ColumnFilters<String> get interests => $composableBuilder(
       column: $table.interests, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get publicKeyHex => $composableBuilder(
+      column: $table.publicKeyHex, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get ed25519PublicKeyHex => $composableBuilder(
+      column: $table.ed25519PublicKeyHex,
+      builder: (column) => ColumnFilters(column));
 
   Expression<bool> conversationsRefs(
       Expression<bool> Function($$ConversationsTableFilterComposer f) f) {
@@ -4087,9 +3906,6 @@ class $$DiscoveredPeersTableOrderingComposer
   ColumnOrderings<String> get peerId => $composableBuilder(
       column: $table.peerId, builder: (column) => ColumnOrderings(column));
 
-  ColumnOrderings<String> get userId => $composableBuilder(
-      column: $table.userId, builder: (column) => ColumnOrderings(column));
-
   ColumnOrderings<String> get name => $composableBuilder(
       column: $table.name, builder: (column) => ColumnOrderings(column));
 
@@ -4117,6 +3933,14 @@ class $$DiscoveredPeersTableOrderingComposer
 
   ColumnOrderings<String> get interests => $composableBuilder(
       column: $table.interests, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get publicKeyHex => $composableBuilder(
+      column: $table.publicKeyHex,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get ed25519PublicKeyHex => $composableBuilder(
+      column: $table.ed25519PublicKeyHex,
+      builder: (column) => ColumnOrderings(column));
 }
 
 class $$DiscoveredPeersTableAnnotationComposer
@@ -4130,9 +3954,6 @@ class $$DiscoveredPeersTableAnnotationComposer
   });
   GeneratedColumn<String> get peerId =>
       $composableBuilder(column: $table.peerId, builder: (column) => column);
-
-  GeneratedColumn<String> get userId =>
-      $composableBuilder(column: $table.userId, builder: (column) => column);
 
   GeneratedColumn<String> get name =>
       $composableBuilder(column: $table.name, builder: (column) => column);
@@ -4160,6 +3981,12 @@ class $$DiscoveredPeersTableAnnotationComposer
 
   GeneratedColumn<String> get interests =>
       $composableBuilder(column: $table.interests, builder: (column) => column);
+
+  GeneratedColumn<String> get publicKeyHex => $composableBuilder(
+      column: $table.publicKeyHex, builder: (column) => column);
+
+  GeneratedColumn<String> get ed25519PublicKeyHex => $composableBuilder(
+      column: $table.ed25519PublicKeyHex, builder: (column) => column);
 
   Expression<T> conversationsRefs<T extends Object>(
       Expression<T> Function($$ConversationsTableAnnotationComposer a) f) {
@@ -4208,7 +4035,6 @@ class $$DiscoveredPeersTableTableManager extends RootTableManager<
               $$DiscoveredPeersTableAnnotationComposer($db: db, $table: table),
           updateCompanionCallback: ({
             Value<String> peerId = const Value.absent(),
-            Value<String?> userId = const Value.absent(),
             Value<String> name = const Value.absent(),
             Value<int?> age = const Value.absent(),
             Value<String?> bio = const Value.absent(),
@@ -4218,11 +4044,12 @@ class $$DiscoveredPeersTableTableManager extends RootTableManager<
             Value<bool> isBlocked = const Value.absent(),
             Value<int?> position = const Value.absent(),
             Value<String?> interests = const Value.absent(),
+            Value<String?> publicKeyHex = const Value.absent(),
+            Value<String?> ed25519PublicKeyHex = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
               DiscoveredPeersCompanion(
             peerId: peerId,
-            userId: userId,
             name: name,
             age: age,
             bio: bio,
@@ -4232,11 +4059,12 @@ class $$DiscoveredPeersTableTableManager extends RootTableManager<
             isBlocked: isBlocked,
             position: position,
             interests: interests,
+            publicKeyHex: publicKeyHex,
+            ed25519PublicKeyHex: ed25519PublicKeyHex,
             rowid: rowid,
           ),
           createCompanionCallback: ({
             required String peerId,
-            Value<String?> userId = const Value.absent(),
             required String name,
             Value<int?> age = const Value.absent(),
             Value<String?> bio = const Value.absent(),
@@ -4246,11 +4074,12 @@ class $$DiscoveredPeersTableTableManager extends RootTableManager<
             Value<bool> isBlocked = const Value.absent(),
             Value<int?> position = const Value.absent(),
             Value<String?> interests = const Value.absent(),
+            Value<String?> publicKeyHex = const Value.absent(),
+            Value<String?> ed25519PublicKeyHex = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
               DiscoveredPeersCompanion.insert(
             peerId: peerId,
-            userId: userId,
             name: name,
             age: age,
             bio: bio,
@@ -4260,6 +4089,8 @@ class $$DiscoveredPeersTableTableManager extends RootTableManager<
             isBlocked: isBlocked,
             position: position,
             interests: interests,
+            publicKeyHex: publicKeyHex,
+            ed25519PublicKeyHex: ed25519PublicKeyHex,
             rowid: rowid,
           ),
           withReferenceMapper: (p0) => p0
@@ -5663,151 +5494,6 @@ typedef $$MessageReactionsTableProcessedTableManager = ProcessedTableManager<
     (ReactionEntry, $$MessageReactionsTableReferences),
     ReactionEntry,
     PrefetchHooks Function({bool messageId})>;
-typedef $$PeerPublicKeysTableCreateCompanionBuilder = PeerPublicKeysCompanion
-    Function({
-  required String peerId,
-  required String publicKeyHex,
-  required DateTime receivedAt,
-  Value<int> rowid,
-});
-typedef $$PeerPublicKeysTableUpdateCompanionBuilder = PeerPublicKeysCompanion
-    Function({
-  Value<String> peerId,
-  Value<String> publicKeyHex,
-  Value<DateTime> receivedAt,
-  Value<int> rowid,
-});
-
-class $$PeerPublicKeysTableFilterComposer
-    extends Composer<_$AppDatabase, $PeerPublicKeysTable> {
-  $$PeerPublicKeysTableFilterComposer({
-    required super.$db,
-    required super.$table,
-    super.joinBuilder,
-    super.$addJoinBuilderToRootComposer,
-    super.$removeJoinBuilderFromRootComposer,
-  });
-  ColumnFilters<String> get peerId => $composableBuilder(
-      column: $table.peerId, builder: (column) => ColumnFilters(column));
-
-  ColumnFilters<String> get publicKeyHex => $composableBuilder(
-      column: $table.publicKeyHex, builder: (column) => ColumnFilters(column));
-
-  ColumnFilters<DateTime> get receivedAt => $composableBuilder(
-      column: $table.receivedAt, builder: (column) => ColumnFilters(column));
-}
-
-class $$PeerPublicKeysTableOrderingComposer
-    extends Composer<_$AppDatabase, $PeerPublicKeysTable> {
-  $$PeerPublicKeysTableOrderingComposer({
-    required super.$db,
-    required super.$table,
-    super.joinBuilder,
-    super.$addJoinBuilderToRootComposer,
-    super.$removeJoinBuilderFromRootComposer,
-  });
-  ColumnOrderings<String> get peerId => $composableBuilder(
-      column: $table.peerId, builder: (column) => ColumnOrderings(column));
-
-  ColumnOrderings<String> get publicKeyHex => $composableBuilder(
-      column: $table.publicKeyHex,
-      builder: (column) => ColumnOrderings(column));
-
-  ColumnOrderings<DateTime> get receivedAt => $composableBuilder(
-      column: $table.receivedAt, builder: (column) => ColumnOrderings(column));
-}
-
-class $$PeerPublicKeysTableAnnotationComposer
-    extends Composer<_$AppDatabase, $PeerPublicKeysTable> {
-  $$PeerPublicKeysTableAnnotationComposer({
-    required super.$db,
-    required super.$table,
-    super.joinBuilder,
-    super.$addJoinBuilderToRootComposer,
-    super.$removeJoinBuilderFromRootComposer,
-  });
-  GeneratedColumn<String> get peerId =>
-      $composableBuilder(column: $table.peerId, builder: (column) => column);
-
-  GeneratedColumn<String> get publicKeyHex => $composableBuilder(
-      column: $table.publicKeyHex, builder: (column) => column);
-
-  GeneratedColumn<DateTime> get receivedAt => $composableBuilder(
-      column: $table.receivedAt, builder: (column) => column);
-}
-
-class $$PeerPublicKeysTableTableManager extends RootTableManager<
-    _$AppDatabase,
-    $PeerPublicKeysTable,
-    PeerPublicKeyEntry,
-    $$PeerPublicKeysTableFilterComposer,
-    $$PeerPublicKeysTableOrderingComposer,
-    $$PeerPublicKeysTableAnnotationComposer,
-    $$PeerPublicKeysTableCreateCompanionBuilder,
-    $$PeerPublicKeysTableUpdateCompanionBuilder,
-    (
-      PeerPublicKeyEntry,
-      BaseReferences<_$AppDatabase, $PeerPublicKeysTable, PeerPublicKeyEntry>
-    ),
-    PeerPublicKeyEntry,
-    PrefetchHooks Function()> {
-  $$PeerPublicKeysTableTableManager(
-      _$AppDatabase db, $PeerPublicKeysTable table)
-      : super(TableManagerState(
-          db: db,
-          table: table,
-          createFilteringComposer: () =>
-              $$PeerPublicKeysTableFilterComposer($db: db, $table: table),
-          createOrderingComposer: () =>
-              $$PeerPublicKeysTableOrderingComposer($db: db, $table: table),
-          createComputedFieldComposer: () =>
-              $$PeerPublicKeysTableAnnotationComposer($db: db, $table: table),
-          updateCompanionCallback: ({
-            Value<String> peerId = const Value.absent(),
-            Value<String> publicKeyHex = const Value.absent(),
-            Value<DateTime> receivedAt = const Value.absent(),
-            Value<int> rowid = const Value.absent(),
-          }) =>
-              PeerPublicKeysCompanion(
-            peerId: peerId,
-            publicKeyHex: publicKeyHex,
-            receivedAt: receivedAt,
-            rowid: rowid,
-          ),
-          createCompanionCallback: ({
-            required String peerId,
-            required String publicKeyHex,
-            required DateTime receivedAt,
-            Value<int> rowid = const Value.absent(),
-          }) =>
-              PeerPublicKeysCompanion.insert(
-            peerId: peerId,
-            publicKeyHex: publicKeyHex,
-            receivedAt: receivedAt,
-            rowid: rowid,
-          ),
-          withReferenceMapper: (p0) => p0
-              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
-              .toList(),
-          prefetchHooksCallback: null,
-        ));
-}
-
-typedef $$PeerPublicKeysTableProcessedTableManager = ProcessedTableManager<
-    _$AppDatabase,
-    $PeerPublicKeysTable,
-    PeerPublicKeyEntry,
-    $$PeerPublicKeysTableFilterComposer,
-    $$PeerPublicKeysTableOrderingComposer,
-    $$PeerPublicKeysTableAnnotationComposer,
-    $$PeerPublicKeysTableCreateCompanionBuilder,
-    $$PeerPublicKeysTableUpdateCompanionBuilder,
-    (
-      PeerPublicKeyEntry,
-      BaseReferences<_$AppDatabase, $PeerPublicKeysTable, PeerPublicKeyEntry>
-    ),
-    PeerPublicKeyEntry,
-    PrefetchHooks Function()>;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -5828,6 +5514,4 @@ class $AppDatabaseManager {
       $$BlockedUsersTableTableManager(_db, _db.blockedUsers);
   $$MessageReactionsTableTableManager get messageReactions =>
       $$MessageReactionsTableTableManager(_db, _db.messageReactions);
-  $$PeerPublicKeysTableTableManager get peerPublicKeys =>
-      $$PeerPublicKeysTableTableManager(_db, _db.peerPublicKeys);
 }

@@ -4,7 +4,10 @@ import 'package:uuid/uuid.dart';
 import '../../core/constants/app_constants.dart';
 import '../local_database/database.dart';
 
-/// Repository for managing conversations and messages
+/// Repository for managing conversations and messages.
+///
+/// All [peerId] parameters refer to the peer's stable app-level userId
+/// (canonical UUID). Transport-specific IDs are resolved upstream.
 class ChatRepository {
   ChatRepository(this._db);
 
@@ -239,7 +242,10 @@ class ChatRepository {
   /// Pass the sender's [id] (from the BLE payload's `messageId`) so that
   /// reactions sent by either side can reference the same stable ID.
   /// Uses insert-or-ignore so duplicate deliveries are silently dropped.
-  Future<MessageEntry> receiveMessage({
+  ///
+  /// Returns null if the message was a duplicate (already in DB), allowing
+  /// callers to skip UI updates for re-delivered messages.
+  Future<MessageEntry?> receiveMessage({
     required String conversationId,
     required String senderId,
     required MessageContentType contentType,
@@ -249,6 +255,13 @@ class ChatRepository {
     String? replyToMessageId,
   }) async {
     final msgId = id ?? _uuid.v4();
+
+    // Check if this message already exists (duplicate delivery).
+    if (id != null) {
+      final existing = await getMessageById(id);
+      if (existing != null) return null;
+    }
+
     final now = DateTime.now();
 
     final entry = MessagesCompanion.insert(
@@ -291,7 +304,9 @@ class ChatRepository {
   /// [textContent] stores JSON-encoded metadata:
   ///   {"photo_id":"<uuid>","original_size":<bytes>}
   /// [thumbnailPath] is the relative path to the saved thumbnail file.
-  Future<MessageEntry> receivePhotoPreview({
+  ///
+  /// Returns null if the message was a duplicate (already in DB).
+  Future<MessageEntry?> receivePhotoPreview({
     required String conversationId,
     required String senderId,
     required String textContent,
@@ -299,6 +314,13 @@ class ChatRepository {
     String? id,
   }) async {
     final msgId = id ?? _uuid.v4();
+
+    // Check if this message already exists (duplicate delivery).
+    if (id != null) {
+      final existing = await getMessageById(id);
+      if (existing != null) return null;
+    }
+
     final now = DateTime.now();
 
     final entry = MessagesCompanion.insert(
@@ -447,7 +469,7 @@ class ChatRepository {
   }
 
   /// Add a message to a conversation (for received messages)
-  Future<MessageEntry> addMessage({
+  Future<MessageEntry?> addMessage({
     required String conversationId,
     required String senderId,
     String? textContent,
@@ -484,17 +506,6 @@ class ChatRepository {
       ..where(_db.messages.senderId.equals(senderId).not())
       ..addColumns([count]);
     return query.getSingle().then((result) => result.read(count) ?? 0);
-  }
-
-  /// Fix messages whose [senderId] was stored as an empty string due to
-  /// [ChatBloc] being created before the profile UUID was available.
-  /// Safe to call unconditionally — only rows with [senderId] == '' are touched,
-  /// and those can only ever be locally-sent messages (received messages always
-  /// carry the peer's non-empty BLE device ID as their sender).
-  Future<void> fixEmptySenderIds(String ownUserId) async {
-    if (ownUserId.isEmpty) return;
-    await (_db.update(_db.messages)..where((t) => t.senderId.equals('')))
-        .write(MessagesCompanion(senderId: Value(ownUserId)));
   }
 
   /// Persist the stable [photoId] into a sent photo message's [textContent]
@@ -549,6 +560,7 @@ class ChatRepository {
               t.conversationId.equals(conversationId) &
               t.senderId.equals(ownUserId) &
               (t.status.equalsValue(MessageStatus.pending) |
+                  t.status.equalsValue(MessageStatus.queued) |
                   t.status.equalsValue(MessageStatus.failed)) &
               t.contentType.equalsValue(MessageContentType.text) &
               t.createdAt.isBiggerThanValue(cutoff) &
@@ -582,6 +594,7 @@ class ChatRepository {
           ..where((t) =>
               t.senderId.equals(ownUserId) &
               (t.status.equalsValue(MessageStatus.pending) |
+                  t.status.equalsValue(MessageStatus.queued) |
                   t.status.equalsValue(MessageStatus.failed)) &
               t.createdAt.isSmallerThanValue(cutoff)))
         .write(const MessagesCompanion(status: Value(MessageStatus.failed)));

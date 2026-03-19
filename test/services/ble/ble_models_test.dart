@@ -31,7 +31,7 @@ void main() {
     });
 
     test('toJson omits null position and interests', () {
-      final payload = BroadcastPayload(userId: 'u', name: 'Bob');
+      const payload = BroadcastPayload(userId: 'u', name: 'Bob');
 
       final json = payload.toJson();
 
@@ -180,7 +180,7 @@ void main() {
 
   group('PhotoTransferProgress', () {
     test('progressPercent rounds to nearest int', () {
-      final p = PhotoTransferProgress(
+      const p = PhotoTransferProgress(
         messageId: 'm',
         peerId: 'p',
         progress: 0.756,
@@ -190,7 +190,7 @@ void main() {
     });
 
     test('isComplete when status = completed', () {
-      final p = PhotoTransferProgress(
+      const p = PhotoTransferProgress(
         messageId: 'm',
         peerId: 'p',
         progress: 1.0,
@@ -201,7 +201,7 @@ void main() {
     });
 
     test('isFailed when status = failed', () {
-      final p = PhotoTransferProgress(
+      const p = PhotoTransferProgress(
         messageId: 'm',
         peerId: 'p',
         progress: 0.0,
@@ -213,7 +213,7 @@ void main() {
     });
 
     test('copyWith updates fields, preserves rest', () {
-      final orig = PhotoTransferProgress(
+      const orig = PhotoTransferProgress(
         messageId: 'msg-1',
         peerId: 'peer-1',
         progress: 0.5,
@@ -231,7 +231,7 @@ void main() {
 
   group('MessagePayload', () {
     test('toJson/fromJson round-trip', () {
-      final payload = MessagePayload(
+      const payload = MessagePayload(
         messageId: 'msg-abc',
         type: MessageType.photoPreview,
         content: '{"photo_id":"xyz","size":1024}',
@@ -244,7 +244,7 @@ void main() {
     });
 
     test('wifiTransferReady round-trip', () {
-      final payload = MessagePayload(
+      const payload = MessagePayload(
         messageId: 'transfer-1',
         type: MessageType.wifiTransferReady,
         content: 'transfer-id-xyz',

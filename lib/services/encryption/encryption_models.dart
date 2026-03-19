@@ -7,11 +7,16 @@ import 'dart:typed_data';
 // encrypted wire payloads.  All are immutable value types.
 // ---------------------------------------------------------------------------
 
-/// The role this device plays in a specific Noise_XK handshake.
+/// The Noise pattern used for a handshake.
 ///
-/// XK pattern:
-///   Initiator = the side that sends the first handshake message (msg1).
-///   Responder = the side that receives msg1 and replies with msg2.
+/// XK: requires pre-shared public key (from BLE profile or LAN beacon).
+/// XX: no pre-shared key needed — static keys exchanged during handshake.
+enum NoisePattern { xk, xx }
+
+/// The role this device plays in a specific Noise handshake.
+///
+/// Initiator = the side that sends the first handshake message (msg1).
+/// Responder = the side that receives msg1 and replies with msg2.
 ///
 /// Tie-breaking rule: the peer whose app-userId is lexicographically
 /// GREATER is always the initiator (avoids simultaneous-initiate conflicts).
@@ -59,6 +64,7 @@ class PendingHandshake {
     required this.peerId,
     required this.role,
     required this.state,
+    this.pattern = NoisePattern.xk,
     required this.localEphemeralPrivate,
     required this.localEphemeralPublic,
     this.remoteEphemeralPublic,
@@ -72,6 +78,7 @@ class PendingHandshake {
   final String peerId;
   final NoiseRole role;
   final HandshakeState state;
+  final NoisePattern pattern;
 
   // Ephemeral key pair for this handshake (discarded after Split()).
   final Uint8List localEphemeralPrivate;
@@ -102,6 +109,7 @@ class PendingHandshake {
       peerId: peerId,
       role: role,
       state: state ?? this.state,
+      pattern: pattern,
       localEphemeralPrivate: localEphemeralPrivate,
       localEphemeralPublic: localEphemeralPublic,
       remoteEphemeralPublic: remoteEphemeralPublic ?? this.remoteEphemeralPublic,

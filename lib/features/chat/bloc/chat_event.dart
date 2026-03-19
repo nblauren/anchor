@@ -149,8 +149,6 @@ class BleMessageReceived extends ChatEvent {
 // Note: Photo transfer events are now in photo_transfer_bloc.dart
 // Note: Reaction events are now in reaction_bloc.dart
 
-/// A peer's BLE peripheral UUID changed due to MAC rotation.
-/// Updates the active conversation's peerId so sends target the new address.
 /// A peer has gone out of range — cancel any active photo transfers with them.
 class ChatPeerLost extends ChatEvent {
   const ChatPeerLost(this.peerId);
@@ -158,19 +156,6 @@ class ChatPeerLost extends ChatEvent {
 
   @override
   List<Object?> get props => [peerId];
-}
-
-class ChatPeerIdMigrated extends ChatEvent {
-  const ChatPeerIdMigrated({
-    required this.oldPeerId,
-    required this.newPeerId,
-  });
-
-  final String oldPeerId;
-  final String newPeerId;
-
-  @override
-  List<Object?> get props => [oldPeerId, newPeerId];
 }
 
 // Note: E2EE events are now in chat_e2ee_bloc.dart

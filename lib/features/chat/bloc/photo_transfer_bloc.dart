@@ -168,20 +168,6 @@ class PhotoPeerLost extends PhotoTransferEvent {
   List<Object?> get props => [peerId];
 }
 
-/// Peer ID changed due to MAC rotation — update transfer mappings.
-class PhotoPeerIdMigrated extends PhotoTransferEvent {
-  const PhotoPeerIdMigrated({
-    required this.oldPeerId,
-    required this.newPeerId,
-  });
-
-  final String oldPeerId;
-  final String newPeerId;
-
-  @override
-  List<Object?> get props => [oldPeerId, newPeerId];
-}
-
 /// Reset transfer state (e.g. when conversation is closed).
 class ClearPhotoTransfers extends PhotoTransferEvent {
   const ClearPhotoTransfers();
@@ -262,7 +248,6 @@ class PhotoTransferBloc
     on<_BlePhotoReceived>(_onBlePhotoReceived);
     on<_PreviewUpgraded>(_onPreviewUpgraded);
     on<PhotoPeerLost>(_onPhotoPeerLost);
-    on<PhotoPeerIdMigrated>(_onPhotoPeerIdMigrated);
     on<ClearPhotoTransfers>(_onClearPhotoTransfers);
 
     // Subscribe to transport manager photo streams.
@@ -455,6 +440,9 @@ class PhotoTransferBloc
         textContent: metadata,
         thumbnailPath: thumbnailPath,
       );
+
+      // Duplicate preview — already persisted and shown in UI.
+      if (message == null) return;
 
       final previewSender =
           await _peerRepository.getPeerById(preview.fromPeerId);
@@ -698,7 +686,9 @@ class PhotoTransferBloc
           contentType: MessageContentType.photo,
           photoPath: photoPath,
         );
-        _chatEventBus.notifyMessageAdded(message);
+        if (message != null) {
+          _chatEventBus.notifyMessageAdded(message);
+        }
       }
 
       Logger.info(
@@ -816,6 +806,8 @@ class PhotoTransferBloc
           thumbnailPath: thumbnailPath,
         );
 
+        if (message == null) return; // Duplicate
+
         final wifiSender = await _peerRepository.getPeerById(bleDeviceId);
         await _notificationService.showMessageNotification(
           fromPeerId: bleDeviceId,
@@ -868,7 +860,9 @@ class PhotoTransferBloc
           contentType: MessageContentType.photo,
           photoPath: photoPath,
         );
-        _chatEventBus.notifyMessageAdded(message);
+        if (message != null) {
+          _chatEventBus.notifyMessageAdded(message);
+        }
       }
 
       Logger.info(
@@ -966,37 +960,6 @@ class PhotoTransferBloc
       'peer ${event.peerId.substring(0, 8)} lost',
       'PhotoTransfer',
     );
-  }
-
-  void _onPhotoPeerIdMigrated(
-    PhotoPeerIdMigrated event,
-    Emitter<PhotoTransferState> emit,
-  ) {
-    // Update pending outgoing photos targeting the old peerId.
-    final updatedPending =
-        Map<String, PendingOutgoingPhoto>.from(state.pendingOutgoingPhotos);
-    var changed = false;
-    for (final entry in updatedPending.entries.toList()) {
-      if (entry.value.peerId == event.oldPeerId) {
-        updatedPending[entry.key] = PendingOutgoingPhoto(
-          photoId: entry.value.photoId,
-          localPhotoPath: entry.value.localPhotoPath,
-          messageId: entry.value.messageId,
-          peerId: event.newPeerId,
-        );
-        changed = true;
-      }
-    }
-    if (changed) {
-      emit(state.copyWith(pendingOutgoingPhotos: updatedPending));
-    }
-
-    // Update transferToBleId mappings.
-    for (final entry in _transferToBleId.entries.toList()) {
-      if (entry.value == event.oldPeerId) {
-        _transferToBleId[entry.key] = event.newPeerId;
-      }
-    }
   }
 
   // ---------------------------------------------------------------------------

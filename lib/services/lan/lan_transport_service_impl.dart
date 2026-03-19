@@ -25,6 +25,7 @@ class _LanPeerMeta {
     this.interests,
     this.thumbnailBytes,
     this.publicKeyHex,
+    this.signingPublicKeyHex,
   });
 
   final String lanPeerId;
@@ -39,6 +40,8 @@ class _LanPeerMeta {
   Uint8List? thumbnailBytes;
   /// Peer's X25519 public key (64-char hex) for E2EE key exchange.
   final String? publicKeyHex;
+  /// Peer's Ed25519 signing public key (64-char hex) for mesh announcement verification.
+  final String? signingPublicKeyHex;
 }
 
 class _PendingPhoto {
@@ -230,8 +233,10 @@ class LanTransportServiceImpl implements LanTransportService {
 
     // Start timers
     _beaconTimer = Timer.periodic(_beaconInterval, (_) => _sendBeacon());
+    // Check peer timeouts on each beacon cycle instead of a separate 10s poll.
+    // This reduces worst-case detection lag from 10s to the beacon interval (5s).
     _timeoutTimer = Timer.periodic(
-      const Duration(seconds: 10),
+      _beaconInterval,
       (_) => _checkPeerTimeouts(),
     );
 
@@ -576,6 +581,7 @@ class LanTransportServiceImpl implements LanTransportService {
       if (_profile!.interests != null && _profile!.interests!.isNotEmpty)
         'interests': _profile!.interests,
       if (_profile!.publicKeyHex != null) 'pk': _profile!.publicKeyHex,
+      if (_profile!.signingPublicKeyHex != null) 'spk': _profile!.signingPublicKeyHex,
     };
 
     try {
@@ -629,24 +635,34 @@ class LanTransportServiceImpl implements LanTransportService {
     _startRecoveryTimer();
   }
 
+  int _recoveryAttempt = 0;
+
   void _startRecoveryTimer() {
     _recoveryTimer?.cancel();
-    _recoveryTimer = Timer.periodic(const Duration(seconds: 15), (_) async {
+    _recoveryAttempt = 0;
+    _scheduleRecoveryAttempt();
+  }
+
+  /// Schedule the next recovery attempt with exponential backoff (5s → 60s cap).
+  void _scheduleRecoveryAttempt() {
+    final delaySec = min(5 * pow(2, _recoveryAttempt).toInt(), 60);
+    _recoveryTimer = Timer(Duration(seconds: delaySec), () async {
       if (_started) {
-        // Already restarted — cancel recovery.
-        _recoveryTimer?.cancel();
         _recoveryTimer = null;
         return;
       }
       final available = await isAvailable;
       if (available) {
         Logger.info('LAN: Wi-Fi returned — restarting LAN transport', _tag);
-        _recoveryTimer?.cancel();
         _recoveryTimer = null;
+        _recoveryAttempt = 0;
         await start();
         if (_started) {
           _availabilityController.add(true);
         }
+      } else {
+        _recoveryAttempt++;
+        _scheduleRecoveryAttempt();
       }
     });
   }
@@ -674,6 +690,8 @@ class LanTransportServiceImpl implements LanTransportService {
       final interests = json['interests'] as String?;
       final pk = json['pk'] as String?;
       final publicKeyHex = (pk != null && pk.length == 64) ? pk : null;
+      final spk = json['spk'] as String?;
+      final signingPublicKeyHex = (spk != null && spk.length == 64) ? spk : null;
       final ipAddress = datagram.address.address;
 
       _lastSeen[lanPeerId] = DateTime.now();
@@ -691,6 +709,7 @@ class LanTransportServiceImpl implements LanTransportService {
           position: position,
           interests: interests,
           publicKeyHex: publicKeyHex,
+          signingPublicKeyHex: signingPublicKeyHex,
         );
         _peers[lanPeerId] = meta;
 
@@ -707,7 +726,8 @@ class LanTransportServiceImpl implements LanTransportService {
             existing.bio != bio ||
             existing.position != position ||
             existing.interests != interests ||
-            existing.publicKeyHex != publicKeyHex) {
+            existing.publicKeyHex != publicKeyHex ||
+            existing.signingPublicKeyHex != signingPublicKeyHex) {
           final updated = _LanPeerMeta(
             lanPeerId: lanPeerId,
             userId: userId,
@@ -720,6 +740,7 @@ class LanTransportServiceImpl implements LanTransportService {
             interests: interests,
             thumbnailBytes: existing.thumbnailBytes,
             publicKeyHex: publicKeyHex,
+            signingPublicKeyHex: signingPublicKeyHex,
           );
           _peers[lanPeerId] = updated;
           _peerDiscoveredController.add(_buildDiscoveredPeer(updated));
@@ -1049,6 +1070,7 @@ class LanTransportServiceImpl implements LanTransportService {
       thumbnailBytes: meta.thumbnailBytes,
       timestamp: DateTime.now(),
       publicKeyHex: meta.publicKeyHex,
+      signingPublicKeyHex: meta.signingPublicKeyHex,
     );
   }
 

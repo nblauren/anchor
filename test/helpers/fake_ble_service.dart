@@ -294,4 +294,10 @@ class FakeBleService implements BleServiceInterface {
 
   @override
   String? resolveToPeripheralId(String peerId) => null;
+
+  @override
+  void suppressMeshRelay() {}
+
+  @override
+  void resumeMeshRelay() {}
 }

@@ -18,6 +18,7 @@ import 'services/encryption/encryption.dart';
 import 'services/image_service.dart';
 import 'services/audio_service.dart';
 import 'services/lan/lan.dart';
+import 'services/mesh/mesh.dart';
 import 'services/message_send_service.dart';
 import 'services/nearby/nearby.dart';
 import 'services/notification_service.dart';
@@ -52,6 +53,26 @@ Future<void> initializeDependencies({
     () => NotificationService(audioService: getIt<AudioService>()),
   );
 
+  // Initialize database
+  await getIt<DatabaseService>().initialize();
+
+  // Encryption service — registered after database is ready.
+  // Must be initialized before BLE so it can supply the local public key
+  // for embedding in BroadcastPayload (fff1 characteristic).
+  getIt.registerLazySingleton<EncryptionService>(
+    () => EncryptionService(database: getIt<DatabaseService>().database),
+  );
+  await getIt<EncryptionService>().initialize();
+
+  // PeerRegistry — single source of truth for all peer identity resolution
+  getIt.registerLazySingleton<PeerRegistry>(() => PeerRegistry());
+
+  // MessageRouter — unified cross-transport dedup and gossip relay
+  getIt.registerLazySingleton<MessageRouter>(() => MessageRouter(
+    peerRegistry: getIt<PeerRegistry>(),
+    encryptionService: getIt<EncryptionService>(),
+  ));
+
   // BLE service - select based on config
   getIt.registerLazySingleton<BleServiceInterface>(() {
     if (config.useMockService) {
@@ -65,17 +86,6 @@ Future<void> initializeDependencies({
       );
     }
   });
-
-  // Initialize database
-  await getIt<DatabaseService>().initialize();
-
-  // Encryption service — registered after database is ready.
-  // Must be initialized before BLE so it can supply the local public key
-  // for embedding in BroadcastPayload (fff1 characteristic).
-  getIt.registerLazySingleton<EncryptionService>(
-    () => EncryptionService(database: getIt<DatabaseService>().database),
-  );
-  await getIt<EncryptionService>().initialize();
 
   // Initialize BLE service
   try {
@@ -137,6 +147,8 @@ Future<void> initializeDependencies({
     lanService: getIt<LanTransportService>(),
     wifiAwareService: getIt<WifiAwareTransportService>(),
     bleService: getIt<BleServiceInterface>(),
+    peerRegistry: getIt<PeerRegistry>(),
+    messageRouter: getIt<MessageRouter>(),
     encryptionService: getIt<EncryptionService>(),
     healthTracker: getIt<TransportHealthTracker>(),
     highSpeedTransferService: getIt<HighSpeedTransferService>(),
@@ -302,6 +314,8 @@ Future<void> disposeDependencies() async {
   await getIt<TransportRetryQueue>().dispose();
   await getIt<TransportHealthTracker>().dispose();
   await getIt<TransportManager>().dispose();
+  await getIt<MessageRouter>().dispose();
+  await getIt<PeerRegistry>().dispose();
   await getIt<LanTransportService>().dispose();
   await getIt<HighSpeedTransferService>().dispose();
   await getIt<DatabaseService>().close();

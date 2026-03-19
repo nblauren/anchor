@@ -1,17 +1,15 @@
-import 'dart:io';
 import 'dart:math';
-import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import 'package:drift/drift.dart' show Value;
-import 'package:path_provider/path_provider.dart';
 
 import '../../../core/constants/profile_constants.dart';
 import '../../../core/utils/logger.dart';
 import '../../../services/database_service.dart';
-import '../../../services/image_service.dart' show ImageService, resolvePhotoPath;
+import '../../../services/image_service.dart'
+    show ImageService, resolvePhotoPath;
 import '../../../services/nsfw_detection_service.dart';
 import '../../../services/profile_broadcast_service.dart';
 import 'profile_event.dart';
@@ -86,7 +84,8 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
       return true;
     } catch (e) {
       // On detection error, allow the photo — don't block on service failure.
-      Logger.error('NSFW detection failed, allowing photo', e, null, 'ProfileBloc');
+      Logger.error(
+          'NSFW detection failed, allowing photo', e, null, 'ProfileBloc');
       return true;
     }
   }
@@ -105,7 +104,8 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
         return;
       }
 
-      final photos = await _databaseService.profileRepository.getPhotos(profile.id);
+      final photos =
+          await _databaseService.profileRepository.getPhotos(profile.id);
       final photoList = photos.map((p) => ProfilePhoto.fromEntry(p)).toList();
 
       emit(state.copyWith(
@@ -208,9 +208,8 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
       );
 
       // Compute updated state values
-      final newPosition = event.clearPosition
-          ? null
-          : (event.position ?? state.position);
+      final newPosition =
+          event.clearPosition ? null : (event.position ?? state.position);
       final newInterestIds = event.interests ?? state.interestIds;
 
       emit(state.copyWith(
@@ -245,7 +244,8 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
     }
 
     if (!state.canAddMorePhotos) {
-      emit(state.copyWith(errorMessage: 'Maximum ${ProfileState.maxPhotos} photos allowed'));
+      emit(state.copyWith(
+          errorMessage: 'Maximum ${ProfileState.maxPhotos} photos allowed'));
       return;
     }
 
@@ -260,7 +260,8 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
       bool isPrimary = willBePrimary;
 
       if (willBePrimary) {
-        final absolutePath = await resolvePhotoPath(processed.photoPath) ?? processed.photoPath;
+        final absolutePath =
+            await resolvePhotoPath(processed.photoPath) ?? processed.photoPath;
         final safe = await _passesNsfwCheck(absolutePath, 'new_primary', emit);
         if (!safe) {
           // Save as non-primary secondary so the photo is not lost.
@@ -288,7 +289,8 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
         nsfwBlockedPhotoId: (!isPrimary && willBePrimary) ? photo.id : null,
       ));
 
-      Logger.info('Photo added: ${photo.id} (primary=$isPrimary)', 'ProfileBloc');
+      Logger.info(
+          'Photo added: ${photo.id} (primary=$isPrimary)', 'ProfileBloc');
 
       // Only rebroadcast when the new photo is actually primary.
       if (isPrimary) {
@@ -308,7 +310,8 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
     Emitter<ProfileState> emit,
   ) async {
     try {
-      final photoToRemove = state.photos.firstWhere((p) => p.id == event.photoId);
+      final photoToRemove =
+          state.photos.firstWhere((p) => p.id == event.photoId);
 
       // Delete from database
       await _databaseService.profileRepository.deletePhoto(event.photoId);
@@ -320,11 +323,13 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
       );
 
       // Update state
-      final updatedPhotos = state.photos.where((p) => p.id != event.photoId).toList();
+      final updatedPhotos =
+          state.photos.where((p) => p.id != event.photoId).toList();
 
       // Reload photos to get updated primary status
       if (state.profileId != null) {
-        final photos = await _databaseService.profileRepository.getPhotos(state.profileId!);
+        final photos = await _databaseService.profileRepository
+            .getPhotos(state.profileId!);
         final photoList = photos.map((p) => ProfilePhoto.fromEntry(p)).toList();
         emit(state.copyWith(photos: photoList));
       } else {
@@ -346,17 +351,22 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
 
     try {
       // Detect whether the effective primary photo is changing.
-      final currentFirstId = state.sortedPhotos.isNotEmpty ? state.sortedPhotos.first.id : null;
-      final newFirstId = event.photoIds.isNotEmpty ? event.photoIds.first : null;
-      final primaryChanging = newFirstId != null && newFirstId != currentFirstId;
+      final currentFirstId =
+          state.sortedPhotos.isNotEmpty ? state.sortedPhotos.first.id : null;
+      final newFirstId =
+          event.photoIds.isNotEmpty ? event.photoIds.first : null;
+      final primaryChanging =
+          newFirstId != null && newFirstId != currentFirstId;
 
       if (primaryChanging) {
         emit(state.copyWith(isProcessingPhoto: true));
 
         // Find the photo object for the new position-0 entry.
-        final newPrimaryPhoto = state.photos.firstWhere((p) => p.id == newFirstId);
+        final newPrimaryPhoto =
+            state.photos.firstWhere((p) => p.id == newFirstId);
         final absolutePath =
-            await resolvePhotoPath(newPrimaryPhoto.photoPath) ?? newPrimaryPhoto.photoPath;
+            await resolvePhotoPath(newPrimaryPhoto.photoPath) ??
+                newPrimaryPhoto.photoPath;
 
         final safe = await _passesNsfwCheck(absolutePath, newFirstId, emit);
         if (!safe) {
@@ -381,7 +391,8 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
       }
 
       // Reload photos to get updated order and primary flag.
-      final photos = await _databaseService.profileRepository.getPhotos(state.profileId!);
+      final photos =
+          await _databaseService.profileRepository.getPhotos(state.profileId!);
       final photoList = photos.map((p) => ProfilePhoto.fromEntry(p)).toList();
 
       emit(state.copyWith(photos: photoList));
@@ -403,7 +414,8 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
     if (state.profileId == null) return;
 
     // No-op if already primary.
-    if (state.sortedPhotos.isNotEmpty && state.sortedPhotos.first.id == event.photoId) {
+    if (state.sortedPhotos.isNotEmpty &&
+        state.sortedPhotos.first.id == event.photoId) {
       return;
     }
 
@@ -411,7 +423,8 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
 
     try {
       final photo = state.photos.firstWhere((p) => p.id == event.photoId);
-      final absolutePath = await resolvePhotoPath(photo.photoPath) ?? photo.photoPath;
+      final absolutePath =
+          await resolvePhotoPath(photo.photoPath) ?? photo.photoPath;
 
       final safe = await _passesNsfwCheck(absolutePath, event.photoId, emit);
       if (!safe) {
@@ -425,7 +438,8 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
       );
 
       // Reload photos to get updated primary status
-      final photos = await _databaseService.profileRepository.getPhotos(state.profileId!);
+      final photos =
+          await _databaseService.profileRepository.getPhotos(state.profileId!);
       final photoList = photos.map((p) => ProfilePhoto.fromEntry(p)).toList();
 
       emit(state.copyWith(photos: photoList, isProcessingPhoto: false));
@@ -494,7 +508,16 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
     try {
       final rng = Random();
 
-      const names = ['Alex', 'Jordan', 'Sam', 'Riley', 'Casey', 'Drew', 'Morgan', 'Kai'];
+      const names = [
+        'Alex',
+        'Jordan',
+        'Sam',
+        'Riley',
+        'Casey',
+        'Drew',
+        'Morgan',
+        'Kai'
+      ];
       const bios = [
         'Just here for a good time',
         'Love the ocean and good company',
@@ -509,7 +532,8 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
       final position = rng.nextInt(ProfileConstants.maxPositionId + 1);
 
       // Pick 2–5 random interests
-      final allInterestIds = ProfileConstants.interestMap.keys.toList()..shuffle(rng);
+      final allInterestIds = ProfileConstants.interestMap.keys.toList()
+        ..shuffle(rng);
       final interestCount = 2 + rng.nextInt(4);
       final interests = allInterestIds.take(interestCount).toList();
 
@@ -517,48 +541,10 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
       final profile = await _databaseService.profileRepository.createProfile(
         name: name,
         age: age,
-        bio: bio,
+        bio: '',
         position: position,
         interests: ProfileConstants.encodeInterests(interests),
       );
-
-      // Generate a solid-color placeholder image (200x200 PNG)
-      final color = ui.Color.fromARGB(
-        255,
-        100 + rng.nextInt(156),
-        100 + rng.nextInt(156),
-        100 + rng.nextInt(156),
-      );
-      final recorder = ui.PictureRecorder();
-      final canvas = ui.Canvas(recorder);
-      canvas.drawRect(
-        const ui.Rect.fromLTWH(0, 0, 200, 200),
-        ui.Paint()..color = color,
-      );
-      final picture = recorder.endRecording();
-      final image = await picture.toImage(200, 200);
-      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-      final pngBytes = byteData!.buffer.asUint8List();
-
-      // Save to file
-      final docsDir = await getApplicationDocumentsDirectory();
-      final photoDir = Directory('${docsDir.path}/profile_photos');
-      if (!photoDir.existsSync()) photoDir.createSync(recursive: true);
-      final photoFile = File('${photoDir.path}/quick_setup.png');
-      await photoFile.writeAsBytes(pngBytes);
-
-      // Store relative path (consistent with ImageService convention)
-      const relativePath = 'profile_photos/quick_setup.png';
-
-      // Add photo to DB
-      final photo = await _databaseService.profileRepository.addPhoto(
-        userId: profile.id,
-        photoPath: relativePath,
-        thumbnailPath: relativePath, // same file for thumbnail in debug
-        isPrimary: true,
-      );
-
-      final newPhoto = ProfilePhoto.fromEntry(photo);
 
       emit(state.copyWith(
         status: ProfileStatus.saved,
@@ -568,7 +554,6 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
         bio: profile.bio,
         position: profile.position,
         interestIds: ProfileConstants.parseInterests(profile.interests),
-        photos: [newPhoto],
       ));
 
       Logger.info('Quick setup profile created: ${profile.id}', 'ProfileBloc');

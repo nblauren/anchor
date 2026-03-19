@@ -4,12 +4,14 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
+import 'package:drift/drift.dart' show Value;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../../core/utils/logger.dart';
 import '../../data/local_database/database.dart';
 import 'encryption_models.dart';
 import 'noise_handshake.dart';
+import 'noise_xx_handshake.dart';
 
 // ---------------------------------------------------------------------------
 // EncryptionService
@@ -43,11 +45,17 @@ import 'noise_handshake.dart';
 
 const _kPrivateKeyStorageKey = 'anchor_e2ee_private_key_hex';
 const _kPublicKeyStorageKey = 'anchor_e2ee_public_key_hex';
+const _kEd25519PrivateKeyStorageKey = 'anchor_e2ee_ed25519_private_key_hex';
+const _kEd25519PublicKeyStorageKey = 'anchor_e2ee_ed25519_public_key_hex';
 
 /// Timeout for a pending Noise handshake (peer must respond within 45 s).
 /// Cross-platform (Android↔iOS) handshakes need extra time because the
 /// responder may not have discovered the initiator's BLE Peripheral yet.
 const _kHandshakeTimeout = Duration(seconds: 45);
+
+/// Session timeout — sessions older than this require a new handshake.
+/// Prevents stale session reuse if a peer's app state is lost.
+const _kSessionTimeout = Duration(hours: 24);
 
 class EncryptionService {
   EncryptionService({
@@ -66,20 +74,28 @@ class EncryptionService {
   final FlutterSecureStorage _secureStorage;
   final _xchacha = Xchacha20.poly1305Aead();
   final _x25519 = X25519();
+  final _ed25519 = Ed25519();
   final _random = Random.secure();
 
-  // Long-term key pair loaded once from secure storage.
+  // Long-term X25519 key pair loaded once from secure storage.
   Uint8List? _localPrivateKey;
   Uint8List? _localPublicKey;
 
-  // Active sessions: peerId → NoiseSession
+  // Long-term Ed25519 signing key pair.
+  Uint8List? _localEd25519PrivateKey;
+  Uint8List? _localEd25519PublicKey;
+
+  // Active sessions: userId (stable canonical peer ID) → NoiseSession
   final Map<String, NoiseSession> _sessions = {};
 
-  // Pending handshakes: peerId → PendingHandshake
+  // Pending handshakes: userId (stable canonical peer ID) → PendingHandshake
   final Map<String, PendingHandshake> _pending = {};
 
-  // Handshake timeout timers
+  // Handshake timeout timers: userId (stable canonical peer ID) → Timer
   final Map<String, Timer> _handshakeTimers = {};
+
+  // Session cleanup timer
+  Timer? _sessionCleanupTimer;
 
   // Stream: emits handshake messages that BleService must send to peers.
   final _outboundHandshakeController =
@@ -110,12 +126,17 @@ class EncryptionService {
   /// Must be called once at app start (after secure storage is available).
   Future<void> initialize() async {
     await _loadOrGenerateKeyPair();
+    // Schedule session cleanup to run after 1/4 of the session timeout.
+    // This adapts automatically if _kSessionTimeout changes, rather than
+    // using a hardcoded 15-minute interval.
+    _scheduleSessionCleanup();
     Logger.info(
         'EncryptionService initialised — pubkey: ${_publicKeyHex().substring(0, 12)}…',
         'E2EE');
   }
 
   Future<void> dispose() async {
+    _sessionCleanupTimer?.cancel();
     for (final t in _handshakeTimers.values) {
       t.cancel();
     }
@@ -135,21 +156,36 @@ class EncryptionService {
   /// Returns null only during the very first call before [initialize()] completes.
   Uint8List? get localPublicKey => _localPublicKey;
 
-  /// Returns the local public key as a hex string for JSON embedding.
+  /// Returns the local X25519 public key as a hex string for JSON embedding.
   String? get localPublicKeyHex {
     final pk = _localPublicKey;
     if (pk == null) return null;
     return _bytesToHex(pk);
   }
 
-  /// Store a peer's public key received from their BLE profile.
+  /// Our Ed25519 signing public key bytes.
+  Uint8List? get localEd25519PublicKey => _localEd25519PublicKey;
+
+  /// Returns the local Ed25519 public key as a hex string for broadcast.
+  String? get localEd25519PublicKeyHex {
+    final pk = _localEd25519PublicKey;
+    if (pk == null) return null;
+    return _bytesToHex(pk);
+  }
+
+  /// Store a peer's public key(s) received from their BLE profile.
   ///
   /// Called by BleFacade._onProfileReadResult() when the peer's fff1
-  /// characteristic JSON includes a `pk` field (32-byte X25519 key, hex).
+  /// characteristic JSON includes a `pk` field (32-byte X25519 key, hex)
+  /// and optionally a `spk` field (Ed25519 signing key, hex).
   ///
-  /// If the key changed (peer re-generated their keypair), any existing
-  /// session for that peer is invalidated — they will need to re-handshake.
-  Future<void> storePeerPublicKey(String peerId, String publicKeyHex) async {
+  /// If the X25519 key changed (peer re-generated their keypair), any
+  /// existing session for that peer is invalidated.
+  Future<void> storePeerPublicKey(
+    String peerId,
+    String publicKeyHex, {
+    String? ed25519PublicKeyHex,
+  }) async {
     // Validate: must be exactly 32 bytes = 64 hex chars.
     if (publicKeyHex.length != 64) {
       Logger.warning(
@@ -158,8 +194,34 @@ class EncryptionService {
       return;
     }
 
+    // Validate Ed25519 key length if provided (32 bytes = 64 hex chars).
+    if (ed25519PublicKeyHex != null && ed25519PublicKeyHex.length != 64) {
+      Logger.warning(
+          'Ignoring invalid Ed25519 key for $peerId (wrong length)',
+          'E2EE');
+      ed25519PublicKeyHex = null;
+    }
+
     final existing = await _getPeerPublicKeyHex(peerId);
-    if (existing == publicKeyHex) return; // unchanged
+    if (existing == publicKeyHex) {
+      // X25519 key unchanged — still update Ed25519 key if provided
+      // and different.
+      if (ed25519PublicKeyHex != null) {
+        final existingEd = await _getPeerEd25519PublicKeyHex(peerId);
+        if (existingEd != ed25519PublicKeyHex) {
+          await (_database.update(_database.discoveredPeers)
+                ..where((t) => t.peerId.equals(peerId)))
+              .write(DiscoveredPeersCompanion(
+            ed25519PublicKeyHex: Value(ed25519PublicKeyHex),
+          ));
+          Logger.info(
+            'Updated Ed25519 signing key for $peerId (X25519 unchanged)',
+            'E2EE',
+          );
+        }
+      }
+      return;
+    }
 
     if (existing != null) {
       // Key rotated — invalidate existing session and pending handshake.
@@ -170,13 +232,33 @@ class EncryptionService {
       _cancelPendingHandshake(peerId);
     }
 
-    await _database.into(_database.peerPublicKeys).insertOnConflictUpdate(
-          PeerPublicKeysCompanion.insert(
-            peerId: peerId,
-            publicKeyHex: publicKeyHex,
-            receivedAt: DateTime.now(),
-          ),
-        );
+    // Insert or update the peer's public keys on the discovered_peers table.
+    // The peer might not exist yet (e.g., key arrives before profile read),
+    // so we create a minimal placeholder row if needed.
+    final peerRow = await (_database.select(_database.discoveredPeers)
+          ..where((t) => t.peerId.equals(peerId)))
+        .getSingleOrNull();
+
+    if (peerRow != null) {
+      await (_database.update(_database.discoveredPeers)
+            ..where((t) => t.peerId.equals(peerId)))
+          .write(DiscoveredPeersCompanion(
+        publicKeyHex: Value(publicKeyHex),
+        ed25519PublicKeyHex: Value(ed25519PublicKeyHex),
+      ));
+    } else {
+      await _database.into(_database.discoveredPeers).insert(
+            DiscoveredPeersCompanion.insert(
+              peerId: peerId,
+              name: 'Unknown',
+              age: const Value(0),
+              bio: const Value(''),
+              lastSeenAt: DateTime.now(),
+              publicKeyHex: Value(publicKeyHex),
+              ed25519PublicKeyHex: Value(ed25519PublicKeyHex),
+            ),
+          );
+    }
 
     Logger.info(
         'Stored public key for peer $peerId (${publicKeyHex.substring(0, 8)}…) — handshake can now proceed',
@@ -184,73 +266,58 @@ class EncryptionService {
     _peerKeyStoredController.add(peerId);
   }
 
-  /// Whether we have a valid E2EE session with [peerId].
-  bool hasSession(String peerId) => _sessions.containsKey(peerId);
+  /// Whether we have a valid (non-expired) E2EE session with [peerId].
+  bool hasSession(String peerId) {
+    final session = _sessions[peerId];
+    if (session == null) return false;
+    if (_isSessionExpired(session)) {
+      // Session expired — remove it and require re-handshake
+      _sessions.remove(peerId);
+      Logger.info(
+        'E2EE session expired for $peerId (age: '
+        '${DateTime.now().difference(session.establishedAt).inHours}h)',
+        'E2EE',
+      );
+      return false;
+    }
+    return true;
+  }
+
+  /// Check if a session has exceeded the timeout.
+  bool _isSessionExpired(NoiseSession session) {
+    return DateTime.now().difference(session.establishedAt) > _kSessionTimeout;
+  }
+
+  /// Schedule the next session cleanup based on the session timeout.
+  void _scheduleSessionCleanup() {
+    _sessionCleanupTimer?.cancel();
+    // Run cleanup at 1/4 of the session timeout (adaptive to the timeout value).
+    final interval = Duration(
+      milliseconds: _kSessionTimeout.inMilliseconds ~/ 4,
+    );
+    _sessionCleanupTimer = Timer.periodic(interval, (_) => _cleanupExpiredSessions());
+  }
+
+  /// Remove expired sessions and emit timeout events.
+  void _cleanupExpiredSessions() {
+    final expired = <String>[];
+    _sessions.forEach((peerId, session) {
+      if (_isSessionExpired(session)) {
+        expired.add(peerId);
+      }
+    });
+    for (final peerId in expired) {
+      _sessions.remove(peerId);
+      Logger.info(
+        'E2EE session cleanup: expired session for $peerId',
+        'E2EE',
+      );
+      _handshakeTimeoutController.add(peerId);
+    }
+  }
 
   /// Whether a Noise handshake is in progress with [peerId].
   bool hasPendingHandshake(String peerId) => _pending.containsKey(peerId);
-
-  /// Migrate a session or pending handshake from [oldPeerId] to [newPeerId].
-  ///
-  /// Called when a BLE Central UUID is resolved to the peer's Peripheral UUID
-  /// (iOS Core Bluetooth assigns different UUIDs for Central vs Peripheral
-  /// roles on the same physical device).  Also called on transport migration
-  /// (e.g. BLE peer upgraded to LAN/Wi-Fi Aware).
-  ///
-  /// If a session was established under [oldPeerId] it is moved to [newPeerId]
-  /// and [sessionEstablishedStream] fires with the new peerId so that ChatBloc
-  /// can update [isE2eeActive].  Any pending (in-flight) handshake is also
-  /// re-keyed so subsequent messages from [newPeerId] continue the exchange.
-  void migratePeerId(String oldPeerId, String newPeerId) {
-    if (oldPeerId == newPeerId && !_sessions.containsKey(newPeerId)) return;
-
-    // Migrate established session — but do NOT overwrite an existing session
-    // under newPeerId.  This happens when both devices initiate handshakes
-    // concurrently (one via Central UUID, one via Peripheral UUID) and the
-    // Central→Peripheral migration would clobber the already-active session.
-    final session = _sessions.remove(oldPeerId);
-    if (session != null) {
-      if (_sessions.containsKey(newPeerId)) {
-        Logger.info(
-          'Dropped migrated E2EE session $oldPeerId → $newPeerId '
-          '(session already exists under $newPeerId)',
-          'E2EE',
-        );
-      } else {
-        _sessions[newPeerId] = NoiseSession(
-          peerId: newPeerId,
-          sendKey: session.sendKey,
-          receiveKey: session.receiveKey,
-          establishedAt: session.establishedAt,
-        );
-        Logger.info('Migrated E2EE session $oldPeerId → $newPeerId', 'E2EE');
-        _sessionEstablishedController.add(newPeerId);
-      }
-    }
-
-    // Migrate pending handshake (covers the mid-handshake race where Central
-    // UUID arrives before the Peripheral UUID is known).
-    final pending = _pending.remove(oldPeerId);
-    if (pending != null) {
-      _pending[newPeerId] = PendingHandshake(
-        peerId: newPeerId,
-        role: pending.role,
-        state: pending.state,
-        localEphemeralPrivate: pending.localEphemeralPrivate,
-        localEphemeralPublic: pending.localEphemeralPublic,
-        remoteEphemeralPublic: pending.remoteEphemeralPublic,
-        h: pending.h,
-        ck: pending.ck,
-        k: pending.k,
-        n: pending.n,
-        startedAt: pending.startedAt,
-      );
-      final timer = _handshakeTimers.remove(oldPeerId);
-      if (timer != null) _handshakeTimers[newPeerId] = timer;
-      Logger.info(
-          'Migrated pending E2EE handshake $oldPeerId → $newPeerId', 'E2EE');
-    }
-  }
 
   // ── Handshake initiation ──────────────────────────────────────────────────
 
@@ -271,11 +338,17 @@ class EncryptionService {
     }
 
     final peerKeyHex = await _getPeerPublicKeyHex(peerId);
-    if (peerKeyHex == null) {
-      return const HandshakeResult(
-          error: 'No public key for peer — cannot initiate E2EE');
-    }
 
+    // If we have the peer's public key, use XK (pre-authenticated).
+    // Otherwise, fall back to XX (no pre-shared key needed).
+    if (peerKeyHex != null) {
+      return _initiateXK(peerId, peerKeyHex);
+    } else {
+      return _initiateXX(peerId);
+    }
+  }
+
+  Future<HandshakeResult> _initiateXK(String peerId, String peerKeyHex) async {
     final peerPublicKey = _hexToBytes(peerKeyHex);
 
     // Initialize Noise symmetric state
@@ -295,6 +368,7 @@ class EncryptionService {
       peerId: peerId,
       role: NoiseRole.initiator,
       state: HandshakeState.awaitingMessage2,
+      pattern: NoisePattern.xk,
       localEphemeralPrivate: msg1Result.localEphPriv,
       localEphemeralPublic: msg1Result.localEphPub,
       h: msg1Result.h,
@@ -320,6 +394,44 @@ class EncryptionService {
     return HandshakeResult(messageToSend: outbound);
   }
 
+  Future<HandshakeResult> _initiateXX(String peerId) async {
+    // Initialize Noise_XX symmetric state (no pre-message).
+    final symState = await NoiseXXHandshakeProcessor.initSymmetricState();
+
+    // Write Message 1: -> e (just 32 bytes ephemeral key).
+    final msg1Result = await NoiseXXHandshakeProcessor.writeMessage1(
+      symState.h,
+      symState.ck,
+    );
+
+    final pending = PendingHandshake(
+      peerId: peerId,
+      role: NoiseRole.initiator,
+      state: HandshakeState.awaitingMessage2,
+      pattern: NoisePattern.xx,
+      localEphemeralPrivate: msg1Result.localEphPriv,
+      localEphemeralPublic: msg1Result.localEphPub,
+      h: msg1Result.h,
+      ck: msg1Result.ck,
+      startedAt: DateTime.now(),
+    );
+    _pending[peerId] = pending;
+
+    _startHandshakeTimeout(peerId);
+
+    final outbound = HandshakeMessageOut(
+      peerId: peerId,
+      step: kXXStep1,
+      payload: msg1Result.payload,
+    );
+
+    _outboundHandshakeController.add(outbound);
+    Logger.info(
+        'Noise_XX handshake initiated with $peerId (msg1, ${msg1Result.payload.length} bytes)',
+        'E2EE');
+    return HandshakeResult(messageToSend: outbound);
+  }
+
   // ── Incoming handshake message handling ───────────────────────────────────
 
   /// Process an incoming handshake message from [peerId].
@@ -332,6 +444,22 @@ class EncryptionService {
     int step,
     Uint8List payload,
   ) async {
+    // XK steps: 1, 2, 3
+    // XX steps: 11, 12, 13
+    if (isXXHandshakeStep(step)) {
+      final localStep = xxStepToLocal(step);
+      switch (localStep) {
+        case 1:
+          return _onXXMessage1Received(peerId, payload);
+        case 2:
+          return _onXXMessage2Received(peerId, payload);
+        case 3:
+          return _onXXMessage3Received(peerId, payload);
+        default:
+          return HandshakeResult(error: 'Unknown XX handshake step: $step');
+      }
+    }
+
     switch (step) {
       case 1:
         return _onMessage1Received(peerId, payload);
@@ -532,17 +660,211 @@ class EncryptionService {
     }
   }
 
+  // ── Noise_XX incoming message handling ───────────────────────────────────
+
+  /// XX RESPONDER: received Message 1 (-> e), must send Message 2.
+  Future<HandshakeResult> _onXXMessage1Received(
+    String peerId,
+    Uint8List message1,
+  ) async {
+    if (_sessions.containsKey(peerId)) {
+      Logger.info('Peer $peerId re-initiating XX handshake — dropping old session',
+          'E2EE');
+      _sessions.remove(peerId);
+    }
+
+    try {
+      // Initialize XX symmetric state (no pre-message).
+      final symState = await NoiseXXHandshakeProcessor.initSymmetricState();
+
+      // Read Message 1: -> e
+      final readResult = await NoiseXXHandshakeProcessor.readMessage1(
+        symState.h, symState.ck, message1,
+      );
+
+      // Write Message 2: <- e, ee, s, es
+      final msg2Result = await NoiseXXHandshakeProcessor.writeMessage2(
+        readResult.h,
+        readResult.ck,
+        readResult.initiatorEphPublic,
+        _localPrivateKey!,
+        _localPublicKey!,
+      );
+
+      final pending = PendingHandshake(
+        peerId: peerId,
+        role: NoiseRole.responder,
+        state: HandshakeState.awaitingMessage3,
+        pattern: NoisePattern.xx,
+        localEphemeralPrivate: msg2Result.localEphPriv,
+        localEphemeralPublic: msg2Result.localEphPub,
+        remoteEphemeralPublic: readResult.initiatorEphPublic,
+        h: msg2Result.h,
+        ck: msg2Result.ck,
+        k: msg2Result.k,
+        n: msg2Result.n,
+        startedAt: DateTime.now(),
+      );
+      _pending[peerId] = pending;
+
+      _startHandshakeTimeout(peerId);
+
+      final outbound = HandshakeMessageOut(
+        peerId: peerId,
+        step: kXXStep2,
+        payload: msg2Result.payload,
+      );
+
+      _outboundHandshakeController.add(outbound);
+      Logger.info(
+          'Noise_XX msg1 OK — sending msg2 to $peerId (${msg2Result.payload.length} bytes)',
+          'E2EE');
+      return HandshakeResult(messageToSend: outbound);
+    } on NoiseHandshakeException catch (e) {
+      _cancelPendingHandshake(peerId);
+      Logger.error('XX crypto failed for $peerId: $e', e, null, 'E2EE');
+      return HandshakeResult(error: e.message);
+    }
+  }
+
+  /// XX INITIATOR: received Message 2 (<- e, ee, s, es), must send Message 3.
+  Future<HandshakeResult> _onXXMessage2Received(
+    String peerId,
+    Uint8List message2,
+  ) async {
+    final pending = _pending[peerId];
+    if (pending == null || pending.role != NoiseRole.initiator ||
+        pending.pattern != NoisePattern.xx) {
+      return const HandshakeResult(
+          error: 'Unexpected XX message 2 — not waiting as XX initiator');
+    }
+    if (pending.state != HandshakeState.awaitingMessage2) {
+      return HandshakeResult(
+          error: 'Wrong handshake state for XX msg2: ${pending.state}');
+    }
+
+    try {
+      // Read Message 2: <- e, ee, s, es
+      final readResult = await NoiseXXHandshakeProcessor.readMessage2(
+        pending.h,
+        pending.ck,
+        message2,
+        pending.localEphemeralPrivate,
+      );
+
+      // We now know the responder's static public key — store it.
+      final responderPkHex = _bytesToHex(readResult.responderStaticPublic);
+      Logger.debug(
+          'XX: learned responder static key for $peerId: ${responderPkHex.substring(0, 12)}…',
+          'E2EE');
+      await storePeerPublicKey(peerId, responderPkHex);
+
+      // Write Message 3: -> s, se
+      final msg3Result = await NoiseXXHandshakeProcessor.writeMessage3(
+        readResult.h,
+        readResult.ck,
+        readResult.k,
+        readResult.n,
+        _localPrivateKey!,
+        _localPublicKey!,
+        readResult.responderEphPublic,
+      );
+
+      // Split — derive session keys (initiator perspective).
+      final keys = await NoiseXXHandshakeProcessor.split(msg3Result.ck);
+      _establishSession(
+        peerId,
+        sendKey: keys.initiatorSend,
+        receiveKey: keys.initiatorRecv,
+      );
+
+      final outbound = HandshakeMessageOut(
+        peerId: peerId,
+        step: kXXStep3,
+        payload: msg3Result.payload,
+      );
+
+      _outboundHandshakeController.add(outbound);
+      Logger.info(
+          'Noise_XX complete (initiator) — session established with $peerId',
+          'E2EE');
+      return HandshakeResult(messageToSend: outbound, sessionEstablished: true);
+    } on NoiseHandshakeException catch (e) {
+      _cancelPendingHandshake(peerId);
+      Logger.error('XX crypto failed for $peerId: $e', e, null, 'E2EE');
+      return HandshakeResult(error: e.message);
+    }
+  }
+
+  /// XX RESPONDER: received Message 3 (-> s, se) — handshake complete.
+  Future<HandshakeResult> _onXXMessage3Received(
+    String peerId,
+    Uint8List message3,
+  ) async {
+    final pending = _pending[peerId];
+    if (pending == null || pending.role != NoiseRole.responder ||
+        pending.pattern != NoisePattern.xx) {
+      return const HandshakeResult(
+          error: 'Unexpected XX message 3 — not waiting as XX responder');
+    }
+    if (pending.state != HandshakeState.awaitingMessage3) {
+      return HandshakeResult(
+          error: 'Wrong handshake state for XX msg3: ${pending.state}');
+    }
+
+    try {
+      final readResult = await NoiseXXHandshakeProcessor.readMessage3(
+        pending.h,
+        pending.ck,
+        pending.k,
+        pending.n,
+        message3,
+        pending.localEphemeralPrivate,
+      );
+
+      // We now know the initiator's static public key — store it.
+      final initiatorPkHex = _bytesToHex(readResult.initiatorStaticPublic);
+      Logger.debug(
+          'XX: learned initiator static key for $peerId: ${initiatorPkHex.substring(0, 12)}…',
+          'E2EE');
+      await storePeerPublicKey(peerId, initiatorPkHex);
+
+      // Split — responder swaps keys.
+      final keys = await NoiseXXHandshakeProcessor.split(readResult.ck);
+      _establishSession(
+        peerId,
+        sendKey: keys.initiatorRecv,
+        receiveKey: keys.initiatorSend,
+      );
+
+      Logger.info(
+          'Noise_XX complete (responder) — session established with $peerId',
+          'E2EE');
+      return const HandshakeResult(sessionEstablished: true);
+    } on NoiseHandshakeException catch (e) {
+      _cancelPendingHandshake(peerId);
+      Logger.error('XX crypto failed for $peerId: $e', e, null, 'E2EE');
+      return HandshakeResult(error: e.message);
+    }
+  }
+
   // ── Message encryption / decryption ──────────────────────────────────────
 
   /// Encrypt [plaintext] for [peerId].
   ///
-  /// Returns null if no session exists (caller should send unencrypted with v:0).
+  /// Returns null if no session exists or session expired
+  /// (caller should send unencrypted with v:0).
   ///
   /// XChaCha20-Poly1305 with a random 24-byte nonce.
   /// Wire format: nonce (24 bytes) || ciphertext || tag (16 bytes)
   Future<EncryptedPayload?> encrypt(String peerId, Uint8List plaintext) async {
     final session = _sessions[peerId];
     if (session == null) return null;
+    if (_isSessionExpired(session)) {
+      _sessions.remove(peerId);
+      _handshakeTimeoutController.add(peerId);
+      return null;
+    }
 
     final nonce = _randomNonce(24);
 
@@ -650,6 +972,7 @@ class EncryptionService {
   // ── Private helpers ───────────────────────────────────────────────────────
 
   Future<void> _loadOrGenerateKeyPair() async {
+    // ── X25519 (DH key agreement) ──
     String? privHex = await _secureStorage.read(key: _kPrivateKeyStorageKey);
     String? pubHex = await _secureStorage.read(key: _kPublicKeyStorageKey);
 
@@ -662,22 +985,96 @@ class EncryptionService {
       pubHex = _bytesToHex(Uint8List.fromList(pub.bytes));
       privHex = _bytesToHex(Uint8List.fromList(priv));
 
-      // SECURITY: write private key ONLY to secure storage — never to DB or prefs.
       await _secureStorage.write(key: _kPrivateKeyStorageKey, value: privHex);
       await _secureStorage.write(key: _kPublicKeyStorageKey, value: pubHex);
-
       Logger.info('New X25519 key pair stored in secure storage', 'E2EE');
     }
 
     _localPrivateKey = _hexToBytes(privHex);
     _localPublicKey = _hexToBytes(pubHex);
+
+    // ── Ed25519 (digital signatures) ──
+    String? edPrivHex =
+        await _secureStorage.read(key: _kEd25519PrivateKeyStorageKey);
+    String? edPubHex =
+        await _secureStorage.read(key: _kEd25519PublicKeyStorageKey);
+
+    if (edPrivHex == null || edPubHex == null) {
+      Logger.info('Generating new Ed25519 signing key pair', 'E2EE');
+      final kp = await _ed25519.newKeyPair();
+      final pub = await kp.extractPublicKey();
+      final privBytes = await kp.extractPrivateKeyBytes();
+
+      edPubHex = _bytesToHex(Uint8List.fromList(pub.bytes));
+      edPrivHex = _bytesToHex(Uint8List.fromList(privBytes));
+
+      await _secureStorage.write(
+          key: _kEd25519PrivateKeyStorageKey, value: edPrivHex);
+      await _secureStorage.write(
+          key: _kEd25519PublicKeyStorageKey, value: edPubHex);
+      Logger.info('New Ed25519 key pair stored in secure storage', 'E2EE');
+    }
+
+    _localEd25519PrivateKey = _hexToBytes(edPrivHex);
+    _localEd25519PublicKey = _hexToBytes(edPubHex);
   }
 
   Future<String?> _getPeerPublicKeyHex(String peerId) async {
-    final row = await (_database.select(_database.peerPublicKeys)
+    final row = await (_database.select(_database.discoveredPeers)
           ..where((t) => t.peerId.equals(peerId)))
         .getSingleOrNull();
     return row?.publicKeyHex;
+  }
+
+  Future<String?> _getPeerEd25519PublicKeyHex(String peerId) async {
+    final row = await (_database.select(_database.discoveredPeers)
+          ..where((t) => t.peerId.equals(peerId)))
+        .getSingleOrNull();
+    return row?.ed25519PublicKeyHex;
+  }
+
+  /// Get a peer's stored Ed25519 signing public key (hex).
+  Future<String?> getPeerEd25519PublicKeyHex(String peerId) =>
+      _getPeerEd25519PublicKeyHex(peerId);
+
+  // ── Ed25519 Signing ─────────────────────────────────────────────────────
+
+  /// Sign [data] with our Ed25519 private key.
+  ///
+  /// Returns the 64-byte signature, or null if no key is loaded.
+  Future<Uint8List?> sign(Uint8List data) async {
+    final privBytes = _localEd25519PrivateKey;
+    if (privBytes == null) return null;
+
+    final kp = await _ed25519.newKeyPairFromSeed(privBytes);
+    final sig = await _ed25519.sign(data, keyPair: kp);
+    return Uint8List.fromList(sig.bytes);
+  }
+
+  /// Verify [signature] over [data] using a peer's Ed25519 public key.
+  ///
+  /// Returns false if the signature is invalid or the key is unknown.
+  Future<bool> verify(
+    Uint8List data,
+    Uint8List signature,
+    Uint8List ed25519PublicKey,
+  ) async {
+    final pk = SimplePublicKey(ed25519PublicKey, type: KeyPairType.ed25519);
+    final sig = Signature(signature, publicKey: pk);
+    return _ed25519.verify(data, signature: sig);
+  }
+
+  /// Verify [signature] using a peer's stored Ed25519 key.
+  ///
+  /// Looks up the key from the database. Returns false if no key stored.
+  Future<bool> verifyFromPeer(
+    String peerId,
+    Uint8List data,
+    Uint8List signature,
+  ) async {
+    final keyHex = await _getPeerEd25519PublicKeyHex(peerId);
+    if (keyHex == null) return false;
+    return verify(data, signature, _hexToBytes(keyHex));
   }
 
   void _establishSession(

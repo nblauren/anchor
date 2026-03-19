@@ -46,6 +46,7 @@ class BroadcastPayload extends Equatable {
     this.thumbnailBytes,
     this.thumbnailsList,
     this.publicKeyHex,
+    this.signingPublicKeyHex,
   });
 
   final String userId;
@@ -68,6 +69,12 @@ class BroadcastPayload extends Equatable {
   /// initiation.  NEVER include the private key here.
   final String? publicKeyHex;
 
+  /// Ed25519 signing public key (32 bytes, hex-encoded, 64 chars).
+  ///
+  /// Used to verify mesh peer announcements and prevent identity spoofing.
+  /// Null for old clients that don't support signed announcements.
+  final String? signingPublicKeyHex;
+
   /// Serialize to bytes for BLE transmission
   Map<String, dynamic> toJson() {
     return {
@@ -81,6 +88,7 @@ class BroadcastPayload extends Equatable {
       // 'pk' field carries our X25519 public key for E2EE key exchange.
       // Old clients that don't know about 'pk' will simply ignore this field.
       if (publicKeyHex != null) 'pk': publicKeyHex,
+      if (signingPublicKeyHex != null) 'spk': signingPublicKeyHex,
     };
   }
 
@@ -97,6 +105,7 @@ class BroadcastPayload extends Equatable {
           ? Uint8List.fromList(List<int>.from(json['thumbnailBytes']))
           : null,
       publicKeyHex: json['pk'] as String?,
+      signingPublicKeyHex: json['spk'] as String?,
     );
   }
 
@@ -110,6 +119,7 @@ class BroadcastPayload extends Equatable {
     Uint8List? thumbnailBytes,
     List<Uint8List>? thumbnailsList,
     String? publicKeyHex,
+    String? signingPublicKeyHex,
   }) {
     return BroadcastPayload(
       userId: userId ?? this.userId,
@@ -121,11 +131,12 @@ class BroadcastPayload extends Equatable {
       thumbnailBytes: thumbnailBytes ?? this.thumbnailBytes,
       thumbnailsList: thumbnailsList ?? this.thumbnailsList,
       publicKeyHex: publicKeyHex ?? this.publicKeyHex,
+      signingPublicKeyHex: signingPublicKeyHex ?? this.signingPublicKeyHex,
     );
   }
 
   @override
-  List<Object?> get props => [userId, name, age, bio, position, interests, thumbnailBytes, thumbnailsList, publicKeyHex];
+  List<Object?> get props => [userId, name, age, bio, position, interests, thumbnailBytes, thumbnailsList, publicKeyHex, signingPublicKeyHex];
 }
 
 /// A peer discovered via BLE scan and profile read (fff1 + fff2).
@@ -154,6 +165,7 @@ class DiscoveredPeer extends Equatable {
     this.hopCount = 0,
     this.fullPhotoCount = 0,
     this.publicKeyHex,
+    this.signingPublicKeyHex,
   });
 
   final String peerId;
@@ -183,6 +195,9 @@ class DiscoveredPeer extends Equatable {
   /// Peer's X25519 public key (64-char hex) for Noise_XK E2EE handshake.
   /// Null if the peer's client does not support E2EE.
   final String? publicKeyHex;
+  /// Peer's Ed25519 signing public key (64-char hex) for mesh announcement verification.
+  /// Null if the peer's client does not support signed announcements.
+  final String? signingPublicKeyHex;
 
   /// Estimated distance based on RSSI
   String? get distanceEstimate {
@@ -218,6 +233,7 @@ class DiscoveredPeer extends Equatable {
     int? hopCount,
     int? fullPhotoCount,
     String? publicKeyHex,
+    String? signingPublicKeyHex,
   }) {
     return DiscoveredPeer(
       peerId: peerId ?? this.peerId,
@@ -235,6 +251,7 @@ class DiscoveredPeer extends Equatable {
       hopCount: hopCount ?? this.hopCount,
       fullPhotoCount: fullPhotoCount ?? this.fullPhotoCount,
       publicKeyHex: publicKeyHex ?? this.publicKeyHex,
+      signingPublicKeyHex: signingPublicKeyHex ?? this.signingPublicKeyHex,
     );
   }
 
@@ -242,7 +259,7 @@ class DiscoveredPeer extends Equatable {
   List<Object?> get props => [
         peerId, name, userId, age, bio, position, interests,
         thumbnailBytes, photoThumbnails,
-        rssi, timestamp, isRelayed, hopCount, fullPhotoCount, publicKeyHex,
+        rssi, timestamp, isRelayed, hopCount, fullPhotoCount, publicKeyHex, signingPublicKeyHex,
       ];
 }
 

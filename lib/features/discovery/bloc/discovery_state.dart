@@ -196,7 +196,7 @@ class DiscoveryState extends Equatable {
   final TransportType activeTransport;
 
   /// Visible peers (excluding blocked), online first then offline.
-  /// Deduplicates by peerId in case a MAC rotation briefly produces two entries.
+  /// Deduplicates by peerId (= canonical userId) for safety.
   /// Insertion order is preserved within each group so RSSI fluctuations
   /// do not cause tiles to shuffle. New peers are prepended by the bloc,
   /// so recently discovered peers naturally appear first.

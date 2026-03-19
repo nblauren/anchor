@@ -23,8 +23,6 @@ class MockBleService implements BleServiceInterface {
   final _statusController = StreamController<BleStatus>.broadcast();
   final _peerDiscoveredController = StreamController<DiscoveredPeer>.broadcast();
   final _peerLostController = StreamController<String>.broadcast();
-  final _peerIdChangedController =
-      StreamController<PeerIdChanged>.broadcast();
   final _messageReceivedController = StreamController<ReceivedMessage>.broadcast();
   final _photoProgressController = StreamController<PhotoTransferProgress>.broadcast();
   final _photoReceivedController = StreamController<ReceivedPhoto>.broadcast();
@@ -138,7 +136,6 @@ class MockBleService implements BleServiceInterface {
     await _statusController.close();
     await _peerDiscoveredController.close();
     await _peerLostController.close();
-    await _peerIdChangedController.close();
     await _messageReceivedController.close();
     await _photoProgressController.close();
     await _photoReceivedController.close();
@@ -214,8 +211,7 @@ class MockBleService implements BleServiceInterface {
   Stream<String> get peerLostStream => _peerLostController.stream;
 
   @override
-  Stream<PeerIdChanged> get peerIdChangedStream =>
-      _peerIdChangedController.stream;
+  Stream<PeerIdChanged> get peerIdChangedStream => const Stream.empty();
 
   @override
   Future<void> startScanning() async {
@@ -556,7 +552,12 @@ class MockBleService implements BleServiceInterface {
   }
 
   @override
-  String? getPeerIdForUserId(String userId) => null;
+  String? getPeerIdForUserId(String userId) {
+    // In the new identity model, peer IDs are userIds. Return the userId
+    // if we have a visible peer with that ID.
+    if (_visiblePeers.containsKey(userId)) return userId;
+    return null;
+  }
 
   @override
   List<String> get visiblePeerIds => _visiblePeers.keys.toList();
@@ -579,6 +580,12 @@ class MockBleService implements BleServiceInterface {
 
   @override
   int get meshRoutingTableSize => 0;
+
+  @override
+  void suppressMeshRelay() {}
+
+  @override
+  void resumeMeshRelay() {}
 
   @override
   Future<void> sendHandshakeMessage(

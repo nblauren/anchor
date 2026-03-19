@@ -204,8 +204,12 @@ abstract class BleServiceInterface {
 
   /// Resolve a BLE Central UUID to the corresponding Peripheral UUID.
   ///
-  /// On iOS/macOS the Central and Peripheral UUIDs differ for the same device.
-  /// Returns null if the mapping is unknown.
+  /// **Deprecated**: With the userId-based canonical identity model, peer IDs
+  /// are stable app-level userIds. This method is retained for interface
+  /// compatibility but implementations may simply return null.
+  ///
+  /// On iOS/macOS the Central and Peripheral UUIDs historically differed for
+  /// the same device. Returns null if the mapping is unknown or not applicable.
   String? resolveToPeripheralId(String peerId);
 
   // ==================== Mesh ====================
@@ -221,4 +225,12 @@ abstract class BleServiceInterface {
 
   /// Number of peers whose neighbor lists are known (routing table size)
   int get meshRoutingTableSize;
+
+  /// Temporarily suppress outgoing mesh relay writes and flush any pending
+  /// mesh writes from the GATT queue. Used before critical BLE signals
+  /// (e.g. wifiTransferReady) to prevent iOS prepare queue saturation.
+  void suppressMeshRelay();
+
+  /// Resume outgoing mesh relay writes after [suppressMeshRelay].
+  void resumeMeshRelay();
 }

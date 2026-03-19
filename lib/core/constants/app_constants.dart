@@ -38,6 +38,10 @@ class AppConstants {
   static const int messageRetryWindowHours = 24;
   static const int messageMaxCrossSessionRetries = 20;
 
+  /// Store-and-forward TTL in days (cruise duration).
+  /// Messages older than this are expired and marked as failed.
+  static const int storeForwardTtlDays = 7;
+
   // In-session transport retry queue
   static const int maxInSessionRetries = 5;
   static const int retryQueueExpiryMinutes = 10;
@@ -46,6 +50,20 @@ class AppConstants {
   // Battery-aware transport policy
   static const int batteryCriticalThreshold = 10;
   static const int batteryLowThreshold = 20;
+
+  // Mesh protocol
+  /// Default TTL for direct messages (max relay hops).
+  static const int meshDefaultTtl = 3;
+  /// Maximum TTL allowed.
+  static const int meshMaxTtl = 5;
+  /// TTL for anchor drop signals (short range).
+  static const int meshAnchorDropTtl = 2;
+  /// TTL for peer announcements (broader discovery).
+  static const int meshAnnounceTtl = 5;
+  /// Expected unique messages for Bloom filter sizing.
+  static const int meshDedupCapacity = 10000;
+  /// E2EE session timeout in hours.
+  static const int e2eeSessionTimeoutHours = 24;
 
   // Transport feature flags
   /// Set to false to disable LAN (TCP/UDP) transport entirely and fall back

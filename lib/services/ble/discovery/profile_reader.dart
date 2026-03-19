@@ -81,6 +81,11 @@ class ProfileReader {
   /// Prevents redundant subscribe calls on every 30s profile re-read cycle.
   final Set<String> _reversePathNotifySubscribed = {};
 
+  /// Peers for which we've already subscribed to fff3 (messaging) notifications.
+  /// Enables bidirectional messaging: the remote Peripheral pushes messages
+  /// to us (Central) via fff3 notify, eliminating the need for a reverse connection.
+  final Set<String> _fff3NotifySubscribed = {};
+
   /// Load previously persisted thumbnail sizes from SharedPreferences.
   /// Call once after construction (e.g. from BleFacade.initialize).
   void loadPersistedSizes() {
@@ -153,7 +158,13 @@ class ProfileReader {
     if (!shouldReread) return;
     _lastProfileReadTime[peerId] = DateTime.now();
 
-    // Read profile metadata (small JSON: userId/name/age/bio)
+    // GATT operations MUST be sequential — Android's BluetoothGatt and iOS
+    // Core Bluetooth do not support concurrent operations on the same
+    // connection. Parallel calls cause IllegalStateException (Android) and
+    // 0-byte reads (iOS).
+
+    // 1. Read profile metadata (fff1) — must complete first so we know
+    //    the thumbnail_size for the skip check.
     final profileChar = conn.profileChar;
     if (profileChar != null) {
       try {
@@ -175,10 +186,9 @@ class ProfileReader {
       );
     }
 
-    // Subscribe to thumbnail char notifications AFTER the profile read.
-    // Skip if we already have the thumbnail and the server reports the same size
-    // (peer hasn't changed their photo). This avoids pushing 60-70KB over BLE
-    // on every 30s re-read cycle.
+    // 2. Subscribe to thumbnail notifications (fff2).
+    // Skip if we already have the thumbnail and the server reports the same
+    // size (peer hasn't changed their photo).
     final expectedSize = _thumbnailExpectedSizes[peerId];
     final alreadyHave = expectedSize != null &&
         _peerThumbnailReceivedSizes[peerId] == expectedSize;
@@ -189,6 +199,8 @@ class ProfileReader {
         // Clear any stale buffer so we accumulate a fresh delivery.
         _thumbnailBuffers.remove(peerId);
 
+        // Unsubscribe first to reset the Peripheral's notify state.
+        // Swallow errors — the subscription may not exist yet.
         try {
           await _central.setCharacteristicNotifyState(
             conn.peripheral,
@@ -196,6 +208,12 @@ class ProfileReader {
             state: false,
           );
         } catch (_) {}
+
+        // Small settling delay: the Peripheral's notify state handler fires
+        // immediately on subscribe and starts pushing chunks. Without this
+        // delay, chunks can arrive before the Central's notification listener
+        // is fully registered, causing silent drops (especially on Android).
+        await Future<void>.delayed(const Duration(milliseconds: 15));
 
         await _central.setCharacteristicNotifyState(
           conn.peripheral,
@@ -224,10 +242,34 @@ class ProfileReader {
       );
     }
 
-    // Subscribe to fff5 (reverse-path) notifications for cross-platform responses.
-    // This enables cross-platform E2EE handshakes: when the remote Peripheral
-    // needs to push a handshake response back to us (the Central), it uses
-    // fff5 GATT notifications. Only subscribe once per connection.
+    // 3. Subscribe to fff3 (messaging) notifications for bidirectional messaging.
+    // This lets the remote Peripheral push messages back to us (Central) via
+    // fff3 notify, without needing a separate reverse GATT connection.
+    final messagingChar = conn.messagingChar;
+    if (messagingChar != null && !_fff3NotifySubscribed.contains(peerId)) {
+      try {
+        await _central.setCharacteristicNotifyState(
+          conn.peripheral,
+          messagingChar,
+          state: true,
+        );
+        _fff3NotifySubscribed.add(peerId);
+        Logger.info(
+          'ProfileReader: Subscribed to fff3 notify from $peerId (bidirectional)',
+          'BLE',
+        );
+      } catch (e) {
+        Logger.warning(
+          'ProfileReader: fff3 notify subscribe FAILED for $peerId: $e — '
+          'will retry on next profile read cycle',
+          'BLE',
+        );
+      }
+    }
+
+    // 4. Subscribe to fff5 (reverse-path) notifications — legacy fallback.
+    // clearPeer() removes peerId from _reversePathNotifySubscribed on
+    // disconnect, so this re-subscribes correctly after reconnection.
     final reversePathChar = conn.reversePathChar;
     if (reversePathChar != null && !_reversePathNotifySubscribed.contains(peerId)) {
       try {
@@ -242,8 +284,10 @@ class ProfileReader {
           'BLE',
         );
       } catch (e) {
-        Logger.debug(
-          'ProfileReader: fff5 notify subscribe failed for $peerId: $e',
+        // Don't add to _reversePathNotifySubscribed on failure so we retry next cycle.
+        Logger.warning(
+          'ProfileReader: fff5 notify subscribe FAILED for $peerId: $e — '
+          'will retry on next profile read cycle',
           'BLE',
         );
       }
@@ -349,6 +393,9 @@ class ProfileReader {
   // ==================== Cleanup ====================
 
   /// Clear all state for a specific peer.
+  ///
+  /// MUST be called on disconnect so subscriptions are re-established
+  /// on the next connection (especially fff5 reverse-path notifications).
   void clearPeer(String peerId) {
     _lastProfileReadTime.remove(peerId);
     _thumbnailBuffers.remove(peerId);
@@ -361,6 +408,15 @@ class ProfileReader {
     _fullPhotoBuffers.remove(peerId);
     _fullPhotoExpectedSizes.remove(peerId);
     _peerFullPhotoSizes.remove(peerId);
+    // Clear subscription tracking so they're re-established on reconnect.
+    // Without this, a peer that disconnects and reconnects would never get
+    // fff3/fff5 notifications re-subscribed (the sets still contain the old peerId).
+    _reversePathNotifySubscribed.remove(peerId);
+    _fff3NotifySubscribed.remove(peerId);
+    Logger.debug(
+      'ProfileReader: Cleared peer state for $peerId (incl. fff5 subscription)',
+      'BLE',
+    );
   }
 
   /// Clear all state.
@@ -374,11 +430,20 @@ class ProfileReader {
     _fullPhotoBuffers.clear();
     _fullPhotoExpectedSizes.clear();
     _peerFullPhotoSizes.clear();
+    _reversePathNotifySubscribed.clear();
+    _fff3NotifySubscribed.clear();
   }
 
   // ==================== Internal ====================
 
   void _handleProfileData(String peerId, Uint8List data) {
+    if (data.isEmpty) {
+      Logger.warning(
+        'ProfileReader: Empty profile data from $peerId — skipping decode',
+        'BLE',
+      );
+      return;
+    }
     try {
       final json = jsonDecode(utf8.decode(data)) as Map<String, dynamic>;
 

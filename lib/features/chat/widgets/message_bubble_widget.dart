@@ -459,6 +459,12 @@ class MessageBubbleWidget extends StatelessWidget {
             color: Colors.white,
           ),
         );
+      case MessageStatus.queued:
+        return const Icon(
+          Icons.schedule,
+          size: 16,
+          color: Colors.white70,
+        );
       case MessageStatus.sent:
         return const Icon(
           Icons.done,

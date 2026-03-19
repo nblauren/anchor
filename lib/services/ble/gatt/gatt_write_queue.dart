@@ -118,7 +118,10 @@ class GattWriteQueue {
   }) {
     if (_disposed) return Future.value(false);
 
-    // Backpressure: when queue is full, shed lowest-priority traffic
+    // Backpressure: when queue is full, shed lowest-priority traffic.
+    // Reserve a small number of mesh relay slots to maintain network
+    // topology even during photo transfers.
+    const reservedMeshSlots = 10;
     if (totalQueued >= maxQueueDepth) {
       if (priority == WritePriority.meshRelay) {
         // Reject new mesh relay writes under pressure
@@ -129,16 +132,20 @@ class GattWriteQueue {
         return Future.value(false);
       }
 
-      // Purge mesh relay queue to make room for higher-priority traffic
+      // Trim mesh relay queue to reserved capacity instead of purging all.
+      // This keeps critical routing messages (peer_announce, neighbor_list)
+      // alive while making room for higher-priority traffic.
       final meshQueue = _queues[WritePriority.meshRelay]!;
-      if (meshQueue.isNotEmpty) {
-        final purged = meshQueue.length;
-        for (final req in meshQueue) {
+      if (meshQueue.length > reservedMeshSlots) {
+        final purgeCount = meshQueue.length - reservedMeshSlots;
+        var purged = 0;
+        while (purged < purgeCount && meshQueue.isNotEmpty) {
+          final req = meshQueue.removeFirst();
           if (!req.completer.isCompleted) req.completer.complete(false);
+          purged++;
         }
-        meshQueue.clear();
         Logger.info(
-          'GattWriteQueue: Purged $purged mesh relay items under backpressure',
+          'GattWriteQueue: Trimmed $purged mesh relay items (kept $reservedMeshSlots)',
           'BLE',
         );
       }
@@ -238,18 +245,21 @@ class GattWriteQueue {
         if (request.completer.isCompleted) continue;
 
         try {
-          // User messages use writeWithResponse for delivery confirmation.
-          // Photo chunks and mesh relay use writeWithoutResponse for throughput
-          // (some packet loss is acceptable — photos retry, mesh is best-effort).
-          final writeType = request.priority == WritePriority.userMessage
-              ? GATTCharacteristicWriteType.withResponse
-              : GATTCharacteristicWriteType.withoutResponse;
+          // All writes use writeWithResponse to guarantee delivery and provide
+          // flow control. writeWithoutResponse caused silent packet loss on iOS
+          // when the BLE controller buffer filled up, causing photo transfers
+          // to stall mid-flight with no error.
+          //
+          // Mesh relay is the exception — best-effort, loss-tolerant.
+          final writeType = request.priority == WritePriority.meshRelay
+              ? GATTCharacteristicWriteType.withoutResponse
+              : GATTCharacteristicWriteType.withResponse;
 
-          await _central.writeCharacteristic(
+          await _writeWithTimeout(
             request.peripheral,
             request.characteristic,
-            value: request.data,
-            type: writeType,
+            request.data,
+            writeType,
           );
           if (!request.completer.isCompleted) {
             request.completer.complete(true);
@@ -276,6 +286,67 @@ class GattWriteQueue {
     // Check if more items arrived while we were finishing
     if (totalQueued > 0 && !_disposed) {
       _processNext();
+    }
+  }
+
+  /// Timeout for a single GATT write operation. If the write doesn't complete
+  /// within this duration (e.g. peer disconnected mid-write on iOS where the
+  /// Future never resolves), the write is considered failed and the queue moves on.
+  static const _writeTimeout = Duration(seconds: 10);
+
+  /// Write with timeout and automatic retry on iOS "prepare queue full" (CBATTError 9).
+  ///
+  /// The timeout prevents a hung writeCharacteristic call from blocking the
+  /// entire queue indefinitely — which was the primary cause of the
+  /// "transfer stops midway" bug.
+  ///
+  /// The retry handles a transient error that occurs when a GATT descriptor
+  /// write (e.g. from setCharacteristicNotifyState) and a characteristic write
+  /// collide on the same iOS prepare queue. In high-density cruise environments
+  /// (50+ peers), collisions are frequent, so we retry up to 4 times with
+  /// exponential backoff (100ms → 800ms).
+  Future<void> _writeWithTimeout(
+    Peripheral peripheral,
+    GATTCharacteristic characteristic,
+    Uint8List data,
+    GATTCharacteristicWriteType writeType, {
+    int maxRetries = 4,
+  }) async {
+    for (var attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        await _central.writeCharacteristic(
+          peripheral,
+          characteristic,
+          value: data,
+          type: writeType,
+        ).timeout(_writeTimeout);
+        return;
+      } on TimeoutException {
+        Logger.warning(
+          'GattWriteQueue: Write timed out after ${_writeTimeout.inSeconds}s '
+          '(attempt ${attempt + 1}/${maxRetries + 1})',
+          'BLE',
+        );
+        if (attempt < maxRetries) continue;
+        throw TimeoutException(
+          'GATT write timed out after ${maxRetries + 1} attempts',
+          _writeTimeout,
+        );
+      } catch (e) {
+        final isPrepareQueueFull =
+            e.toString().contains('Code=9') || e.toString().contains('Code 9');
+        if (isPrepareQueueFull && attempt < maxRetries) {
+          final delayMs = 100 * (1 << attempt); // 100, 200, 400, 800
+          Logger.info(
+            'GattWriteQueue: Prepare queue full — retry ${attempt + 1}/$maxRetries '
+            '(backoff ${delayMs}ms)',
+            'BLE',
+          );
+          await Future<void>.delayed(Duration(milliseconds: delayMs));
+          continue;
+        }
+        rethrow;
+      }
     }
   }
 }

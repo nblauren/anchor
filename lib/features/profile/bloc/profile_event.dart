@@ -122,8 +122,8 @@ class DismissNsfwWarning extends ProfileEvent {
   const DismissNsfwWarning();
 }
 
-/// Debug-only: auto-create a complete profile with random data and a
-/// placeholder photo so the developer can skip the 7-step setup flow.
+/// Debug-only: auto-create a profile with random data (no photo) so the
+/// developer can skip the 7-step setup flow.
 class QuickSetupProfile extends ProfileEvent {
   const QuickSetupProfile();
 }

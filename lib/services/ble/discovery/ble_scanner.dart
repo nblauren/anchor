@@ -280,20 +280,47 @@ class BleScanner {
     onPeerNeedsProfile?.call(deviceId, peripheral);
   }
 
-  /// Decode local name "A:<name>:<age>[:<profileVersion>]"
+  /// Decode local name — supports both formats:
+  ///
+  /// **v2 (current)**: "A<profileVersion>" (e.g. "A3", "A17")
+  ///   Minimal format that keeps the advertisement under 31 bytes so the
+  ///   service UUID stays in the primary AD packet. Name/age come from fff1.
+  ///
+  /// **v1 (legacy)**: "A:<name>:<age>[:<profileVersion>]"
+  ///   Old format that exceeded 31 bytes and caused discovery failures.
+  ///   Still accepted for backward compatibility with older app versions.
   ({String name, int? age, int? profileVersion})? _decodeLocalName(
       String advName) {
-    if (!advName.startsWith('A:')) return null;
-    final parts = advName.split(':');
-    if (parts.length < 2) return null;
-    final name = parts[1];
-    final age = parts.length >= 3 ? int.tryParse(parts[2]) : null;
-    final profileVersion = parts.length >= 4 ? int.tryParse(parts[3]) : null;
-    return (
-      name: name.isEmpty ? 'Anchor User' : name,
-      age: (age == null || age == 0) ? null : age,
-      profileVersion: profileVersion,
-    );
+    if (!advName.startsWith('A')) return null;
+
+    // v1 legacy format: "A:<name>:<age>[:<version>]"
+    if (advName.startsWith('A:')) {
+      final parts = advName.split(':');
+      if (parts.length < 2) return null;
+      final name = parts[1];
+      final age = parts.length >= 3 ? int.tryParse(parts[2]) : null;
+      final profileVersion = parts.length >= 4 ? int.tryParse(parts[3]) : null;
+      return (
+        name: name.isEmpty ? 'Anchor User' : name,
+        age: (age == null || age == 0) ? null : age,
+        profileVersion: profileVersion,
+      );
+    }
+
+    // v2 compact format: "A<profileVersion>" (e.g. "A3", "A17")
+    if (advName.length >= 2) {
+      final versionStr = advName.substring(1);
+      final profileVersion = int.tryParse(versionStr);
+      if (profileVersion != null) {
+        return (
+          name: 'Anchor User', // Real name comes from GATT fff1 read
+          age: null,            // Real age comes from GATT fff1 read
+          profileVersion: profileVersion,
+        );
+      }
+    }
+
+    return null;
   }
 
   void _recalculateTiming({int? visiblePeerCount}) {

@@ -98,7 +98,6 @@ class ConversationListBloc
     TransportRetryQueue? retryQueue,
   })  : _chatRepository = chatRepository,
         _notificationService = notificationService,
-        _ownUserId = ownUserId,
         super(const ConversationListState()) {
     on<LoadConversations>(_onLoadConversations);
     on<DeleteConversation>(_onDeleteConversation);
@@ -131,7 +130,6 @@ class ConversationListBloc
 
   final ChatRepository _chatRepository;
   final NotificationService _notificationService;
-  final String _ownUserId;
 
   StreamSubscription<void>? _busSub;
   StreamSubscription? _sendConvSub;
@@ -143,11 +141,6 @@ class ConversationListBloc
     Emitter<ConversationListState> emit,
   ) async {
     emit(state.copyWith(status: ConversationListStatus.loading));
-
-    // One-time repair: fix any messages whose senderId was saved as ''.
-    if (_ownUserId.isNotEmpty) {
-      await _chatRepository.fixEmptySenderIds(_ownUserId);
-    }
 
     try {
       final conversations = await _chatRepository.getAllConversations();

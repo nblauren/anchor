@@ -68,16 +68,21 @@ class ConnectionManager {
   int _activeConnectAttempts = 0;
 
   /// Maximum concurrent connection attempts (separate from pool size).
-  /// Prevents scan storms from overwhelming the BLE stack.
+  /// Kept at 3 to avoid overwhelming the BLE stack — non-Anchor devices
+  /// waste slots and increasing this causes more failed attempts.
   static const _maxConcurrentConnectAttempts = 3;
 
   // ==================== Streams ====================
 
   final _disconnectedController = StreamController<String>.broadcast();
+  final _connectedController = StreamController<String>.broadcast();
   final _peerUnreachableController = StreamController<String>.broadcast();
 
   /// Emitted when a peer disconnects (GATT connection lost).
   Stream<String> get onDisconnected => _disconnectedController.stream;
+
+  /// Emitted when a GATT connection is successfully established with a peer.
+  Stream<String> get onConnected => _connectedController.stream;
 
   /// Emitted when a peer is declared unreachable after consecutive failures.
   Stream<String> get onPeerUnreachable => _peerUnreachableController.stream;
@@ -262,6 +267,7 @@ class ConnectionManager {
     clear();
     await _connectionStateSubscription?.cancel();
     await _disconnectedController.close();
+    await _connectedController.close();
     await _peerUnreachableController.close();
   }
 
@@ -359,10 +365,17 @@ class ConnectionManager {
       conn.resetFailures();
       _connections[peerId] = conn;
       clearDeadStatus(peerId);
+      _connectedController.add(peerId);
 
       Logger.info(
-        'ConnectionManager: Connected to $peerId '
-        '(maxWrite=$maxWriteLen, messaging=${conn.messagingChar != null})',
+        'ConnectionManager: [CONNECTED] $peerId '
+        '(maxWrite=$maxWriteLen, '
+        'fff1=${conn.profileChar != null}, '
+        'fff2=${conn.thumbnailChar != null}, '
+        'fff3=${conn.messagingChar != null}, '
+        'fff4=${conn.fullPhotosChar != null}, '
+        'fff5=${conn.reversePathChar != null}, '
+        'pool=$activeConnectionCount/$_maxConnections)',
         'BLE',
       );
 
@@ -442,12 +455,13 @@ class ConnectionManager {
   /// Handle peripheral disconnection from the CentralManager.
   void _onConnectionStateChanged(
       PeripheralConnectionStateChangedEventArgs args) {
+    final peerId = args.peripheral.uuid.toString();
     if (args.state == ConnectionState.disconnected) {
-      final peerId = args.peripheral.uuid.toString();
       final conn = _connections[peerId];
       if (conn != null && conn.isConnected) {
         Logger.info(
-          'ConnectionManager: Peripheral $peerId disconnected',
+          'ConnectionManager: [DISCONNECTED] $peerId '
+          '(pool=${activeConnectionCount - 1}/$_maxConnections)',
           'BLE',
         );
         conn.markDisconnected();
@@ -459,6 +473,11 @@ class ConnectionManager {
         }
         _disconnectedController.add(peerId);
       }
+    } else {
+      Logger.debug(
+        'ConnectionManager: Peripheral $peerId state → ${args.state}',
+        'BLE',
+      );
     }
   }
 

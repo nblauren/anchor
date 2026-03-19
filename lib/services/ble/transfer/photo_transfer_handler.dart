@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
@@ -42,8 +43,34 @@ class PhotoTransferHandler {
   /// Track cancelled transfers so in-flight sends stop early.
   final Set<String> _cancelledTransfers = {};
 
-  /// Active incoming binary photo transfers (keyed by peerId/centralUuid).
+  /// Active incoming binary photo transfers (keyed by resolved peerId).
   final Map<String, _IncomingPhotoTransfer> _incomingPhotoTransfers = {};
+
+  /// Timers that expire stale incoming transfers. If no chunk arrives within
+  /// [_receiveTimeout], the partial transfer is discarded and a failure is
+  /// emitted. Without this, a dropped connection mid-transfer would leave the
+  /// transfer hanging forever.
+  final Map<String, Timer> _receiveTimeoutTimers = {};
+
+  /// Base timeout per chunk — scales with remaining chunks.
+  /// Small transfers (< 10 chunks): 15s per chunk.
+  /// Large transfers (100+ chunks): 30s per chunk (BLE congestion likely).
+  static Duration _receiveTimeoutFor(int remainingChunks) {
+    if (remainingChunks > 50) return const Duration(seconds: 30);
+    if (remainingChunks > 10) return const Duration(seconds: 20);
+    return const Duration(seconds: 15);
+  }
+
+  /// Maps raw Central UUID → resolved peerId for binary chunk routing.
+  /// On iOS, the Central UUID ≠ Peripheral UUID for the same device.
+  /// `photo_start` JSON arrives with a resolved `fromPeerId` (via sender_id),
+  /// but binary chunks (0x02/0x03) also carry the first 8 bytes of the
+  /// sender's userId as a secondary identification mechanism.
+  final Map<String, String> _centralToResolvedId = {};
+
+  /// Maps sender tag (first 8 bytes of userId) → resolved peerId.
+  /// Used as a fallback when Central UUID lookup fails (iOS UUID mismatch).
+  final Map<String, String> _senderTagToResolvedId = {};
 
   /// Active incoming thumbnail transfers for the photo-preview consent flow.
   final Map<String, _IncomingThumbnailTransfer> _incomingThumbnailTransfers =
@@ -160,7 +187,15 @@ class PhotoTransferHandler {
 
       _emitProgress(messageId, peerId, 0, PhotoTransferStatus.starting);
 
-      // Phase 2: Binary chunks (of ciphertext when encrypted)
+      // Phase 2: Binary chunks (of ciphertext when encrypted).
+      // v2 binary format: [0x02][uint16 index][8-byte sender tag][raw data]
+      // The sender tag is the first 8 bytes of our userId (UTF-8), allowing
+      // the receiver to resolve the sender even when Central UUID lookup fails.
+      final ownUserId = getOwnUserId?.call() ?? '';
+      final senderTag = _makeSenderTag(ownUserId);
+      const senderTagLen = 8;
+      const v2Overhead = 3 + senderTagLen; // marker + index + tag
+
       for (var i = 0; i < totalChunks; i++) {
         if (_cancelledTransfers.contains(messageId)) {
           _cancelledTransfers.remove(messageId);
@@ -173,11 +208,12 @@ class PhotoTransferHandler {
         final dataEnd = min(dataStart + rawChunkSize, transferData.length);
         final chunkData = transferData.sublist(dataStart, dataEnd);
 
-        final chunkPayload = Uint8List(binaryOverhead + chunkData.length);
+        final chunkPayload = Uint8List(v2Overhead + chunkData.length);
         chunkPayload[0] = 0x02;
         chunkPayload[1] = (i >> 8) & 0xFF;
         chunkPayload[2] = i & 0xFF;
-        chunkPayload.setRange(binaryOverhead, chunkPayload.length, chunkData);
+        chunkPayload.setRange(3, 3 + senderTagLen, senderTag);
+        chunkPayload.setRange(v2Overhead, chunkPayload.length, chunkData);
 
         final chunkSuccess = await _writeQueue.enqueue(
           peerId: peerId,
@@ -280,7 +316,13 @@ class PhotoTransferHandler {
 
       if (!startSuccess) return false;
 
-      // Phase 2: Binary thumbnail chunks (0x03 marker, ciphertext when encrypted)
+      // Phase 2: Binary thumbnail chunks (0x03 marker, ciphertext when encrypted).
+      // Same v2 format as photo chunks: [0x03][index][8-byte sender tag][data]
+      final ownUserId = getOwnUserId?.call() ?? '';
+      final senderTag = _makeSenderTag(ownUserId);
+      const senderTagLen = 8;
+      const v2Overhead = 3 + senderTagLen;
+
       for (var i = 0; i < totalChunks; i++) {
         if (_cancelledTransfers.contains(messageId)) {
           _cancelledTransfers.remove(messageId);
@@ -291,11 +333,12 @@ class PhotoTransferHandler {
         final dataEnd = min(dataStart + rawChunkSize, transferThumb.length);
         final chunkData = transferThumb.sublist(dataStart, dataEnd);
 
-        final chunkPayload = Uint8List(binaryOverhead + chunkData.length);
+        final chunkPayload = Uint8List(v2Overhead + chunkData.length);
         chunkPayload[0] = 0x03;
         chunkPayload[1] = (i >> 8) & 0xFF;
         chunkPayload[2] = i & 0xFF;
-        chunkPayload.setRange(binaryOverhead, chunkPayload.length, chunkData);
+        chunkPayload.setRange(3, 3 + senderTagLen, senderTag);
+        chunkPayload.setRange(v2Overhead, chunkPayload.length, chunkData);
 
         final chunkSuccess = await _writeQueue.enqueue(
           peerId: peerId,
@@ -376,7 +419,12 @@ class PhotoTransferHandler {
   // ==================== Receive: Photo (binary 0x02) ====================
 
   /// Handle photo_start JSON — stores metadata for the binary chunk stream.
-  void handlePhotoStart(Map<String, dynamic> json, String fromPeerId) {
+  ///
+  /// [fromPeerId] is the resolved peer ID (from sender_id → Peripheral UUID).
+  /// [centralId] is the raw Central UUID from the GATT write — binary chunks
+  /// (0x02) only carry this ID, so we record the mapping for chunk lookup.
+  void handlePhotoStart(Map<String, dynamic> json, String fromPeerId,
+      {String? centralId}) {
     final messageId = json['message_id'] as String? ?? '';
     final photoId = json['photo_id'] as String?;
     final totalChunks = json['total_chunks'] as int? ?? 0;
@@ -398,40 +446,123 @@ class PhotoTransferHandler {
       nonce: nonce,
     );
 
+    // Record Central UUID → resolved ID mapping so binary chunks can find
+    // the transfer even when Central UUID ≠ Peripheral UUID (iOS).
+    if (centralId != null && centralId != fromPeerId) {
+      _centralToResolvedId[centralId] = fromPeerId;
+    }
+
+    // Also record the sender tag (first 8 chars of sender_id) for v2 binary
+    // chunk identification. This provides a timing-independent fallback when
+    // the Central UUID lookup fails.
+    final senderId = json['sender_id'] as String?;
+    if (senderId != null && senderId.length >= 8) {
+      _senderTagToResolvedId[senderId.substring(0, 8)] = fromPeerId;
+    }
+
     Logger.info(
-      'PhotoTransfer: Incoming from '
+      'PhotoTransfer: Incoming photo from '
       '${fromPeerId.substring(0, min(8, fromPeerId.length))}: '
-      '$totalChunks chunks, $totalSize bytes',
+      '$totalChunks chunks, $totalSize bytes '
+      '(centralId=${centralId?.substring(0, min(8, centralId.length)) ?? "n/a"}, '
+      'senderId=${senderId != null ? senderId.substring(0, min(8, senderId.length)) : "n/a"})',
       'BLE',
     );
 
     _emitProgress(messageId, fromPeerId, 0, PhotoTransferStatus.starting);
+
+    // Start receive timeout — if no chunks arrive within the window, the
+    // transfer is considered stale and cleaned up.
+    _resetReceiveTimeout(fromPeerId);
   }
 
-  /// Handle binary photo chunk: [0x02][uint16 chunk_index][raw data]
+  /// Handle binary photo chunk.
+  ///
+  /// v2 format: [0x02][uint16 index][8-byte sender tag][raw data] (≥11 bytes)
+  /// v1 format: [0x02][uint16 index][raw data] (≥3 bytes, no sender tag)
+  ///
+  /// The sender tag (first 8 bytes of the sender's userId) provides a
+  /// timing-independent way to resolve which transfer this chunk belongs to,
+  /// even when the Central UUID doesn't match any known Peripheral UUID (iOS).
   Future<void> handleBinaryPhotoChunk(Uint8List data, String centralId) async {
     if (data.length < 3) return;
 
     final chunkIndex = (data[1] << 8) | data[2];
-    final chunkData = data.sublist(3);
 
+    // Try to extract v2 sender tag: bytes 3..10 are the sender tag if the
+    // chunk is large enough. We detect v2 by checking if the tag resolves
+    // to a known sender — if not, treat as v1 (no tag, raw data starts at 3).
+    String? senderTag;
+    Uint8List chunkData;
+    if (data.length >= 11) {
+      senderTag = String.fromCharCodes(data.sublist(3, 11));
+      chunkData = data.sublist(11);
+    } else {
+      chunkData = data.sublist(3);
+    }
+
+    // Try direct lookup by Central UUID first, then by sender tag, then by
+    // the Central → Peripheral mapping recorded in handlePhotoStart.
     var fromPeerId = centralId;
     _IncomingPhotoTransfer? transfer = _incomingPhotoTransfers[centralId];
 
     if (transfer == null) {
-      for (final entry in _incomingPhotoTransfers.entries) {
-        if (entry.key == centralId) {
-          transfer = entry.value;
-          fromPeerId = entry.key;
-          break;
+      final resolvedId = _centralToResolvedId[centralId];
+      if (resolvedId != null) {
+        transfer = _incomingPhotoTransfers[resolvedId];
+        if (transfer != null) fromPeerId = resolvedId;
+      }
+    }
+
+    // v2 sender tag fallback: resolve via the tag recorded in handlePhotoStart.
+    if (transfer == null && senderTag != null) {
+      final resolvedId = _senderTagToResolvedId[senderTag];
+      if (resolvedId != null) {
+        transfer = _incomingPhotoTransfers[resolvedId];
+        if (transfer != null) {
+          fromPeerId = resolvedId;
+          // Record the mapping for future chunks from this Central.
+          _centralToResolvedId[centralId] = resolvedId;
+          Logger.info(
+            'PhotoTransfer: Resolved chunk sender via tag "$senderTag" '
+            '→ ${resolvedId.substring(0, min(8, resolvedId.length))} '
+            '(centralId=${centralId.substring(0, min(8, centralId.length))})',
+            'BLE',
+          );
         }
       }
     }
 
     if (transfer == null) {
+      // If v2 tag was present but didn't resolve, the raw data might have been
+      // incorrectly split. Fall back to treating entire payload as v1 data.
+      if (senderTag != null && data.length >= 11) {
+        chunkData = data.sublist(3); // v1 fallback: no tag
+        Logger.debug(
+          'PhotoTransfer: Sender tag "$senderTag" unresolved — '
+          'treating as v1 chunk from $centralId',
+          'BLE',
+        );
+      }
+      // Last-resort: check all active transfers
+      if (_incomingPhotoTransfers.length == 1) {
+        final entry = _incomingPhotoTransfers.entries.first;
+        transfer = entry.value;
+        fromPeerId = entry.key;
+        _centralToResolvedId[centralId] = fromPeerId;
+        Logger.debug(
+          'PhotoTransfer: Single active transfer — attributing chunk '
+          '$chunkIndex to ${fromPeerId.substring(0, min(8, fromPeerId.length))}',
+          'BLE',
+        );
+      }
+    }
+
+    if (transfer == null) {
       Logger.warning(
-        'PhotoTransfer: Binary chunk received but no active transfer '
-        'from $centralId (chunk $chunkIndex)',
+        'PhotoTransfer: Binary chunk $chunkIndex received but no active '
+        'transfer from centralId=${centralId.substring(0, min(8, centralId.length))}'
+        '${senderTag != null ? " tag=$senderTag" : ""}',
         'BLE',
       );
       return;
@@ -439,6 +570,9 @@ class PhotoTransferHandler {
 
     transfer.receivedData.add(chunkData);
     transfer.receivedCount++;
+
+    // Reset receive timeout — the transfer is still alive.
+    _resetReceiveTimeout(fromPeerId);
 
     if (transfer.receivedCount % 50 == 0 ||
         transfer.receivedCount == transfer.totalChunks) {
@@ -494,6 +628,7 @@ class PhotoTransferHandler {
       _emitProgress(
           transfer.messageId, fromPeerId, 1.0, PhotoTransferStatus.completed);
 
+      _cancelReceiveTimeout(fromPeerId);
       _incomingPhotoTransfers.remove(fromPeerId);
     }
   }
@@ -554,7 +689,7 @@ class PhotoTransferHandler {
 
   /// Handle photo_preview JSON — stores metadata for incoming thumbnail chunks.
   void handlePhotoPreviewStart(
-      Map<String, dynamic> json, String fromPeerId) {
+      Map<String, dynamic> json, String fromPeerId, {String? centralId}) {
     final messageId = json['message_id'] as String? ?? '';
     final photoId = json['photo_id'] as String? ?? '';
     final originalSize = json['original_size'] as int? ?? 0;
@@ -594,34 +729,83 @@ class PhotoTransferHandler {
       receivedCount: 0,
       nonce: thumbNonce,
     );
+
+    // Record Central UUID → resolved ID mapping for thumbnail chunk lookup.
+    if (centralId != null && centralId != fromPeerId) {
+      _centralToResolvedId[centralId] = fromPeerId;
+    }
+
+    // Record sender tag for v2 binary chunk identification.
+    final senderId = json['sender_id'] as String?;
+    if (senderId != null && senderId.length >= 8) {
+      _senderTagToResolvedId[senderId.substring(0, 8)] = fromPeerId;
+    }
   }
 
-  /// Handle binary thumbnail chunk: [0x03][uint16 chunk_index][raw data]
+  /// Handle binary thumbnail chunk.
+  ///
+  /// v2 format: [0x03][uint16 index][8-byte sender tag][raw data] (≥11 bytes)
+  /// v1 format: [0x03][uint16 index][raw data] (≥3 bytes)
   Future<void> handleBinaryThumbnailChunk(Uint8List data, String centralId) async {
     if (data.length < 3) return;
 
+    // Extract v2 sender tag if present, same logic as photo chunks.
+    String? senderTag;
+    Uint8List chunkData;
+    if (data.length >= 11) {
+      senderTag = String.fromCharCodes(data.sublist(3, 11));
+      chunkData = data.sublist(11);
+    } else {
+      chunkData = data.sublist(3);
+    }
+
+    // Try direct lookup, then Central → Peripheral, then sender tag.
     _IncomingThumbnailTransfer? transfer =
         _incomingThumbnailTransfers[centralId];
+    var resolvedPeerId = centralId;
 
     if (transfer == null) {
-      for (final entry in _incomingThumbnailTransfers.entries) {
-        if (entry.key == centralId) {
-          transfer = entry.value;
-          break;
+      final mapped = _centralToResolvedId[centralId];
+      if (mapped != null) {
+        transfer = _incomingThumbnailTransfers[mapped];
+        if (transfer != null) resolvedPeerId = mapped;
+      }
+    }
+
+    if (transfer == null && senderTag != null) {
+      final mapped = _senderTagToResolvedId[senderTag];
+      if (mapped != null) {
+        transfer = _incomingThumbnailTransfers[mapped];
+        if (transfer != null) {
+          resolvedPeerId = mapped;
+          _centralToResolvedId[centralId] = mapped;
         }
+      }
+    }
+
+    if (transfer == null) {
+      // v1 fallback
+      if (senderTag != null && data.length >= 11) {
+        chunkData = data.sublist(3);
+      }
+      // Single-transfer last resort
+      if (_incomingThumbnailTransfers.length == 1) {
+        final entry = _incomingThumbnailTransfers.entries.first;
+        transfer = entry.value;
+        resolvedPeerId = entry.key;
+        _centralToResolvedId[centralId] = resolvedPeerId;
       }
     }
 
     if (transfer == null) {
       Logger.warning(
         'PhotoTransfer: Thumbnail chunk but no active preview transfer '
-        'from $centralId',
+        'from centralId=${centralId.substring(0, min(8, centralId.length))}'
+        '${senderTag != null ? " tag=$senderTag" : ""}',
         'BLE',
       );
       return;
     }
-
-    final chunkData = data.sublist(3);
     transfer.receivedData.add(chunkData);
     transfer.receivedCount++;
 
@@ -643,21 +827,21 @@ class PhotoTransferHandler {
           nonce: thumbNonce,
           ciphertext: rawThumb,
         );
-        final decrypted = await enc.decryptBytes(centralId, payload);
+        final decrypted = await enc.decryptBytes(resolvedPeerId, payload);
         if (decrypted == null) {
           Logger.warning(
             'PhotoTransfer: Thumbnail decryption failed for '
             '${transfer.messageId} — dropping',
             'E2EE',
           );
-          _incomingThumbnailTransfers.remove(centralId);
+          _incomingThumbnailTransfers.remove(resolvedPeerId);
           return;
         }
         thumbnailBytes = decrypted;
       }
 
       onPhotoPreviewReceived?.call(ReceivedPhotoPreview(
-        fromPeerId: centralId,
+        fromPeerId: resolvedPeerId,
         messageId: transfer.messageId,
         photoId: transfer.photoId,
         thumbnailBytes: thumbnailBytes,
@@ -665,7 +849,7 @@ class PhotoTransferHandler {
         timestamp: DateTime.now(),
       ));
 
-      _incomingThumbnailTransfers.remove(centralId);
+      _incomingThumbnailTransfers.remove(resolvedPeerId);
     }
   }
 
@@ -696,10 +880,60 @@ class PhotoTransferHandler {
     _cancelledTransfers.clear();
     _incomingPhotoTransfers.clear();
     _incomingThumbnailTransfers.clear();
+    _centralToResolvedId.clear();
+    _senderTagToResolvedId.clear();
     _photoReassembler.clear();
+    for (final timer in _receiveTimeoutTimers.values) {
+      timer.cancel();
+    }
+    _receiveTimeoutTimers.clear();
+  }
+
+  /// Produce an 8-byte sender tag from a userId (UTF-8, zero-padded).
+  /// Used to identify the sender in binary photo/thumbnail chunks (v2 format).
+  static Uint8List _makeSenderTag(String userId) {
+    final tag = Uint8List(8);
+    final src = utf8.encode(userId.length >= 8 ? userId.substring(0, 8) : userId);
+    for (var i = 0; i < src.length && i < 8; i++) {
+      tag[i] = src[i];
+    }
+    return tag;
   }
 
   // ==================== Internal ====================
+
+  /// Reset (or start) the receive timeout for an incoming transfer.
+  /// Each incoming chunk resets the timer. The timeout duration scales
+  /// with the remaining chunk count — larger transfers get more time
+  /// because BLE congestion is more likely.
+  void _resetReceiveTimeout(String peerId) {
+    _receiveTimeoutTimers[peerId]?.cancel();
+    final transfer = _incomingPhotoTransfers[peerId];
+    final remaining = transfer != null
+        ? transfer.totalChunks - transfer.receivedCount
+        : 10; // default for initial timeout before first chunk
+    _receiveTimeoutTimers[peerId] = Timer(_receiveTimeoutFor(remaining), () {
+      final transfer = _incomingPhotoTransfers.remove(peerId);
+      _receiveTimeoutTimers.remove(peerId);
+      if (transfer != null) {
+        Logger.warning(
+          'PhotoTransfer: Receive timeout for ${transfer.messageId} '
+          'from ${peerId.substring(0, min(8, peerId.length))} '
+          '(${transfer.receivedCount}/${transfer.totalChunks} chunks)',
+          'BLE',
+        );
+        _emitProgress(transfer.messageId, peerId,
+            transfer.receivedCount / transfer.totalChunks,
+            PhotoTransferStatus.failed,
+            errorMessage: 'Receive timeout — connection lost');
+      }
+    });
+  }
+
+  /// Cancel the receive timeout for a completed or cancelled transfer.
+  void _cancelReceiveTimeout(String peerId) {
+    _receiveTimeoutTimers.remove(peerId)?.cancel();
+  }
 
   /// Get or establish a connection to a peer, returning the connection
   /// if it can send messages, or null if unreachable.

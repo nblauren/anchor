@@ -282,8 +282,6 @@ void main() {
     test('known-vector: HKDF output is deterministic', () async {
       // Two calls with the same input must produce the same output.
       final ck = Uint8List.fromList(List.generate(32, (i) => i));
-      final ikm = Uint8List.fromList(List.generate(32, (i) => 32 - i));
-
       // Access via the private function using the processor
       // (We test indirectly via a full handshake producing consistent keys.)
       // This test verifies Split() is deterministic.

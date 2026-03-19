@@ -262,6 +262,11 @@ class PeerGridTile extends StatelessWidget {
         peer.thumbnailData!,
         fit: BoxFit.cover,
         gaplessPlayback: true,
+        // Decode to grid tile resolution instead of full image size.
+        // Grid tiles are ~180x220 logical pixels; 2x for retina = 360x440.
+        // This cuts decode time significantly for large thumbnails.
+        cacheWidth: 360,
+        cacheHeight: 440,
         errorBuilder: (context, error, stackTrace) => _buildPlaceholder(),
       );
     }

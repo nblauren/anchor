@@ -51,7 +51,6 @@ class TestFixtures {
   /// Create a [DiscoveredPeerEntry] (Drift model) with sensible test defaults.
   static DiscoveredPeerEntry makeEntry({
     String peerId = 'peer-1',
-    String? userId,
     String name = 'Alice',
     int? age = 30,
     String? bio = 'Test bio',
@@ -64,7 +63,6 @@ class TestFixtures {
   }) {
     return DiscoveredPeerEntry(
       peerId: peerId,
-      userId: userId,
       name: name,
       age: age,
       bio: bio,
@@ -97,7 +95,7 @@ class TestFixtures {
   }) {
     return ble.DiscoveredPeer(
       peerId: peerId,
-      userId: userId ?? 'user-$peerId',
+      userId: userId ?? peerId,
       name: name,
       age: age,
       bio: bio,

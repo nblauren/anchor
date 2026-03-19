@@ -59,6 +59,12 @@ class NearbyTransferServiceImpl implements HighSpeedTransferService {
   // Prevent duplicate invitations
   final Set<String> _pendingInvites = {};
 
+  // Timer for browse restart (iOS Multipeer workaround).
+  Timer? _inviteTimer;
+
+  // The peerId we're currently trying to invite (set during receivePayload).
+  String? _targetInvitePeerId;
+
   // ---------------------------------------------------------------------------
   // Initialization
   // ---------------------------------------------------------------------------
@@ -108,10 +114,24 @@ class NearbyTransferServiceImpl implements HighSpeedTransferService {
             _connectedDevices[device.deviceId] = device;
             _discoveredDevices.remove(device.deviceId);
             _pendingInvites.remove(device.deviceId);
+            // Resolve the connection completer if anyone is waiting.
+            if (_connectionCompleter != null &&
+                !_connectionCompleter!.isCompleted) {
+              _connectionCompleter!.complete(true);
+            }
           } else if (device.state == SessionState.notConnected) {
             _discoveredDevices[device.deviceId] = device;
             _connectedDevices.remove(device.deviceId);
             _pendingInvites.remove(device.deviceId);
+            // A new device was discovered — try inviting if we have a target.
+            if (_targetInvitePeerId != null) {
+              Logger.debug(
+                'Discovered device: name="${device.deviceName}" '
+                'id=${device.deviceId} (target=$_targetInvitePeerId)',
+                _tag,
+              );
+              _tryInvitePeer(_targetInvitePeerId!);
+            }
           }
         }
       });
@@ -146,6 +166,7 @@ class NearbyTransferServiceImpl implements HighSpeedTransferService {
     required String peerId,
     required Uint8List data,
     Duration timeout = const Duration(seconds: 15),
+    void Function()? onAdvertising,
   }) async {
     if (!await _ensureInitialized()) {
       Logger.error('sendPayload: init failed', null, null, _tag);
@@ -159,9 +180,22 @@ class NearbyTransferServiceImpl implements HighSpeedTransferService {
     _emitProgress(transferId, peerId, NearbyTransferStatus.discovering, 0);
 
     try {
+      // Clean up stale state from any previous transfer before starting.
+      try {
+        await _nearbyService!.stopAdvertisingPeer();
+        await _nearbyService!.stopBrowsingForPeers();
+      } catch (_) {}
+      _connectedDevices.clear();
+      _discoveredDevices.clear();
+      _pendingInvites.clear();
+
       // 1. Advertise with our userId so the receiver can find us.
       await _nearbyService!.startAdvertisingPeer(deviceName: _ownUserId);
       Logger.info('sendPayload: advertising as $_ownUserId', _tag);
+
+      // Signal to caller that advertising is active — safe to tell receiver
+      // to start browsing now.
+      onAdvertising?.call();
 
       // 2. Wait for the receiver to browse → discover us → invite → connect.
       final connected = await _waitForPeerConnected(peerId, timeout);
@@ -235,11 +269,16 @@ class NearbyTransferServiceImpl implements HighSpeedTransferService {
       _emitProgress(transferId, peerId, NearbyTransferStatus.completed, 1.0);
       _outgoing.remove(transferId);
 
-      // Give the native message channel time to flush all pending messages
-      // to the receiver before tearing down the connection. Without this
-      // delay, _stopNearby() disconnects the session and the receiver may
-      // not receive the final chunks or the transfer_complete message.
-      await Future.delayed(const Duration(seconds: 3));
+      // Wait for the receiver to acknowledge the transfer before tearing
+      // down the connection. This replaces the old 3-second hardcoded delay
+      // with a deterministic signal from the receiver.
+      await _waitForTransferAck(transferId, deviceId)
+          .timeout(const Duration(seconds: 10), onTimeout: () {
+        Logger.warning(
+          'sendPayload: No ACK from receiver — disconnecting anyway',
+          _tag,
+        );
+      });
       await _stopNearby();
       return true;
     } catch (e) {
@@ -271,6 +310,15 @@ class NearbyTransferServiceImpl implements HighSpeedTransferService {
     _emitProgress(transferId, peerId, NearbyTransferStatus.discovering, 0);
 
     try {
+      // Clean up stale state from any previous transfer before starting.
+      try {
+        await _nearbyService!.stopAdvertisingPeer();
+        await _nearbyService!.stopBrowsingForPeers();
+      } catch (_) {}
+      _connectedDevices.clear();
+      _discoveredDevices.clear();
+      _pendingInvites.clear();
+
       // 1. Register incoming transfer BEFORE browsing so arriving chunks are
       //    captured even if the connection is made very quickly.
       final completer = Completer<bool>();
@@ -372,88 +420,146 @@ class NearbyTransferServiceImpl implements HighSpeedTransferService {
     await _nearbyService!.sendMessage(deviceId, jsonEncode(json));
   }
 
+  /// Wait for the receiver to send a `transfer_ack` message confirming
+  /// they received and reassembled all chunks. This replaces the old
+  /// hardcoded 3-second post-transfer delay.
+  Future<void> _waitForTransferAck(String transferId, String deviceId) {
+    final completer = Completer<void>();
+    _pendingAcks[transferId] = completer;
+    return completer.future;
+  }
+
+  /// Pending transfer ACK completers: transferId → Completer.
+  final Map<String, Completer<void>> _pendingAcks = {};
+
+  /// Completer that resolves when a Nearby device connects.
+  /// Used by the SENDER (advertiser) side — resolves on first connection.
+  Completer<bool>? _connectionCompleter;
+
   /// Wait until any device is connected.
-  /// Used by the SENDER (advertiser) side — it just waits for the receiver
-  /// to browse, discover, invite, and connect.
-  ///
-  /// We don't filter by [peerId] because the sender only knows the receiver's
-  /// BLE device ID, while the receiver's Nearby device name is its userId
-  /// (a completely different identifier).  Since the Nearby session is
-  /// ephemeral (one transfer at a time), the first connected device is
-  /// the expected receiver.
+  /// Uses a Completer that is resolved from the state-change subscription
+  /// instead of polling with a Timer.
   Future<bool> _waitForPeerConnected(String peerId, Duration timeout) async {
     if (_connectedDevices.isNotEmpty) return true;
 
-    final completer = Completer<bool>();
-
-    late Timer timer;
-    timer = Timer.periodic(const Duration(milliseconds: 200), (_) {
-      if (_connectedDevices.isNotEmpty) {
-        if (!completer.isCompleted) completer.complete(true);
-        timer.cancel();
-      }
-    });
-
+    _connectionCompleter = Completer<bool>();
     try {
-      return await completer.future.timeout(timeout, onTimeout: () {
-        timer.cancel();
+      return await _connectionCompleter!.future.timeout(timeout, onTimeout: () {
         return false;
       });
     } catch (_) {
-      timer.cancel();
       return false;
+    } finally {
+      _connectionCompleter = null;
     }
   }
 
-  /// Periodically check discovered devices and invite the target peer.
-  /// Used by the RECEIVER (browser) side. Only invites each device ONCE to
-  /// avoid spamming the native layer with duplicate requestConnection calls.
+  /// Check discovered devices and invite the target peer.
+  /// Used by the RECEIVER (browser) side. Invites are triggered reactively
+  /// from the state-change subscription. A single timer restarts browsing
+  /// if no devices are discovered after 5 seconds (iOS Multipeer workaround).
+  Timer? _browseRestartTimer;
+
   void _startInvitingPeer(String peerId) {
-    final prefix = peerId.length >= 8 ? peerId.substring(0, 8) : peerId;
+    _inviteTimer?.cancel();
+    _browseRestartTimer?.cancel();
+    _targetInvitePeerId = peerId;
 
-    // Poll discovered devices and invite matching ones.
-    Timer.periodic(const Duration(milliseconds: 500), (timer) {
-      // Stop polling once connected.
-      if (_findDeviceIdForPeer(peerId) != null) {
-        timer.cancel();
-        return;
-      }
+    // Attempt immediate invite from already-discovered devices.
+    _tryInvitePeer(peerId);
 
-      for (final device in _discoveredDevices.values) {
-        if (device.deviceName.contains(prefix) &&
-            !_pendingInvites.contains(device.deviceId)) {
-          Logger.info(
-            'Inviting ${device.deviceName} (${device.deviceId})',
-            _tag,
-          );
-          _pendingInvites.add(device.deviceId);
-          _nearbyService?.invitePeer(
-            deviceID: device.deviceId,
-            deviceName: device.deviceName,
-          );
-        }
+    // Schedule a browse restart if no devices are discovered within 5s.
+    // This handles the iOS Multipeer edge case where advertisers started
+    // after the initial browse aren't visible.
+    _browseRestartTimer = Timer(const Duration(seconds: 5), () {
+      if (_discoveredDevices.isEmpty && _connectedDevices.isEmpty) {
+        Logger.info('Re-starting browse (no devices after 5s)', _tag);
+        _restartBrowsing();
+        // Schedule one more restart in case the first didn't work.
+        _browseRestartTimer = Timer(const Duration(seconds: 5), () {
+          if (_discoveredDevices.isEmpty && _connectedDevices.isEmpty) {
+            Logger.info('Re-starting browse (still no devices after 10s)', _tag);
+            _restartBrowsing();
+          }
+        });
       }
     });
   }
 
-  /// Find the first connected device, optionally matching [peerId] prefix.
+  /// Try to invite a discovered peer. Called from state-change subscription
+  /// when new devices are discovered.
   ///
-  /// Tries name-based matching first (works when receiver passes sender's
-  /// Nearby ID).  Falls back to the first connected device — safe because
-  /// the Nearby session is ephemeral (one transfer at a time).
+  /// Prefers an exact name match (sender advertises with userId), but falls
+  /// back to inviting *any* discovered device. This is safe because the Nearby
+  /// session is ephemeral (one transfer at a time) and works around Android
+  /// Nearby Connections which may report a platform-internal name instead of
+  /// the advertised deviceName.
+  void _tryInvitePeer(String peerId) {
+    // 1. Try exact name match first.
+    for (final device in _discoveredDevices.values) {
+      if (device.deviceName == peerId &&
+          !_pendingInvites.contains(device.deviceId)) {
+        Logger.info(
+          'Inviting exact match ${device.deviceName} (${device.deviceId})',
+          _tag,
+        );
+        _pendingInvites.add(device.deviceId);
+        _nearbyService?.invitePeer(
+          deviceID: device.deviceId,
+          deviceName: device.deviceName,
+        );
+        return;
+      }
+    }
+
+    // 2. Fallback: invite any discovered device not yet invited.
+    //    On Android the discovered deviceName may differ from the advertised
+    //    userId, so exact matching fails. Since only one transfer runs at a
+    //    time, the first discovered device is the sender.
+    for (final device in _discoveredDevices.values) {
+      if (!_pendingInvites.contains(device.deviceId)) {
+        Logger.info(
+          'Inviting fallback device ${device.deviceName} (${device.deviceId}) '
+          'for target $peerId',
+          _tag,
+        );
+        _pendingInvites.add(device.deviceId);
+        _nearbyService?.invitePeer(
+          deviceID: device.deviceId,
+          deviceName: device.deviceName,
+        );
+        return;
+      }
+    }
+  }
+
+  /// Restart browsing to force re-discovery of advertisers that started
+  /// after the initial browse (common on iOS Multipeer Connectivity).
+  Future<void> _restartBrowsing() async {
+    try {
+      await _nearbyService!.stopBrowsingForPeers();
+      await _nearbyService!.startBrowsingForPeers();
+    } catch (_) {}
+  }
+
+  /// Find the first connected device matching [peerId] by exact deviceName.
+  ///
+  /// [peerId] is the app-level userId. The sender advertises with userId as
+  /// the device name, so we match by exact equality. Falls back to the first
+  /// connected device when no name match is found — safe because the Nearby
+  /// session is ephemeral (one transfer at a time).
   String? _findDeviceIdForPeer(String peerId) {
     if (_connectedDevices.isEmpty) return null;
 
-    // Try name-based match first.
-    final prefix = peerId.length >= 8 ? peerId.substring(0, 8) : peerId;
+    // Try exact name match first (peerId == userId == advertised device name).
     for (final entry in _connectedDevices.entries) {
-      if (entry.value.deviceName.contains(prefix)) {
+      if (entry.value.deviceName == peerId) {
         return entry.key;
       }
     }
 
     // Fall back to first connected device (sender doesn't know receiver's
-    // Nearby name, only its BLE device ID).
+    // Nearby name, only its userId).
     return _connectedDevices.keys.first;
   }
 
@@ -523,6 +629,8 @@ class NearbyTransferServiceImpl implements HighSpeedTransferService {
             if (!incoming.completer.isCompleted) {
               incoming.completer.complete(true);
             }
+            // Send ACK to the sender so they know we received everything.
+            _sendTransferAck(transferId);
           } catch (e) {
             Logger.error('Decode failed for $transferId', e, null, _tag);
             _emitProgress(transferId, incoming.peerId,
@@ -533,13 +641,45 @@ class NearbyTransferServiceImpl implements HighSpeedTransferService {
             }
           }
           break;
+
+        case 'transfer_ack':
+          // Sender receives this from the receiver confirming data was received.
+          final ackCompleter = _pendingAcks.remove(transferId);
+          if (ackCompleter != null && !ackCompleter.isCompleted) {
+            ackCompleter.complete();
+            Logger.info('Received transfer ACK for $transferId', _tag);
+          }
+          break;
       }
     } catch (e) {
       Logger.error('_handleReceivedData error', e, null, _tag);
     }
   }
 
+  /// Send a transfer_ack message to the sender confirming data was received.
+  void _sendTransferAck(String transferId) {
+    // Send to any connected device (sender is the only one in this session).
+    for (final deviceId in _connectedDevices.keys) {
+      try {
+        _sendJson(deviceId, {
+          'type': 'transfer_ack',
+          'transfer_id': transferId,
+        });
+        Logger.info('Sent transfer ACK for $transferId', _tag);
+      } catch (e) {
+        Logger.warning('Failed to send transfer ACK: $e', _tag);
+      }
+      break; // Only one peer in the session.
+    }
+  }
+
   Future<void> _stopNearby() async {
+    _inviteTimer?.cancel();
+    _inviteTimer = null;
+    _browseRestartTimer?.cancel();
+    _browseRestartTimer = null;
+    _targetInvitePeerId = null;
+    _connectionCompleter = null;
     try {
       await _nearbyService?.stopAdvertisingPeer();
       await _nearbyService?.stopBrowsingForPeers();
@@ -549,11 +689,17 @@ class NearbyTransferServiceImpl implements HighSpeedTransferService {
     _discoveredDevices.clear();
     _connectedDevices.clear();
     _pendingInvites.clear();
-    // Reset so the next transfer triggers a fresh native init via _doInit().
-    // Without this, stale native state from the previous session causes the
-    // second transfer to fail (advertising/browsing won't start properly).
-    _initialized = false;
-    _initFuture = null;
+    // Complete any pending ACK waiters (transfer is over).
+    for (final completer in _pendingAcks.values) {
+      if (!completer.isCompleted) completer.complete();
+    }
+    _pendingAcks.clear();
+    // NOTE: We intentionally do NOT reset _initialized or _initFuture here.
+    // Re-calling init() on the same NearbyService instance is unreliable on
+    // iOS (Multipeer Connectivity doesn't properly recreate native session
+    // objects). Instead, we just stop advertising/browsing and clear state.
+    // The next sendPayload/receivePayload can directly start advertising/
+    // browsing on the already-initialized service.
   }
 }
 

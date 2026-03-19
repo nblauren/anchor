@@ -38,7 +38,6 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         _chatEventBus = chatEventBus,
         _storeAndForwardService = storeAndForwardService,
         _encryptionService = encryptionService,
-        _retryQueue = retryQueue,
         super(const ChatState()) {
     on<OpenConversation>(_onOpenConversation);
     on<LoadMessages>(_onLoadMessages);
@@ -53,9 +52,8 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     on<ClearChatError>(_onClearError);
     on<BlockChatPeer>(_onBlockChatPeer);
     on<UnblockChatPeer>(_onUnblockChatPeer);
-    // Peer loss + MAC rotation
+    // Peer loss
     on<ChatPeerLost>(_onChatPeerLost);
-    on<ChatPeerIdMigrated>(_onChatPeerIdMigrated);
     // Reply
     on<SetReplyingTo>(_onSetReplyingTo);
     // Message update from PhotoTransferBloc (preview → full photo swap)
@@ -68,14 +66,6 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     // are now handled by PhotoTransferBloc).
     _messageSubscription = _transportManager.messageReceivedStream.listen(
       (msg) => add(BleMessageReceived(msg)),
-    );
-
-    _peerIdChangedSubscription =
-        _transportManager.peerIdChangedStream.listen(
-      (change) => add(ChatPeerIdMigrated(
-        oldPeerId: change.oldPeerId,
-        newPeerId: change.newPeerId,
-      )),
     );
 
     _peerLostSubscription = _transportManager.peerLostStream.listen(
@@ -98,38 +88,13 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       if (!isClosed) add(PhotoPreviewUpgraded(previewMessageId: msg.id, updatedMessage: msg));
     });
 
-    // Subscribe to background delivery updates from StoreAndForwardService
-    // so the open conversation UI refreshes without requiring a reload.
-    final storeForward = _storeAndForwardService;
-    if (storeForward != null) {
-      // Re-initialize in case the service deferred init (profile was created
-      // after the first app startup call).
-      storeForward.initialize();
+    // Initialize StoreAndForwardService in case it deferred init.
+    // Delivery status is now handled exclusively via MessageSendService
+    // to avoid duplicate updates from multiple overlapping subscriptions.
+    _storeAndForwardService?.initialize();
 
-      _storeForwardSubscription = storeForward.messageStatusStream.listen(
-        (update) {
-          if (!isClosed) {
-            add(MessageStatusUpdated(
-              messageId: update.messageId,
-              status: update.status,
-            ));
-          }
-        },
-      );
-    }
-
-    // Subscribe to in-session retry queue delivery updates.
-    final rq = _retryQueue;
-    if (rq != null) {
-      _retryQueueSubscription = rq.deliveryStream.listen((update) {
-        if (!isClosed) {
-          add(MessageStatusUpdated(
-            messageId: update.messageId,
-            status: update.delivered ? MessageStatus.sent : MessageStatus.failed,
-          ));
-        }
-      });
-    }
+    // Note: TransportRetryQueue delivery updates are now funneled through
+    // MessageSendService.deliveryStream to avoid duplicate status updates.
 
     // Subscribe to MessageSendService delivery updates.
     _sendDeliverySubscription = _messageSendService.deliveryStream.listen(
@@ -154,17 +119,11 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   final ChatEventBus _chatEventBus;
   final StoreAndForwardService? _storeAndForwardService;
   final EncryptionService? _encryptionService;
-  final TransportRetryQueue? _retryQueue;
-  StreamSubscription? _retryQueueSubscription;
   StreamSubscription? _sendDeliverySubscription;
 
   // Transport manager subscriptions
   StreamSubscription<ble.ReceivedMessage>? _messageSubscription;
-  StreamSubscription<ble.PeerIdChanged>? _peerIdChangedSubscription;
   StreamSubscription<String>? _peerLostSubscription;
-
-  // Store-and-forward delivery update subscription
-  StreamSubscription<MessageDeliveryUpdate>? _storeForwardSubscription;
 
   // ChatEventBus subscriptions (cross-bloc from PhotoTransferBloc)
   StreamSubscription<MessageEntry>? _busMessageAddedSub;
@@ -458,6 +417,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
 
       // Save received message to database, preserving the sender's messageId
       // so both sides share the same stable ID for reaction targeting.
+      // Returns null if duplicate (already in DB) — skip UI update.
       final message = await _chatRepository.receiveMessage(
         id: bleMsg.messageId,
         conversationId: conversation.id,
@@ -469,6 +429,9 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
             bleMsg.type == ble.MessageType.text ? bleMsg.content : null,
         replyToMessageId: bleMsg.replyToId,
       );
+
+      // Duplicate message — already persisted and shown in UI.
+      if (message == null) return;
 
       // If viewing this conversation, add to UI and immediately mark as read
       if (state.currentConversation?.peerId == bleMsg.fromPeerId) {
@@ -676,28 +639,6 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
 
   // Note: Wi-Fi Direct, Nearby, and photo transfer handlers are now in PhotoTransferBloc.
 
-  Future<void> _onChatPeerIdMigrated(
-    ChatPeerIdMigrated event,
-    Emitter<ChatState> emit,
-  ) async {
-    final current = state.currentConversation;
-    if (current == null || current.peerId != event.oldPeerId) return;
-
-    emit(state.copyWith(
-      currentConversation: CurrentConversation(
-        id: current.id,
-        peerId: event.newPeerId,
-        peerName: current.peerName,
-      ),
-    ));
-
-    Logger.info(
-      'ChatBloc: Migrated active conversation peerId '
-          '${event.oldPeerId} → ${event.newPeerId}',
-      'Chat',
-    );
-  }
-
   void _onSetReplyingTo(SetReplyingTo event, Emitter<ChatState> emit) {
     if (event.message == null) {
       emit(state.copyWith(clearReplyingToMessage: true));
@@ -710,10 +651,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   Future<void> close() {
     _echoTimer?.cancel();
     _messageSubscription?.cancel();
-    _peerIdChangedSubscription?.cancel();
     _peerLostSubscription?.cancel();
-    _storeForwardSubscription?.cancel();
-    _retryQueueSubscription?.cancel();
     _sendDeliverySubscription?.cancel();
     _busMessageAddedSub?.cancel();
     _busStatusUpdatedSub?.cancel();

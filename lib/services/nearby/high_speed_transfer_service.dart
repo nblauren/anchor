@@ -24,6 +24,10 @@ abstract class HighSpeedTransferService {
   ///
   /// [transferId] links this transfer to a photo/message ID.
   /// [peerId] is the BLE peer ID of the target device.
+  /// [onAdvertising] is called once the native advertising layer is confirmed
+  /// active. The caller should send the BLE `wifiTransferReady` signal to
+  /// the receiver only after this fires — sending earlier risks the receiver
+  /// browsing before the sender is discoverable.
   /// Returns `true` if the transfer completed successfully.
   /// Returns `false` on timeout or failure (caller should fall back to BLE).
   Future<bool> sendPayload({
@@ -31,6 +35,7 @@ abstract class HighSpeedTransferService {
     required String peerId,
     required Uint8List data,
     Duration timeout = const Duration(seconds: 15),
+    void Function()? onAdvertising,
   });
 
   /// Begin listening for an incoming payload identified by [transferId].

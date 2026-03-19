@@ -11,7 +11,7 @@ class BleConfig {
   const BleConfig({
     this.useMockService = false,
     this.enableMeshRelay = true,
-    this.meshTtl = 3,
+    this.meshTtl = 7,
     this.photoChunkSize = 4096,
     this.messageTimeout = const Duration(seconds: 30),
     this.scanInterval = const Duration(seconds: 30),

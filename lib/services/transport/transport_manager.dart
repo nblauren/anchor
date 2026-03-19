@@ -11,6 +11,7 @@ import '../ble/ble_models.dart' as ble;
 import '../ble/ble_service_interface.dart';
 import '../encryption/encryption.dart';
 import '../lan/lan.dart';
+import '../mesh/mesh.dart';
 import '../nearby/nearby.dart';
 import '../wifi_aware/wifi_aware_transport_service.dart';
 import 'transport_enums.dart';
@@ -26,29 +27,31 @@ import 'transport_health_tracker.dart';
 /// higher-priority transport drops, the peer seamlessly falls back to the
 /// next best transport without vanishing from the UI.
 ///
-/// ## Per-Peer Routing
+/// ## PeerRegistry Integration
 ///
-/// Each peer is associated with a *set* of available transports. The best
-/// transport is recomputed whenever the set changes, and a
-/// [PeerTransportChanged] event is emitted when the best changes.
+/// All peer identity resolution is delegated to [PeerRegistry]. The old
+/// `_userIdToCurrentPeerId`, `_peerIdAlias`, and `_bleIdForCanonical` maps
+/// are replaced by PeerRegistry's unified identity model.
 ///
-/// ## Stream Architecture
+/// ## MessageRouter Integration
 ///
-/// BLE subscriptions are set up in the constructor and never cancelled until
-/// dispose. LAN and Wi-Fi Aware subscriptions are additive — set up when the
-/// transport becomes available, cancelled when it drops. Events from all
-/// transports are merged into unified broadcast StreamControllers.
+/// All incoming messages pass through [MessageRouter] for cross-transport
+/// deduplication before reaching the application layer.
 class TransportManager {
   TransportManager({
     required LanTransportService lanService,
     required WifiAwareTransportService wifiAwareService,
     required BleServiceInterface bleService,
+    required PeerRegistry peerRegistry,
+    required MessageRouter messageRouter,
     EncryptionService? encryptionService,
     TransportHealthTracker? healthTracker,
     HighSpeedTransferService? highSpeedTransferService,
   })  : _lanService = lanService,
         _wifiAwareService = wifiAwareService,
         _bleService = bleService,
+        _peerRegistry = peerRegistry,
+        _messageRouter = messageRouter,
         _encryptionService = encryptionService,
         _healthTracker = healthTracker,
         _highSpeedService = highSpeedTransferService {
@@ -57,12 +60,15 @@ class TransportManager {
     // independently).
     _subscribeToBle();
     _subscribeToHandshakeRouting();
+    _subscribeToPeerRegistryChanges();
     Logger.info('TransportManager: BLE stream forwarding active', 'Transport');
   }
 
   final LanTransportService _lanService;
   final WifiAwareTransportService _wifiAwareService;
   final BleServiceInterface _bleService;
+  final PeerRegistry _peerRegistry;
+  final MessageRouter _messageRouter;
   final EncryptionService? _encryptionService;
   final TransportHealthTracker? _healthTracker;
   final HighSpeedTransferService? _highSpeedService;
@@ -78,34 +84,10 @@ class TransportManager {
 
   // Magic byte prepended to encrypted photo payloads.
   // JPEG starts with 0xFF 0xD8, PNG with 0x89 — 0x01 is unambiguous.
-  static const _kEncMagic = 0x01;
-  static const _kNonceLen = 24;
+  // Encryption constants moved to message_envelope.dart (shared utility).
 
   TransportType _activeTransport = TransportType.ble;
   bool _initialized = false;
-
-  // ── Per-peer multi-transport tracking ───────────────────────────────────
-
-  /// All transports currently available for each peer.
-  final Map<String, Set<TransportType>> _peerTransports = {};
-
-  /// The best (highest priority) transport for each peer — derived from
-  /// [_peerTransports].
-  final Map<String, TransportType> _peerBestTransport = {};
-
-  // userId → canonical peerId for the current session.
-  // Survives transport switches — used to emit PeerIdChanged when the same
-  // person is rediscovered on a different transport (e.g. LAN → BLE fallback).
-  final Map<String, String> _userIdToCurrentPeerId = {};
-  // Suppressed BLE peerId → canonical (LAN/Wi-Fi Aware) peerId.
-  // Used to translate incoming BLE events so they route to the right
-  // conversation in the DB.
-  final Map<String, String> _peerIdAlias = {};
-  // Canonical (LAN/Wi-Fi Aware) peerId → BLE peerId.
-  // Reverse of _peerIdAlias — used when a LAN send fails and we fall back to
-  // BLE.  Without this, the BLE service receives a LAN session UUID it doesn't
-  // recognise and resorts to mesh relay instead of a direct connection.
-  final Map<String, String> _bleIdForCanonical = {};
 
   // ── Subscription lists (per-transport) ──────────────────────────────────
 
@@ -143,6 +125,7 @@ class TransportManager {
   // Availability subscriptions
   StreamSubscription<bool>? _availabilityLanSub;
   StreamSubscription<bool>? _availabilitySub;
+  StreamSubscription<PeerIdChangedEvent>? _peerRegistrySub;
 
   // ==================== Public Getters ====================
 
@@ -155,19 +138,20 @@ class TransportManager {
 
   /// Returns the best transport currently available for [peerId], or null
   /// if the peer is not tracked.
-  TransportType? transportForPeer(String peerId) => _peerBestTransport[peerId];
+  TransportType? transportForPeer(String peerId) =>
+      _peerRegistry.bestTransportFor(peerId);
 
-  /// Returns the BLE device ID for [canonicalPeerId], or [canonicalPeerId]
-  /// unchanged if no BLE alias is known (BLE-only peer, or mapping not yet set).
-  /// Used for BLE fallback sends when LAN/Wi-Fi Aware is unavailable.
-  String bleIdForPeer(String canonicalPeerId) =>
-      _bleIdForCanonical[canonicalPeerId] ?? canonicalPeerId;
+  /// Returns the BLE device ID for [userId], or [userId] unchanged if no
+  /// BLE transport is registered. Used for BLE sends when the caller has
+  /// the canonical userId but needs the transport-level BLE UUID.
+  String bleIdForPeer(String userId) =>
+      _peerRegistry.bleIdFor(userId) ?? userId;
 
-  /// Maps a BLE device ID back to the canonical (LAN/Wi-Fi Aware) peerId used
-  /// in conversations and UI.  Returns [blePeerId] unchanged if there is no
-  /// alias (i.e. the peer was discovered via BLE only).
-  String canonicalIdForBle(String blePeerId) =>
-      _peerIdAlias[blePeerId] ?? blePeerId;
+  /// Maps a transport-level ID (BLE UUID, LAN peer ID, etc.) back to the
+  /// canonical userId used in conversations and UI. Returns [transportId]
+  /// unchanged if there is no mapping (e.g. unregistered peer).
+  String canonicalIdForBle(String transportId) =>
+      _peerRegistry.resolveCanonical(transportId) ?? transportId;
 
   // ==================== Lifecycle ====================
 
@@ -183,6 +167,7 @@ class TransportManager {
     if (_initialized) return;
     _initialized = true;
     _ownUserId = ownUserId;
+    _messageRouter.setOwnUserId(ownUserId);
 
     // BLE is already initialized and started by BleConnectionBloc — don't
     // re-initialize here.
@@ -229,10 +214,7 @@ class TransportManager {
             'Transport',
           );
           _unsubscribeFromLan();
-          final lostPeerIds = _removeTransportFromAllPeers(TransportType.lan);
-          for (final peerId in lostPeerIds) {
-            _peerLostController.add(peerId);
-          }
+          _removeLanTransportFromAllPeers();
           // Recompute global best
           _activeTransport = _wifiAwareSubscribed
               ? TransportType.wifiAware
@@ -325,11 +307,7 @@ class TransportManager {
           'Transport',
         );
         _unsubscribeFromWifiAware();
-        final lostPeerIds =
-            _removeTransportFromAllPeers(TransportType.wifiAware);
-        for (final peerId in lostPeerIds) {
-          _peerLostController.add(peerId);
-        }
+        _removeWifiAwareTransportFromAllPeers();
         if (_activeTransport == TransportType.wifiAware) {
           _activeTransport =
               _lanSubscribed ? TransportType.lan : TransportType.ble;
@@ -349,8 +327,6 @@ class TransportManager {
     }
     if (_wifiAwareSubscribed) {
       // Fire-and-forget: don't block BLE advertising if Wi-Fi Aware hangs.
-      // Wi-Fi Aware startSession() can block indefinitely on some Android
-      // devices, which would prevent broadcastProfile() from ever being called.
       unawaited(_wifiAwareService.start().catchError((e) {
         Logger.warning(
           'TransportManager: Wi-Fi Aware start failed: $e',
@@ -366,14 +342,9 @@ class TransportManager {
     await _wifiAwareService.stop();
     await _bleService.stop();
 
-    // Clear in-memory ID maps so stale BLE UUIDs from the previous session
+    // Clear PeerRegistry so stale BLE UUIDs from the previous session
     // don't cause messages to route to the wrong peer after restart.
-    // iOS may assign different Central/Peripheral UUIDs across sessions.
-    _peerIdAlias.clear();
-    _bleIdForCanonical.clear();
-    _userIdToCurrentPeerId.clear();
-    _peerTransports.clear();
-    _peerBestTransport.clear();
+    _peerRegistry.clear();
   }
 
   /// Clear stale ID alias maps without stopping transports.
@@ -382,17 +353,14 @@ class TransportManager {
   /// so that stale Central/Peripheral UUID mappings from the previous
   /// session don't cause messages to route to the wrong peer.
   void clearIdMaps() {
-    _peerIdAlias.clear();
-    _bleIdForCanonical.clear();
-    _userIdToCurrentPeerId.clear();
-    _peerTransports.clear();
-    _peerBestTransport.clear();
-    Logger.info('TransportManager: cleared all ID maps', 'Transport');
+    _peerRegistry.clear();
+    Logger.info('TransportManager: cleared PeerRegistry', 'Transport');
   }
 
   Future<void> dispose() async {
     await _availabilityLanSub?.cancel();
     await _availabilitySub?.cancel();
+    await _peerRegistrySub?.cancel();
 
     for (final sub in _bleSubscriptions) {
       await sub.cancel();
@@ -457,70 +425,49 @@ class TransportManager {
   /// is now an identity function — kept for call-site clarity.
   String _encPeerId(String canonicalPeerId) => canonicalPeerId;
 
-  /// Encrypts [payload] for LAN / Wi-Fi Aware sends.
-  /// Returns a new [MessagePayload] where [content] carries the encrypted
-  /// envelope JSON: {"v":1,"n":"<b64 nonce>","c":"<b64 ciphertext>"}.
-  /// Inner plaintext: {"content":"...","reply_to_id":...}.
-  /// Returns [payload] unchanged if no session exists or encryption fails.
+  /// Encrypts [payload] content using the shared [MessageEnvelope] utility.
+  /// Returns a new [MessagePayload] with encrypted content JSON, or the
+  /// original payload unchanged if no session exists or encryption fails.
   Future<ble.MessagePayload> _encryptMessagePayload(
     String canonicalPeerId,
     ble.MessagePayload payload,
   ) async {
     final enc = _encryptionService;
     if (enc == null) return payload;
-    final encPeerId = _encPeerId(canonicalPeerId);
-    if (!enc.hasSession(encPeerId)) return payload;
 
-    final inner = jsonEncode({
-      'content': payload.content,
-      if (payload.replyToId != null) 'reply_to_id': payload.replyToId,
-    });
-    final encPayload = await enc.encrypt(encPeerId, utf8.encode(inner));
-    if (encPayload == null) return payload;
+    final envelope = await encryptMessageContent(
+      peerId: _encPeerId(canonicalPeerId),
+      content: payload.content,
+      replyToId: payload.replyToId,
+      encService: enc,
+    );
+    if (envelope == null) return payload;
 
     return ble.MessagePayload(
       messageId: payload.messageId,
       type: payload.type,
       // replyToId is inside the ciphertext; outer field cleared to avoid leakage.
-      content: jsonEncode({
-        'v': 1,
-        'n': base64.encode(encPayload.nonce),
-        'c': base64.encode(encPayload.ciphertext),
-      }),
+      content: jsonEncode(envelope.toJsonFields()),
     );
   }
 
-  /// Decrypts an incoming [ReceivedMessage] from LAN / Wi-Fi Aware.
-  /// Returns the message unchanged if not encrypted or decryption fails.
+  /// Decrypts an incoming [ReceivedMessage] using the shared [MessageEnvelope]
+  /// utility. Returns the message unchanged if not encrypted or decryption fails.
   Future<ble.ReceivedMessage> _decryptReceivedMessage(
     ble.ReceivedMessage msg,
   ) async {
     final enc = _encryptionService;
     if (enc == null) return msg;
 
-    final content = msg.content;
-    if (content.isEmpty || !content.startsWith('{')) return msg;
+    final parsed = tryParseEncryptedContent(msg.content);
+    if (parsed == null) return msg;
 
-    Map<String, dynamic> parsed;
-    try {
-      parsed = jsonDecode(content) as Map<String, dynamic>;
-    } catch (_) {
-      return msg;
-    }
-    if (parsed['v'] != 1) return msg;
-
-    final nStr = parsed['n'] as String?;
-    final cStr = parsed['c'] as String?;
-    if (nStr == null || cStr == null) return msg;
-
-    final encPayload = EncryptedPayload(
-      nonce: Uint8List.fromList(base64.decode(nStr)),
-      ciphertext: Uint8List.fromList(base64.decode(cStr)),
+    final decrypted = await decryptMessageContent(
+      peerId: _encPeerId(msg.fromPeerId),
+      json: parsed,
+      encService: enc,
     );
-
-    final plaintextBytes =
-        await enc.decrypt(_encPeerId(msg.fromPeerId), encPayload);
-    if (plaintextBytes == null) {
+    if (decrypted == null) {
       Logger.warning(
         'E2EE: message decrypt failed from ${msg.fromPeerId.substring(0, 8)} — dropped',
         'E2EE',
@@ -528,70 +475,43 @@ class TransportManager {
       return msg;
     }
 
-    final inner =
-        jsonDecode(utf8.decode(plaintextBytes)) as Map<String, dynamic>;
     return ble.ReceivedMessage(
       fromPeerId: msg.fromPeerId,
       messageId: msg.messageId,
       type: msg.type,
-      content: inner['content'] as String? ?? '',
+      content: decrypted.content,
       timestamp: msg.timestamp,
-      replyToId: inner['reply_to_id'] as String?,
+      replyToId: decrypted.replyToId,
       isEncrypted: true,
     );
   }
 
-  /// Encrypts [bytes] before sending over any transport.
-  /// Wire format: [0x01] + 24-byte nonce + ciphertext.
-  /// Returns [bytes] unchanged if no session exists or encryption fails.
+  /// Encrypts [bytes] using the shared [MessageEnvelope] photo utility.
   Future<Uint8List> _encryptPhotoBytes(
     String canonicalPeerId,
     Uint8List bytes,
   ) async {
     final enc = _encryptionService;
     if (enc == null) return bytes;
-    final encPeerId = _encPeerId(canonicalPeerId);
-    if (!enc.hasSession(encPeerId)) return bytes;
-
-    final encPayload = await enc.encryptBytes(encPeerId, bytes);
-    if (encPayload == null) return bytes;
-
-    return Uint8List.fromList(
-        [_kEncMagic, ...encPayload.nonce, ...encPayload.ciphertext]);
+    return encryptPhotoBytes(
+      peerId: _encPeerId(canonicalPeerId),
+      bytes: bytes,
+      encService: enc,
+    );
   }
 
-  /// Decrypts photo bytes if they carry the [_kEncMagic] header byte.
-  /// Returns [bytes] unchanged if not encrypted or decryption fails.
+  /// Decrypts photo bytes using the shared [MessageEnvelope] photo utility.
   Future<Uint8List> _decryptPhotoBytes(
     String fromPeerId,
     Uint8List bytes,
   ) async {
-    if (bytes.isEmpty || bytes[0] != _kEncMagic) return bytes;
-
     final enc = _encryptionService;
     if (enc == null) return bytes;
-
-    // Minimum valid encrypted payload: 1 (magic) + 24 (nonce) + 16 (tag) = 41 bytes
-    if (bytes.length < 41) {
-      Logger.warning(
-          'E2EE: encrypted photo too short from $fromPeerId', 'E2EE');
-      return bytes;
-    }
-
-    final encPayload = EncryptedPayload(
-      nonce: bytes.sublist(1, 1 + _kNonceLen),
-      ciphertext: bytes.sublist(1 + _kNonceLen),
+    return decryptPhotoBytes(
+      peerId: _encPeerId(fromPeerId),
+      bytes: bytes,
+      encService: enc,
     );
-
-    final plaintext =
-        await enc.decryptBytes(_encPeerId(fromPeerId), encPayload);
-    if (plaintext == null) {
-      Logger.warning(
-          'E2EE: photo decrypt failed from $fromPeerId — kept encrypted',
-          'E2EE');
-      return bytes;
-    }
-    return plaintext;
   }
 
   // ==================== Unified Send Operations ====================
@@ -602,29 +522,38 @@ class TransportManager {
     // it internally, so the BLE path is unaffected even if it's set twice.
     final enc = _encryptionService;
     final pkHex = enc?.localPublicKeyHex;
-    final payloadWithKey = (pkHex != null && payload.publicKeyHex == null)
-        ? payload.copyWith(publicKeyHex: pkHex)
-        : payload;
+    final spkHex = enc?.localEd25519PublicKeyHex;
+    var enriched = payload;
+    if (pkHex != null && enriched.publicKeyHex == null) {
+      enriched = enriched.copyWith(publicKeyHex: pkHex);
+    }
+    if (spkHex != null && enriched.signingPublicKeyHex == null) {
+      enriched = enriched.copyWith(signingPublicKeyHex: spkHex);
+    }
 
     // Always broadcast on BLE for maximum compatibility
-    await _bleService.broadcastProfile(payloadWithKey);
+    await _bleService.broadcastProfile(enriched);
 
     // Update LAN profile if subscribed
     if (_lanSubscribed) {
-      await _lanService.updateProfile(payloadWithKey);
+      await _lanService.updateProfile(enriched);
     }
 
     // Also publish on Wi-Fi Aware if subscribed
     if (_wifiAwareSubscribed) {
-      await _wifiAwareService.updateProfile(payloadWithKey);
+      await _wifiAwareService.updateProfile(enriched);
     }
   }
 
   Future<bool> sendMessage(String peerId, ble.MessagePayload payload) async {
-    final available = _peerTransports[peerId] ?? {};
+    final transports = _peerRegistry.transportsFor(peerId);
+    final bleId = _peerRegistry.bleIdFor(peerId) ?? peerId;
+
+    // Mark message as seen in MessageRouter dedup to prevent echo
+    _messageRouter.markSeen(payload.messageId);
 
     // Try LAN if peer is reachable via LAN.
-    if (available.contains(TransportType.lan) && _isTransportAllowed(TransportType.lan)) {
+    if (transports.contains(TransportType.lan) && _isTransportAllowed(TransportType.lan)) {
       final sw = Stopwatch()..start();
       final encPayload = await _encryptMessagePayload(peerId, payload);
       final success = await _lanService.sendMessage(peerId, encPayload);
@@ -639,7 +568,7 @@ class TransportManager {
     }
 
     // Try Wi-Fi Aware if peer is reachable via Wi-Fi Aware.
-    if (available.contains(TransportType.wifiAware) && _isTransportAllowed(TransportType.wifiAware)) {
+    if (transports.contains(TransportType.wifiAware) && _isTransportAllowed(TransportType.wifiAware)) {
       final sw = Stopwatch()..start();
       final encPayload = await _encryptMessagePayload(peerId, payload);
       final success = await _wifiAwareService.sendMessage(peerId, encPayload);
@@ -653,10 +582,19 @@ class TransportManager {
       );
     }
 
+    // BLE fallback — verify the BLE ID is still connected before sending.
+    // A stale BLE ID (from pre-migration) could route to the wrong device.
+    if (!_bleService.isPeerReachable(bleId)) {
+      Logger.warning(
+        'TransportManager: BLE fallback skipped — peer $bleId not reachable',
+        'Transport',
+      );
+      return false;
+    }
+
     // BLE handles its own E2EE inside BleFacade — don't double-encrypt.
     final sw = Stopwatch()..start();
-    final success = await _bleService.sendMessage(
-        _bleIdForCanonical[peerId] ?? peerId, payload);
+    final success = await _bleService.sendMessage(bleId, payload);
     sw.stop();
     _healthTracker?.recordSendResult(peerId, TransportType.ble,
         success: success, rttMs: sw.elapsedMilliseconds);
@@ -669,10 +607,11 @@ class TransportManager {
     String messageId, {
     String? photoId,
   }) async {
-    final available = _peerTransports[peerId] ?? {};
+    final transports = _peerRegistry.transportsFor(peerId);
+    final bleId = _peerRegistry.bleIdFor(peerId) ?? peerId;
 
     // Try LAN if peer is reachable via LAN.
-    if (available.contains(TransportType.lan) && _isTransportAllowed(TransportType.lan)) {
+    if (transports.contains(TransportType.lan) && _isTransportAllowed(TransportType.lan)) {
       final sw = Stopwatch()..start();
       final encBytes = await _encryptPhotoBytes(peerId, photoData);
       final success = await _lanService.sendPhoto(
@@ -692,7 +631,7 @@ class TransportManager {
     }
 
     // Try Wi-Fi Aware if peer is reachable via Wi-Fi Aware.
-    if (available.contains(TransportType.wifiAware) && _isTransportAllowed(TransportType.wifiAware)) {
+    if (transports.contains(TransportType.wifiAware) && _isTransportAllowed(TransportType.wifiAware)) {
       final sw = Stopwatch()..start();
       final encBytes = await _encryptPhotoBytes(peerId, photoData);
       final success = await _wifiAwareService.sendPhoto(
@@ -719,9 +658,17 @@ class TransportManager {
       if (wifiDirectSuccess) return true;
     }
 
+    // BLE fallback — verify the BLE ID is still connected before sending.
+    if (!_bleService.isPeerReachable(bleId)) {
+      Logger.warning(
+        'TransportManager: BLE photo fallback skipped — peer $bleId not reachable',
+        'Transport',
+      );
+      return false;
+    }
+
     // BLE photo transfer: BLE's sendPhoto handles its own E2EE internally
     // (via PhotoTransferHandler._encryptionService), so do NOT encrypt here.
-    final bleId = _bleIdForCanonical[peerId] ?? peerId;
     final sw = Stopwatch()..start();
     final success = await _bleService.sendPhoto(
         bleId, photoData, messageId, photoId: photoId);
@@ -738,9 +685,10 @@ class TransportManager {
     required Uint8List thumbnailBytes,
     required int originalSize,
   }) async {
-    final available = _peerTransports[peerId] ?? {};
+    final transports = _peerRegistry.transportsFor(peerId);
+    final bleId = _peerRegistry.bleIdFor(peerId) ?? peerId;
 
-    if (available.contains(TransportType.lan) && _isTransportAllowed(TransportType.lan)) {
+    if (transports.contains(TransportType.lan) && _isTransportAllowed(TransportType.lan)) {
       final success = await _lanService.sendPhotoPreview(
         peerId: peerId,
         messageId: messageId,
@@ -751,7 +699,7 @@ class TransportManager {
       if (success) return true;
     }
 
-    if (available.contains(TransportType.wifiAware) && _isTransportAllowed(TransportType.wifiAware)) {
+    if (transports.contains(TransportType.wifiAware) && _isTransportAllowed(TransportType.wifiAware)) {
       final success = await _wifiAwareService.sendPhotoPreview(
         peerId: peerId,
         messageId: messageId,
@@ -762,7 +710,6 @@ class TransportManager {
       if (success) return true;
     }
 
-    final bleId = _bleIdForCanonical[peerId] ?? peerId;
     return _bleService.sendPhotoPreview(
       peerId: bleId,
       messageId: messageId,
@@ -777,9 +724,10 @@ class TransportManager {
     required String messageId,
     required String photoId,
   }) async {
-    final available = _peerTransports[peerId] ?? {};
+    final transports = _peerRegistry.transportsFor(peerId);
+    final bleId = _peerRegistry.bleIdFor(peerId) ?? peerId;
 
-    if (available.contains(TransportType.lan) && _isTransportAllowed(TransportType.lan)) {
+    if (transports.contains(TransportType.lan) && _isTransportAllowed(TransportType.lan)) {
       final success = await _lanService.sendPhotoRequest(
         peerId: peerId,
         messageId: messageId,
@@ -788,7 +736,7 @@ class TransportManager {
       if (success) return true;
     }
 
-    if (available.contains(TransportType.wifiAware) && _isTransportAllowed(TransportType.wifiAware)) {
+    if (transports.contains(TransportType.wifiAware) && _isTransportAllowed(TransportType.wifiAware)) {
       final success = await _wifiAwareService.sendPhotoRequest(
         peerId: peerId,
         messageId: messageId,
@@ -797,7 +745,6 @@ class TransportManager {
       if (success) return true;
     }
 
-    final bleId = _bleIdForCanonical[peerId] ?? peerId;
     return _bleService.sendPhotoRequest(
       peerId: bleId,
       messageId: messageId,
@@ -806,19 +753,20 @@ class TransportManager {
   }
 
   Future<bool> sendDropAnchor(String peerId) async {
-    final available = _peerTransports[peerId] ?? {};
+    final transports = _peerRegistry.transportsFor(peerId);
+    final bleId = _peerRegistry.bleIdFor(peerId) ?? peerId;
 
-    if (available.contains(TransportType.lan) && _isTransportAllowed(TransportType.lan)) {
+    if (transports.contains(TransportType.lan) && _isTransportAllowed(TransportType.lan)) {
       final success = await _lanService.sendDropAnchor(peerId);
       if (success) return true;
     }
 
-    if (available.contains(TransportType.wifiAware) && _isTransportAllowed(TransportType.wifiAware)) {
+    if (transports.contains(TransportType.wifiAware) && _isTransportAllowed(TransportType.wifiAware)) {
       final success = await _wifiAwareService.sendDropAnchor(peerId);
       if (success) return true;
     }
 
-    return _bleService.sendDropAnchor(_bleIdForCanonical[peerId] ?? peerId);
+    return _bleService.sendDropAnchor(bleId);
   }
 
   Future<bool> sendReaction({
@@ -827,9 +775,10 @@ class TransportManager {
     required String emoji,
     required String action,
   }) async {
-    final available = _peerTransports[peerId] ?? {};
+    final transports = _peerRegistry.transportsFor(peerId);
+    final bleId = _peerRegistry.bleIdFor(peerId) ?? peerId;
 
-    if (available.contains(TransportType.lan) && _isTransportAllowed(TransportType.lan)) {
+    if (transports.contains(TransportType.lan) && _isTransportAllowed(TransportType.lan)) {
       final success = await _lanService.sendReaction(
         peerId: peerId,
         messageId: messageId,
@@ -839,7 +788,7 @@ class TransportManager {
       if (success) return true;
     }
 
-    if (available.contains(TransportType.wifiAware) && _isTransportAllowed(TransportType.wifiAware)) {
+    if (transports.contains(TransportType.wifiAware) && _isTransportAllowed(TransportType.wifiAware)) {
       final success = await _wifiAwareService.sendReaction(
         peerId: peerId,
         messageId: messageId,
@@ -849,7 +798,6 @@ class TransportManager {
       if (success) return true;
     }
 
-    final bleId = _bleIdForCanonical[peerId] ?? peerId;
     return _bleService.sendReaction(
       peerId: bleId,
       messageId: messageId,
@@ -874,23 +822,22 @@ class TransportManager {
       _bleService.setBatterySaverMode(enabled);
 
   bool isPeerReachable(String peerId) {
-    final transports = _peerTransports[peerId];
-    if (transports != null) {
-      for (final t in transports) {
-        switch (t) {
-          case TransportType.lan:
-            if (_lanService.isPeerReachable(peerId)) return true;
-          case TransportType.wifiAware:
-            if (_wifiAwareService.isPeerReachable(peerId)) return true;
-          case TransportType.ble:
-          case TransportType.wifiDirect:
-            final bleId = _bleIdForCanonical[peerId] ?? peerId;
-            if (_bleService.isPeerReachable(bleId)) return true;
-        }
+    final transports = _peerRegistry.transportsFor(peerId);
+    final bleId = _peerRegistry.bleIdFor(peerId) ?? peerId;
+
+    for (final t in transports) {
+      switch (t) {
+        case TransportType.lan:
+          if (_lanService.isPeerReachable(peerId)) return true;
+        case TransportType.wifiAware:
+          if (_wifiAwareService.isPeerReachable(peerId)) return true;
+        case TransportType.ble:
+        case TransportType.wifiDirect:
+          if (_bleService.isPeerReachable(bleId)) return true;
       }
     }
     // Fallback: check BLE directly
-    return _bleService.isPeerReachable(_bleIdForCanonical[peerId] ?? peerId);
+    return _bleService.isPeerReachable(bleId);
   }
 
   /// Fetch all full-size profile photos for a peer (BLE only — uses fff4).
@@ -925,45 +872,60 @@ class TransportManager {
 
       Logger.info('TransportManager: Attempting Wi-Fi Direct photo transfer', 'Transport');
 
-      // Encrypt for E2EE before sending.
-      Uint8List wifiBytes = photoData;
-      final enc = _encryptionService;
-      final encPeerId = _encPeerId(peerId);
-      if (enc != null && enc.hasSession(encPeerId)) {
-        final encPayload = await enc.encryptBytes(encPeerId, photoData);
-        if (encPayload != null) {
-          wifiBytes = Uint8List.fromList(
-              [_kEncMagic, ...encPayload.nonce, ...encPayload.ciphertext]);
-        }
-      }
+      // Encrypt for E2EE before sending (shared utility).
+      final wifiBytes = await _encryptPhotoBytes(peerId, photoData);
 
       final transferId = photoId ?? messageId;
       final sw = Stopwatch()..start();
+
+      // Completer is resolved when sendPayload confirms native advertising
+      // is active. We send the BLE signal to the receiver ONLY after this —
+      // no guessing with delays, no race condition.
+      final advertisingReady = Completer<void>();
 
       final sendFuture = hsService.sendPayload(
         transferId: transferId,
         peerId: peerId,
         data: wifiBytes,
-        timeout: const Duration(seconds: 15),
+        timeout: const Duration(seconds: 30),
+        onAdvertising: () {
+          if (!advertisingReady.isCompleted) advertisingReady.complete();
+        },
       );
 
-      // Tiny delay to ensure advertising is started before the BLE signal.
-      await Future.delayed(const Duration(milliseconds: 200));
+      // Wait for confirmed advertising before telling the receiver to browse.
+      // Timeout after 5s in case sendPayload fails before calling onAdvertising.
+      try {
+        await advertisingReady.future.timeout(const Duration(seconds: 5));
+      } on TimeoutException {
+        Logger.warning(
+          'TransportManager: Advertising ready timeout — sending BLE signal anyway',
+          'Transport',
+        );
+      }
 
       // Tell receiver to start browsing for us.
+      // Suppress mesh relay writes first — mesh broadcastNeighborList()
+      // floods the iOS prepare queue with simultaneous writes to all peers,
+      // causing CBATTError 9 for this critical signal even after 4 retries.
       final ownId = _ownUserId;
       if (ownId != null) {
-        await sendMessage(
-          peerId,
-          ble.MessagePayload(
-            messageId: transferId,
-            type: ble.MessageType.wifiTransferReady,
-            content: jsonEncode({
-              'transfer_id': transferId,
-              'sender_nearby_id': ownId,
-            }),
-          ),
-        );
+        _bleService.suppressMeshRelay();
+        try {
+          await sendMessage(
+            peerId,
+            ble.MessagePayload(
+              messageId: transferId,
+              type: ble.MessageType.wifiTransferReady,
+              content: jsonEncode({
+                'transfer_id': transferId,
+                'sender_nearby_id': ownId,
+              }),
+            ),
+          );
+        } finally {
+          _bleService.resumeMeshRelay();
+        }
       }
 
       final success = await sendFuture;
@@ -988,21 +950,14 @@ class TransportManager {
 
   // ==================== Battery-Aware Transport Policy ====================
 
-  /// Update battery-aware transport policy based on current battery level.
-  ///
-  /// - `< 10%`: Disable LAN + Wi-Fi Aware + Wi-Fi Direct (BLE only)
-  /// - `< 20%`: Disable Wi-Fi Direct for photos
-  /// - `>= 20%`: All transports available
   void setBatteryPolicy(int batteryLevel) {
     _currentBatteryLevel = batteryLevel;
     _minBatteryForTransport.clear();
 
-    // LAN and Wi-Fi Aware require more power
     _minBatteryForTransport[TransportType.lan] =
         AppConstants.batteryCriticalThreshold;
     _minBatteryForTransport[TransportType.wifiAware] =
         AppConstants.batteryCriticalThreshold;
-    // Wi-Fi Direct is power-hungry for photo transfers
     _minBatteryForTransport[TransportType.wifiDirect] =
         AppConstants.batteryLowThreshold;
 
@@ -1012,79 +967,76 @@ class TransportManager {
     );
   }
 
-  /// Check whether a transport is allowed under the current battery policy.
   bool _isTransportAllowed(TransportType transport) {
     final minLevel = _minBatteryForTransport[transport];
-    if (minLevel == null) return true; // No restriction (e.g. BLE)
+    if (minLevel == null) return true;
     return _currentBatteryLevel >= minLevel;
   }
 
-  // ==================== Per-Peer Transport Helpers ====================
+  // ==================== PeerRegistry Change Listener ====================
 
-  /// Add a transport to a peer's available set. Recomputes best transport
-  /// and emits [PeerTransportChanged] if the best changed.
-  void _addPeerTransport(String peerId, TransportType transport) {
-    final set = _peerTransports.putIfAbsent(peerId, () => {});
-    set.add(transport);
-    _recomputeBestTransport(peerId);
-  }
-
-  /// Remove a transport from a peer's available set. Returns true if the
-  /// peer has NO remaining transports (fully lost).
-  bool _removePeerTransport(String peerId, TransportType transport) {
-    final set = _peerTransports[peerId];
-    if (set == null) return true;
-    set.remove(transport);
-    if (set.isEmpty) {
-      _peerTransports.remove(peerId);
-      _peerBestTransport.remove(peerId);
-      return true;
-    }
-    _recomputeBestTransport(peerId);
-    return false;
-  }
-
-  /// Remove a transport from ALL peers. Returns list of peerIds that have
-  /// no remaining transports (fully lost).
-  List<String> _removeTransportFromAllPeers(TransportType transport) {
-    final fullyLost = <String>[];
-    final peerIds = List<String>.from(_peerTransports.keys);
-    for (final peerId in peerIds) {
-      if (_removePeerTransport(peerId, transport)) {
-        fullyLost.add(peerId);
+  /// Subscribe to PeerRegistry's peerIdChanged stream so we forward
+  /// transport-level ID changes to consumers that track transport state.
+  ///
+  /// Since the canonical ID is now always the userId (stable), these events
+  /// signal transport-level changes (e.g., BLE MAC rotation) — the userId
+  /// itself never changes, so no conversation or E2EE session migration is
+  /// needed.
+  void _subscribeToPeerRegistryChanges() {
+    _peerRegistrySub = _peerRegistry.peerIdChangedStream.listen((event) {
+      // Forward to blocs that track transport-level state changes.
+      if (event.userId != null) {
+        _peerIdChangedController.add(ble.PeerIdChanged(
+          oldPeerId: event.oldCanonicalId,
+          newPeerId: event.newCanonicalId,
+          userId: event.userId!,
+        ));
       }
-    }
-    return fullyLost;
-  }
 
-  /// Recompute best transport for a peer. Emits [PeerTransportChanged] if
-  /// the best changed.
-  void _recomputeBestTransport(String peerId) {
-    final set = _peerTransports[peerId];
-    if (set == null || set.isEmpty) return;
-
-    TransportType best = TransportType.ble;
-    int bestPriority = _transportPriority(TransportType.ble);
-    for (final t in set) {
-      final p = _transportPriority(t);
-      if (p < bestPriority) {
-        best = t;
-        bestPriority = p;
-      }
-    }
-
-    final old = _peerBestTransport[peerId];
-    if (old != best) {
-      _peerBestTransport[peerId] = best;
+      // Emit transport change event.
+      final bestTransport = _peerRegistry.bestTransportFor(
+        event.userId ?? event.newCanonicalId,
+      );
       _peerTransportChangedController.add(PeerTransportChanged(
-        peerId: peerId,
-        oldTransport: old,
-        newTransport: best,
+        peerId: event.userId ?? event.newCanonicalId,
+        oldTransport: null,
+        newTransport: bestTransport ?? TransportType.ble,
       ));
-      Logger.debug(
-        'TransportManager: peer $peerId transport ${old?.name ?? 'none'} → ${best.name}',
+
+      Logger.info(
+        'TransportManager: PeerRegistry transport ID changed '
+        '${event.oldCanonicalId} → ${event.newCanonicalId} '
+        '(userId=${event.userId})',
         'Transport',
       );
+    });
+  }
+
+  // ==================== Transport Removal Helpers ====================
+
+  /// Remove a transport from all peers via PeerRegistry and emit
+  /// peerLost for any peers with no remaining transports.
+  void _removeLanTransportFromAllPeers() {
+    for (final identity in _peerRegistry.allPeers.toList()) {
+      final lanId = identity.transportIds[TransportType.lan];
+      if (lanId != null) {
+        final result = _peerRegistry.removeTransport(lanId, TransportType.lan);
+        if (result != null && _peerRegistry.getByCanonical(result) == null) {
+          _peerLostController.add(result);
+        }
+      }
+    }
+  }
+
+  void _removeWifiAwareTransportFromAllPeers() {
+    for (final identity in _peerRegistry.allPeers.toList()) {
+      final waId = identity.transportIds[TransportType.wifiAware];
+      if (waId != null) {
+        final result = _peerRegistry.removeTransport(waId, TransportType.wifiAware);
+        if (result != null && _peerRegistry.getByCanonical(result) == null) {
+          _peerLostController.add(result);
+        }
+      }
     }
   }
 
@@ -1096,35 +1048,63 @@ class TransportManager {
         // Suppress peers whose GATT profile hasn't been read yet (userId=null).
         if (peer.userId == null) return;
 
-        _addPeerTransport(peer.peerId, TransportType.ble);
-        final emitted = _migrateIfNeeded(peer.peerId, peer.userId);
-        // Store E2EE key under the canonical ID (which _migrateIfNeeded just
-        // resolved). For BLE-only peers canonical == peer.peerId.
-        // Await the DB write so the key is persisted before the peer is
-        // emitted to the UI — prevents the race where initiateHandshake runs
-        // before peer_public_keys is populated.
+        // Register transport in PeerRegistry — handles all migration logic.
+        final result = _peerRegistry.registerTransport(
+          transportId: peer.peerId,
+          transport: TransportType.ble,
+          userId: peer.userId,
+          publicKeyHex: peer.publicKeyHex,
+          signingPublicKeyHex: peer.signingPublicKeyHex,
+        );
+
+        final canonical = result.canonicalId;
+
+        // Store E2EE key under the canonical ID. Await the DB write so the
+        // key is persisted before the peer is emitted to the UI — prevents
+        // the race where initiateHandshake runs before peer_public_keys is
+        // populated.
         if (peer.publicKeyHex != null) {
-          final canonical = _peerIdAlias[peer.peerId] ?? peer.peerId;
-          await _encryptionService?.storePeerPublicKey(canonical, peer.publicKeyHex!);
+          await _encryptionService?.storePeerPublicKey(
+            canonical,
+            peer.publicKeyHex!,
+            ed25519PublicKeyHex: peer.signingPublicKeyHex,
+          );
         }
-        if (emitted) {
-          _peerDiscoveredController.add(peer);
-        }
+
+        // Emit peer discovered with canonical ID.
+        _peerDiscoveredController.add(
+          peer.peerId == canonical
+              ? peer
+              : ble.DiscoveredPeer(
+                  peerId: canonical,
+                  name: peer.name,
+                  bio: peer.bio,
+                  age: peer.age,
+                  thumbnailBytes: peer.thumbnailBytes,
+                  userId: peer.userId,
+                  publicKeyHex: peer.publicKeyHex,
+                  signingPublicKeyHex: peer.signingPublicKeyHex,
+                  interests: peer.interests,
+                  timestamp: peer.timestamp,
+                ),
+        );
       }),
       _bleService.peerLostStream.listen((peerId) {
-        // If this BLE peer was aliased to a LAN peer, forward the lost signal
-        // using the canonical peerId so DiscoveryBloc marks the right entry.
-        final canonical = _peerIdAlias.remove(peerId) ?? peerId;
-        final fullyLost = _removePeerTransport(
-          canonical != peerId ? canonical : peerId,
-          TransportType.ble,
-        );
-        if (fullyLost) {
+        final canonical = _peerRegistry.resolveCanonical(peerId) ?? peerId;
+        final result = _peerRegistry.removeTransport(peerId, TransportType.ble);
+
+        // If removal resulted in a canonical that no longer exists, the peer
+        // is fully lost (no remaining transports).
+        if (result != null && _peerRegistry.getByCanonical(result) == null) {
           _peerLostController.add(canonical);
         }
       }),
       _bleService.messageReceivedStream.listen((msg) {
-        final canonical = _peerIdAlias[msg.fromPeerId] ?? msg.fromPeerId;
+        // Cross-transport dedup via MessageRouter
+        final canonical = _peerRegistry.resolveCanonical(msg.fromPeerId) ?? msg.fromPeerId;
+        if (_messageRouter.isDuplicate(msg.messageId)) return;
+        _messageRouter.markSeen(msg.messageId);
+
         _messageReceivedController.add(canonical == msg.fromPeerId
             ? msg
             : ble.ReceivedMessage(
@@ -1138,7 +1118,7 @@ class TransportManager {
       }),
       _bleService.photoPreviewReceivedStream.listen((preview) {
         final canonical =
-            _peerIdAlias[preview.fromPeerId] ?? preview.fromPeerId;
+            _peerRegistry.resolveCanonical(preview.fromPeerId) ?? preview.fromPeerId;
         _photoPreviewReceivedController.add(canonical == preview.fromPeerId
             ? preview
             : ble.ReceivedPhotoPreview(
@@ -1151,7 +1131,7 @@ class TransportManager {
               ));
       }),
       _bleService.photoRequestReceivedStream.listen((req) {
-        final canonical = _peerIdAlias[req.fromPeerId] ?? req.fromPeerId;
+        final canonical = _peerRegistry.resolveCanonical(req.fromPeerId) ?? req.fromPeerId;
         _photoRequestReceivedController.add(canonical == req.fromPeerId
             ? req
             : ble.ReceivedPhotoRequest(
@@ -1162,13 +1142,13 @@ class TransportManager {
               ));
       }),
       _bleService.photoProgressStream.listen((progress) {
-        final canonical = _peerIdAlias[progress.peerId] ?? progress.peerId;
+        final canonical = _peerRegistry.resolveCanonical(progress.peerId) ?? progress.peerId;
         _photoProgressController.add(canonical == progress.peerId
             ? progress
             : progress.copyWith(peerId: canonical));
       }),
       _bleService.photoReceivedStream.listen((photo) async {
-        final canonical = _peerIdAlias[photo.fromPeerId] ?? photo.fromPeerId;
+        final canonical = _peerRegistry.resolveCanonical(photo.fromPeerId) ?? photo.fromPeerId;
         // BLE photos may be E2EE-encrypted; decrypt using the BLE peer ID
         // (which is the session key in EncryptionService).
         final dec = await _decryptPhotoBytes(photo.fromPeerId, photo.photoBytes);
@@ -1185,7 +1165,7 @@ class TransportManager {
         );
       }),
       _bleService.anchorDropReceivedStream.listen((drop) {
-        final canonical = _peerIdAlias[drop.fromPeerId] ?? drop.fromPeerId;
+        final canonical = _peerRegistry.resolveCanonical(drop.fromPeerId) ?? drop.fromPeerId;
         _anchorDropReceivedController.add(canonical == drop.fromPeerId
             ? drop
             : ble.AnchorDropReceived(
@@ -1195,7 +1175,12 @@ class TransportManager {
       }),
       _bleService.reactionReceivedStream.listen((reaction) {
         final canonical =
-            _peerIdAlias[reaction.fromPeerId] ?? reaction.fromPeerId;
+            _peerRegistry.resolveCanonical(reaction.fromPeerId) ?? reaction.fromPeerId;
+        // Cross-transport dedup for reactions
+        final dedupKey = '${reaction.messageId}:${reaction.emoji}:${reaction.action}';
+        if (_messageRouter.isDuplicate(dedupKey)) return;
+        _messageRouter.markSeen(dedupKey);
+
         _reactionReceivedController.add(canonical == reaction.fromPeerId
             ? reaction
             : ble.ReactionReceived(
@@ -1207,24 +1192,20 @@ class TransportManager {
               ));
       }),
       _bleService.peerIdChangedStream.listen((change) {
-        // Update transport mapping for the new peerId
-        final transports = _peerTransports.remove(change.oldPeerId);
-        if (transports != null) {
-          _peerTransports[change.newPeerId] = transports;
+        // BLE-internal ID change (e.g. Central→Peripheral UUID on iOS).
+        // Re-register the new ID in PeerRegistry. The canonical (userId) is
+        // unchanged — only the transport-level BLE UUID is updated.
+        final userId = _peerRegistry.userIdForCanonical(change.oldPeerId);
+        if (userId != null) {
+          _peerRegistry.registerTransport(
+            transportId: change.newPeerId,
+            transport: TransportType.ble,
+            userId: userId,
+          );
         }
-        final best = _peerBestTransport.remove(change.oldPeerId);
-        if (best != null) {
-          _peerBestTransport[change.newPeerId] = best;
-        }
-        // Update incoming alias if the old BLE peerId was aliased
-        final aliasTarget = _peerIdAlias.remove(change.oldPeerId);
-        if (aliasTarget != null) {
-          _peerIdAlias[change.newPeerId] = aliasTarget;
-          _bleIdForCanonical[aliasTarget] = change.newPeerId;
-        }
-        // Migrate any E2EE session or pending handshake keyed by the old peerId
-        // (covers the BLE Central UUID → Peripheral UUID race on iOS).
-        _encryptionService?.migratePeerId(change.oldPeerId, change.newPeerId);
+
+        // Forward to blocs — no E2EE migration needed since sessions are
+        // keyed by userId (canonical), which doesn't change.
         _peerIdChangedController.add(change);
       }),
     ]);
@@ -1236,24 +1217,68 @@ class TransportManager {
 
     _lanSubscriptions.addAll([
       _lanService.peerDiscoveredStream.listen((peer) async {
-        _addPeerTransport(peer.peerId, TransportType.lan);
-        final emitted = _migrateIfNeeded(peer.peerId, peer.userId);
+        final result = _peerRegistry.registerTransport(
+          transportId: peer.peerId,
+          transport: TransportType.lan,
+          userId: peer.userId,
+          publicKeyHex: peer.publicKeyHex,
+          signingPublicKeyHex: peer.signingPublicKeyHex,
+        );
+
+        final canonical = result.canonicalId;
+
         // LAN peers carry publicKeyHex in the beacon — store under canonical ID.
         if (peer.publicKeyHex != null) {
-          await _encryptionService?.storePeerPublicKey(peer.peerId, peer.publicKeyHex!);
+          await _encryptionService?.storePeerPublicKey(
+            canonical,
+            peer.publicKeyHex!,
+            ed25519PublicKeyHex: peer.signingPublicKeyHex,
+          );
         }
-        if (emitted) {
-          _peerDiscoveredController.add(peer);
-        }
+
+        // Always emit discovered (even for updated — LAN may have fresh profile data).
+        _peerDiscoveredController.add(
+          peer.peerId == canonical
+              ? peer
+              : ble.DiscoveredPeer(
+                  peerId: canonical,
+                  name: peer.name,
+                  bio: peer.bio,
+                  age: peer.age,
+                  thumbnailBytes: peer.thumbnailBytes,
+                  userId: peer.userId,
+                  publicKeyHex: peer.publicKeyHex,
+                  signingPublicKeyHex: peer.signingPublicKeyHex,
+                  interests: peer.interests,
+                  timestamp: peer.timestamp,
+                ),
+        );
       }),
       _lanService.peerLostStream.listen((peerId) {
-        final fullyLost = _removePeerTransport(peerId, TransportType.lan);
-        if (fullyLost) {
-          _peerLostController.add(peerId);
+        final canonical = _peerRegistry.resolveCanonical(peerId) ?? peerId;
+        final result = _peerRegistry.removeTransport(peerId, TransportType.lan);
+        if (result != null && _peerRegistry.getByCanonical(result) == null) {
+          _peerLostController.add(canonical);
         }
       }),
       _lanService.messageReceivedStream.listen((msg) async {
-        _messageReceivedController.add(await _decryptReceivedMessage(msg));
+        // Cross-transport dedup
+        if (_messageRouter.isDuplicate(msg.messageId)) return;
+        _messageRouter.markSeen(msg.messageId);
+        // Resolve LAN peer ID to canonical (same as BLE path).
+        final canonical =
+            _peerRegistry.resolveCanonical(msg.fromPeerId) ?? msg.fromPeerId;
+        final resolved = canonical == msg.fromPeerId
+            ? msg
+            : ble.ReceivedMessage(
+                fromPeerId: canonical,
+                messageId: msg.messageId,
+                type: msg.type,
+                content: msg.content,
+                timestamp: msg.timestamp,
+                replyToId: msg.replyToId,
+              );
+        _messageReceivedController.add(await _decryptReceivedMessage(resolved));
       }),
       _lanService.photoPreviewReceivedStream.listen(
         _photoPreviewReceivedController.add,
@@ -1279,9 +1304,13 @@ class TransportManager {
       _lanService.anchorDropReceivedStream.listen(
         _anchorDropReceivedController.add,
       ),
-      _lanService.reactionReceivedStream.listen(
-        _reactionReceivedController.add,
-      ),
+      _lanService.reactionReceivedStream.listen((reaction) {
+        // Cross-transport dedup for reactions
+        final dedupKey = '${reaction.messageId}:${reaction.emoji}:${reaction.action}';
+        if (_messageRouter.isDuplicate(dedupKey)) return;
+        _messageRouter.markSeen(dedupKey);
+        _reactionReceivedController.add(reaction);
+      }),
       _lanService.noiseHandshakeStream.listen(_processIncomingHandshake),
     ]);
   }
@@ -1315,21 +1344,27 @@ class TransportManager {
 
   /// Route an incoming handshake frame to EncryptionService, translating
   /// the transport-level peer ID to the canonical conversation ID first.
+  ///
+  /// For step 1 (new handshake initiation), any ID is accepted.
+  /// For steps 2-3 (continuation), the resolved ID MUST match a pending
+  /// handshake — otherwise the message is dropped with a warning. This
+  /// prevents cross-routing between concurrent handshakes on different
+  /// transports/directions.
   void _processIncomingHandshake(ble.NoiseHandshakeReceived msg) {
     final enc = _encryptionService;
     if (enc == null) return;
     final rawId = msg.fromPeerId;
-    // Translate BLE UUID → canonical (LAN UUID for dual-transport peers).
-    var canonicalId = _peerIdAlias[rawId] ?? rawId;
-    // If the peerId is a BLE Central UUID (not found in _peerTransports), try
+
+    // Use PeerRegistry for canonical resolution.
+    var canonicalId = _peerRegistry.resolveCanonical(rawId) ?? rawId;
+
+    // If the peerId is a BLE Central UUID (not found in PeerRegistry), try
     // to resolve it to a known Peripheral UUID via BleService's userId mapping.
-    // This is critical for cross-platform (Android → iOS) where the Central
-    // UUID ≠ Peripheral UUID and the incoming handshake msg arrives before
-    // the scanner has established the Peripheral connection.
-    if (!_peerTransports.containsKey(canonicalId)) {
+    if (_peerRegistry.getByCanonical(canonicalId) == null) {
       final resolvedPeerId = _bleService.resolveToPeripheralId(canonicalId);
       if (resolvedPeerId != null && resolvedPeerId != canonicalId) {
-        final finalCanonical = _peerIdAlias[resolvedPeerId] ?? resolvedPeerId;
+        final finalCanonical =
+            _peerRegistry.resolveCanonical(resolvedPeerId) ?? resolvedPeerId;
         Logger.debug(
           'TransportManager: handshake peerId resolved $canonicalId → $finalCanonical',
           'Transport',
@@ -1339,29 +1374,46 @@ class TransportManager {
     }
 
     // For steps 2 and 3, verify the resolved ID matches a pending handshake.
-    // If not, the peerId may have been migrated (Central→Peripheral or
-    // transport upgrade) — try the raw BLE ID and common aliases as fallback.
+    // Use a strict search order: canonical → rawId → bleId.
+    // Only accept the FIRST match — never fall through to a second candidate,
+    // which could be a different concurrent handshake.
     if (msg.step >= 2 && !enc.hasPendingHandshake(canonicalId)) {
-      // Try the raw BLE ID directly
+      bool resolved = false;
+      // Try the raw BLE ID directly (Central UUID before registry update)
       if (enc.hasPendingHandshake(rawId)) {
         Logger.info(
           'TransportManager: handshake step ${msg.step} — canonical '
-          '$canonicalId has no pending, falling back to raw $rawId',
+          '$canonicalId has no pending, using raw $rawId',
           'Transport',
         );
         canonicalId = rawId;
-      } else {
-        // Try reverse: maybe the pending handshake is under the BLE ID that
-        // maps to this canonical via _bleIdForCanonical
-        final bleId = _bleIdForCanonical[canonicalId];
+        resolved = true;
+      }
+
+      if (!resolved) {
+        // Try reverse: maybe the pending handshake is under the BLE ID
+        final bleId = _peerRegistry.bleIdFor(canonicalId);
         if (bleId != null && enc.hasPendingHandshake(bleId)) {
           Logger.info(
-            'TransportManager: handshake step ${msg.step} — falling back to '
+            'TransportManager: handshake step ${msg.step} — using '
             'bleId $bleId for canonical $canonicalId',
             'Transport',
           );
           canonicalId = bleId;
+          resolved = true;
         }
+      }
+
+      if (!resolved) {
+        // No pending handshake found under any known ID — drop the message
+        // rather than routing to a potentially wrong session.
+        Logger.warning(
+          'TransportManager: dropping handshake step ${msg.step} from '
+          'raw=$rawId — no matching pending handshake found '
+          '(canonical=$canonicalId)',
+          'Transport',
+        );
+        return;
       }
     }
 
@@ -1389,20 +1441,17 @@ class TransportManager {
   }
 
   /// Route an outbound handshake message to the appropriate transport.
-  ///
-  /// [msg.peerId] is the canonical peer ID (conversation ID). Tries
-  /// transports in priority order (LAN → BLE) with fallback.
   Future<void> _routeOutboundHandshake(HandshakeMessageOut msg) async {
     final canonicalId = msg.peerId;
-    final available = _peerTransports[canonicalId] ?? {};
-    final bleId = _bleIdForCanonical[canonicalId] ?? canonicalId;
+    final transports = _peerRegistry.transportsFor(canonicalId);
+    final bleId = _peerRegistry.bleIdFor(canonicalId) ?? canonicalId;
     Logger.debug(
       'routeOutboundHandshake step ${msg.step}: canonical=$canonicalId, '
-      'bleId=$bleId, transports=${available.map((t) => t.name).join(', ')}',
+      'bleId=$bleId, transports=${transports.map((t) => t.name).join(', ')}',
       'Transport',
     );
 
-    if (available.contains(TransportType.lan) && _isTransportAllowed(TransportType.lan)) {
+    if (transports.contains(TransportType.lan) && _isTransportAllowed(TransportType.lan)) {
       final ok = await _lanService
           .sendHandshakeMessage(canonicalId, msg.step, msg.payload);
       if (ok) return;
@@ -1412,10 +1461,15 @@ class TransportManager {
     }
 
     // BLE fallback — resolve canonical → BLE UUID.
+    // BleFacade.sendHandshakeMessage internally handles retry loops,
+    // reverse-path (fff5), and buffered pending handshakes.
     try {
       await _bleService.sendHandshakeMessage(bleId, msg.step, msg.payload);
     } catch (e) {
-      Logger.error('BLE handshake send failed for $bleId', e, null, 'Transport');
+      Logger.error(
+        'Handshake step ${msg.step} failed for $bleId via all transports',
+        e, null, 'Transport',
+      );
     }
   }
 
@@ -1425,19 +1479,43 @@ class TransportManager {
 
     _wifiAwareSubscriptions.addAll([
       _wifiAwareService.peerDiscoveredStream.listen((peer) {
-        _addPeerTransport(peer.peerId, TransportType.wifiAware);
-        if (_migrateIfNeeded(peer.peerId, peer.userId)) {
-          _peerDiscoveredController.add(peer);
-        }
+        final result = _peerRegistry.registerTransport(
+          transportId: peer.peerId,
+          transport: TransportType.wifiAware,
+          userId: peer.userId,
+          publicKeyHex: peer.publicKeyHex,
+          signingPublicKeyHex: peer.signingPublicKeyHex,
+        );
+
+        final canonical = result.canonicalId;
+        _peerDiscoveredController.add(
+          peer.peerId == canonical
+              ? peer
+              : ble.DiscoveredPeer(
+                  peerId: canonical,
+                  name: peer.name,
+                  bio: peer.bio,
+                  age: peer.age,
+                  thumbnailBytes: peer.thumbnailBytes,
+                  userId: peer.userId,
+                  publicKeyHex: peer.publicKeyHex,
+                  interests: peer.interests,
+                  timestamp: peer.timestamp,
+                ),
+        );
       }),
       _wifiAwareService.peerLostStream.listen((peerId) {
-        final fullyLost =
-            _removePeerTransport(peerId, TransportType.wifiAware);
-        if (fullyLost) {
-          _peerLostController.add(peerId);
+        final canonical = _peerRegistry.resolveCanonical(peerId) ?? peerId;
+        final result =
+            _peerRegistry.removeTransport(peerId, TransportType.wifiAware);
+        if (result != null && _peerRegistry.getByCanonical(result) == null) {
+          _peerLostController.add(canonical);
         }
       }),
       _wifiAwareService.messageReceivedStream.listen((msg) async {
+        // Cross-transport dedup
+        if (_messageRouter.isDuplicate(msg.messageId)) return;
+        _messageRouter.markSeen(msg.messageId);
         _messageReceivedController.add(await _decryptReceivedMessage(msg));
       }),
       _wifiAwareService.photoPreviewReceivedStream.listen(
@@ -1464,9 +1542,13 @@ class TransportManager {
       _wifiAwareService.anchorDropReceivedStream.listen(
         _anchorDropReceivedController.add,
       ),
-      _wifiAwareService.reactionReceivedStream.listen(
-        _reactionReceivedController.add,
-      ),
+      _wifiAwareService.reactionReceivedStream.listen((reaction) {
+        // Cross-transport dedup for reactions
+        final dedupKey = '${reaction.messageId}:${reaction.emoji}:${reaction.action}';
+        if (_messageRouter.isDuplicate(dedupKey)) return;
+        _messageRouter.markSeen(dedupKey);
+        _reactionReceivedController.add(reaction);
+      }),
     ]);
   }
 
@@ -1476,101 +1558,5 @@ class TransportManager {
     }
     _wifiAwareSubscriptions.clear();
     _wifiAwareSubscribed = false;
-  }
-
-  // ==================== Cross-Transport Migration ====================
-
-  /// Check whether [newPeerId] should replace an existing peerId for the same
-  /// user. Returns true if the peer should be emitted to listeners, false if
-  /// it should be suppressed (the existing transport has higher priority).
-  ///
-  /// Only migrates when the new transport is strictly higher priority than the
-  /// old one. This prevents BLE re-discoveries from downgrading a peer that is
-  /// already reachable via LAN.
-  bool _migrateIfNeeded(String newPeerId, String? userId) {
-    if (userId == null) return true;
-    final oldPeerId = _userIdToCurrentPeerId[userId];
-    if (oldPeerId != null && oldPeerId != newPeerId) {
-      final oldPriority =
-          _transportPriority(_peerBestTransport[oldPeerId] ?? _activeTransport);
-      final newPriority =
-          _transportPriority(_peerBestTransport[newPeerId] ?? _activeTransport);
-
-      if (oldPriority < newPriority) {
-        // Existing transport is higher priority (e.g. LAN vs BLE) — suppress.
-        // Record alias so incoming events (messages, photos) from newPeerId
-        // are routed to oldPeerId's conversation in the DB.
-        _peerIdAlias[newPeerId] = oldPeerId;
-        // Record reverse so outgoing BLE fallback uses the real BLE peerId
-        // instead of the LAN session UUID (which BLE can't route directly).
-        _bleIdForCanonical[oldPeerId] = newPeerId;
-        // Merge the suppressed peer's transports into the canonical peer so
-        // BLE fallback is available under the canonical ID.
-        final suppTransports = _peerTransports.remove(newPeerId) ?? {};
-        final canonTransports = _peerTransports.putIfAbsent(oldPeerId, () => {});
-        canonTransports.addAll(suppTransports);
-        _peerBestTransport.remove(newPeerId);
-        _recomputeBestTransport(oldPeerId);
-        Logger.debug(
-          'TransportManager: suppressed $newPeerId → alias to $oldPeerId, '
-          'transports=${canonTransports.map((t) => t.name).join(', ')}',
-          'Transport',
-        );
-        return false;
-      }
-
-      // New transport is equal or higher priority — migrate.
-      // Merge transport sets: the new canonical ID should know about ALL
-      // transports the old ID had (e.g. BLE) plus whatever the new ID has.
-      final oldTransports = _peerTransports.remove(oldPeerId) ?? {};
-      final newTransports = _peerTransports.putIfAbsent(newPeerId, () => {});
-      newTransports.addAll(oldTransports);
-      _peerBestTransport.remove(oldPeerId);
-      _recomputeBestTransport(newPeerId);
-
-      // Record reverse alias so outgoing BLE fallback uses the correct BLE
-      // peerId.  Only needed when the new canonical is NOT itself a BLE UUID
-      // (e.g. canonical is a LAN/Wi-Fi Aware session ID and we need to
-      // remember the BLE UUID for fallback writes).
-      //
-      // When the new canonical IS a BLE UUID (the new peer's transport set
-      // includes BLE — i.e. it was discovered via BLE scanning), the new
-      // canonical can be used directly and mapping to the OLD stale UUID
-      // would route messages to the wrong device (MAC rotation).
-      if (newTransports.contains(TransportType.ble)) {
-        _bleIdForCanonical.remove(newPeerId);
-      } else {
-        _bleIdForCanonical[newPeerId] = oldPeerId;
-      }
-
-      // Migrate any E2EE session or pending handshake to the new canonical peerId.
-      _encryptionService?.migratePeerId(oldPeerId, newPeerId);
-      _peerIdChangedController.add(ble.PeerIdChanged(
-        oldPeerId: oldPeerId,
-        newPeerId: newPeerId,
-        userId: userId,
-      ));
-      Logger.info(
-        'TransportManager: migrated $oldPeerId → $newPeerId (userId=$userId), '
-        'transports=${newTransports.map((t) => t.name).join(', ')}',
-        'Transport',
-      );
-    }
-    _userIdToCurrentPeerId[userId] = newPeerId;
-    return true;
-  }
-
-  /// Lower number = higher priority.
-  int _transportPriority(TransportType t) {
-    switch (t) {
-      case TransportType.lan:
-        return 0;
-      case TransportType.wifiAware:
-        return 1;
-      case TransportType.wifiDirect:
-        return 2;
-      case TransportType.ble:
-        return 3;
-    }
   }
 }

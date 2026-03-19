@@ -2,7 +2,10 @@ import 'package:drift/drift.dart';
 
 import '../local_database/database.dart';
 
-/// Repository for managing discovered peers and blocking logic
+/// Repository for managing discovered peers and blocking logic.
+///
+/// All methods take [peerId] which is the peer's stable app-level userId
+/// (canonical UUID). Transport-specific IDs are resolved upstream.
 class PeerRepository {
   PeerRepository(this._db);
 
@@ -21,18 +24,10 @@ class PeerRepository {
     return await query.get();
   }
 
-  /// Get a peer by ID
+  /// Get a peer by ID (peerId = stable app-level userId).
   Future<DiscoveredPeerEntry?> getPeerById(String peerId) async {
     return await (_db.select(_db.discoveredPeers)
           ..where((t) => t.peerId.equals(peerId)))
-        .getSingleOrNull();
-  }
-
-  /// Get a peer by stable app-level userId (for cross-transport deduplication).
-  Future<DiscoveredPeerEntry?> getPeerByUserId(String userId) async {
-    return await (_db.select(_db.discoveredPeers)
-          ..where((t) => t.userId.equals(userId))
-          ..limit(1))
         .getSingleOrNull();
   }
 
@@ -47,11 +42,12 @@ class PeerRepository {
         .get();
   }
 
-  /// Upsert a discovered peer (insert or update if exists)
+  /// Upsert a discovered peer (insert or update if exists).
+  ///
+  /// [peerId] is the peer's stable app-level userId (canonical UUID).
   Future<DiscoveredPeerEntry> upsertPeer({
     required String peerId,
     required String name,
-    String? userId,
     int? age,
     String? bio,
     int? position,
@@ -68,7 +64,6 @@ class PeerRepository {
       // Update existing peer
       final companion = DiscoveredPeersCompanion(
         name: Value(name),
-        userId: userId != null ? Value(userId) : const Value.absent(),
         // Only overwrite when we actually have a new value — don't let stale
         // advertisement scans wipe richer data from the GATT profile read.
         age: age != null ? Value(age) : const Value.absent(),
@@ -87,7 +82,6 @@ class PeerRepository {
 
       return DiscoveredPeerEntry(
         peerId: peerId,
-        userId: userId ?? existing.userId,
         name: name,
         age: age ?? existing.age,
         bio: bio ?? existing.bio,
@@ -102,7 +96,6 @@ class PeerRepository {
       // Insert new peer
       final entry = DiscoveredPeersCompanion.insert(
         peerId: peerId,
-        userId: Value(userId),
         name: name,
         age: Value(age),
         bio: Value(bio),
@@ -118,7 +111,6 @@ class PeerRepository {
 
       return DiscoveredPeerEntry(
         peerId: peerId,
-        userId: userId,
         name: name,
         age: age,
         bio: bio,
@@ -181,102 +173,6 @@ class PeerRepository {
     }
     query.orderBy([(t) => OrderingTerm.desc(t.lastSeenAt)]);
     return query.watch();
-  }
-
-  // ==================== MAC Rotation Migration ====================
-
-  /// Migrate all database records from [oldPeerId] to [newPeerId] when a BLE
-  /// MAC rotation is detected. Updates discovered_peers, conversations,
-  /// blocked_users, and anchor_drops in a single transaction.
-  Future<void> migratePeerId({
-    required String oldPeerId,
-    required String newPeerId,
-    required String userId,
-  }) async {
-    await _db.transaction(() async {
-      final oldPeer = await getPeerById(oldPeerId);
-      if (oldPeer == null) return; // Already gone
-
-      // Ensure new peer record exists (may have been created by scan ad)
-      final newPeer = await getPeerById(newPeerId);
-      if (newPeer == null) {
-        // Create new peer with old peer's profile data
-        await _db.into(_db.discoveredPeers).insertOnConflictUpdate(
-              DiscoveredPeersCompanion.insert(
-                peerId: newPeerId,
-                userId: Value(userId),
-                name: oldPeer.name,
-                age: Value(oldPeer.age),
-                bio: Value(oldPeer.bio),
-                position: Value(oldPeer.position),
-                interests: Value(oldPeer.interests),
-                thumbnailData: Value(oldPeer.thumbnailData),
-                lastSeenAt: DateTime.now(),
-                rssi: Value(oldPeer.rssi),
-                isBlocked: Value(oldPeer.isBlocked),
-              ),
-            );
-      } else {
-        // Update existing new peer with userId and carry over blocked status
-        await (_db.update(_db.discoveredPeers)
-              ..where((t) => t.peerId.equals(newPeerId)))
-            .write(DiscoveredPeersCompanion(
-          userId: Value(userId),
-          isBlocked: Value(oldPeer.isBlocked),
-        ));
-      }
-
-      // Check if conversation already exists for new peerId
-      final existingNewConv = await (_db.select(_db.conversations)
-            ..where((t) => t.peerId.equals(newPeerId)))
-          .getSingleOrNull();
-
-      if (existingNewConv == null) {
-        // Migrate conversations: update peerId reference
-        // Foreign keys are enabled, so new peer must exist first (done above)
-        await (_db.update(_db.conversations)
-              ..where((t) => t.peerId.equals(oldPeerId)))
-            .write(ConversationsCompanion(peerId: Value(newPeerId)));
-      } else {
-        // Both peerIds have conversations — merge messages into the new one
-        final oldConvs = await (_db.select(_db.conversations)
-              ..where((t) => t.peerId.equals(oldPeerId)))
-            .get();
-        for (final oldConv in oldConvs) {
-          await (_db.update(_db.messages)
-                ..where((t) => t.conversationId.equals(oldConv.id)))
-              .write(
-                  MessagesCompanion(conversationId: Value(existingNewConv.id)));
-          await (_db.delete(_db.conversations)
-                ..where((t) => t.id.equals(oldConv.id)))
-              .go();
-        }
-      }
-
-      // Migrate blocked status
-      final wasBlocked = await isPeerBlocked(oldPeerId);
-      if (wasBlocked) {
-        await _db.into(_db.blockedUsers).insertOnConflictUpdate(
-              BlockedUsersCompanion.insert(
-                peerId: newPeerId,
-                blockedAt: DateTime.now(),
-              ),
-            );
-      }
-
-      // Migrate anchor drops
-      await (_db.update(_db.anchorDrops)
-            ..where((t) => t.peerId.equals(oldPeerId)))
-          .write(AnchorDropsCompanion(peerId: Value(newPeerId)));
-
-      // Delete old peer (conversations FK now points to newPeerId)
-      await (_db.delete(_db.blockedUsers)
-            ..where((t) => t.peerId.equals(oldPeerId)))
-          .go();
-      await (_db.delete(_db.discoveredPeers)
-            ..where((t) => t.peerId.equals(oldPeerId)))
-          .go();
-    });
   }
 
   // ==================== Blocking Logic ====================
