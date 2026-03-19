@@ -516,14 +516,52 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
         'Casey',
         'Drew',
         'Morgan',
-        'Kai'
+        'Kai',
+        'Taylor',
+        'Jamie',
+        'Avery',
+        'Quinn',
+        'Reese',
+        'Parker',
+        'Rowan',
+        'Skyler',
+        'Cameron',
+        'Dakota',
+        'Emerson',
+        'Blake',
+        'Phoenix',
+        'Sage',
+        'River',
+        'Logan',
+        'Elliot'
       ];
+
       const bios = [
         'Just here for a good time',
         'Love the ocean and good company',
         'First cruise, looking to meet new people',
         'Dance floor enthusiast',
         'Adventure seeker and cocktail lover',
+        'Sunsets, music, and good vibes only',
+        'Let’s make this trip unforgettable',
+        'Probably at the bar or the pool',
+        'Looking for fun connections',
+        'Spontaneous and always smiling',
+        'Here for laughs and late nights',
+        'Good energy only ✨',
+        'Catch me where the party is',
+        'Chill, flirty, and a little chaotic',
+        'Exploring the ship one drink at a time',
+        'Music, dancing, and meeting new faces',
+        'Open to whatever the night brings',
+        'Living my best cruise life',
+        'Let’s vibe and see where it goes',
+        'Sun, sea, and a bit of mischief',
+        'Just go with the flow',
+        'Looking for someone to share sunsets with',
+        'Fluent in sarcasm and cocktails',
+        'Making memories > making plans',
+        'Here for fun, not stress'
       ];
 
       final name = names[rng.nextInt(names.length)];
@@ -541,7 +579,7 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
       final profile = await _databaseService.profileRepository.createProfile(
         name: name,
         age: age,
-        bio: '',
+        bio: bio,
         position: position,
         interests: ProfileConstants.encodeInterests(interests),
       );

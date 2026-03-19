@@ -75,6 +75,9 @@ void main() {
           interests: any(named: 'interests'),
           thumbnailData: any(named: 'thumbnailData'),
           rssi: any(named: 'rssi'),
+          publicKeyHex: any(named: 'publicKeyHex'),
+          transportId: any(named: 'transportId'),
+          transportType: any(named: 'transportType'),
         )).thenAnswer((inv) async => defaultEntry(
           peerId: inv.namedArguments[#peerId] as String,
           name: inv.namedArguments[#name] as String,
@@ -233,6 +236,9 @@ void main() {
             interests: any(named: 'interests'),
             thumbnailData: any(named: 'thumbnailData'),
             rssi: any(named: 'rssi'),
+            publicKeyHex: any(named: 'publicKeyHex'),
+            transportId: any(named: 'transportId'),
+            transportType: any(named: 'transportType'),
           ));
     },
   );
@@ -259,6 +265,9 @@ void main() {
             interests: any(named: 'interests'),
             thumbnailData: any(named: 'thumbnailData'),
             rssi: any(named: 'rssi'),
+            publicKeyHex: any(named: 'publicKeyHex'),
+            transportId: any(named: 'transportId'),
+            transportType: any(named: 'transportType'),
           )).called(1);
     },
   );

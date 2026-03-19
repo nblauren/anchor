@@ -423,6 +423,15 @@ class MockBleService implements BleServiceInterface {
   Stream<ReactionReceived> get reactionReceivedStream =>
       _reactionReceivedController.stream;
 
+  @override
+  Future<bool> sendRawBytes(String peerId, Uint8List data) async {
+    Logger.info(
+      'MockBleService: sendRawBytes ${data.length}B to ${peerId.substring(0, min(8, peerId.length))}',
+      'BLE',
+    );
+    return _visiblePeers.containsKey(peerId);
+  }
+
   // ==================== Photo Transfer ====================
 
   @override
@@ -586,6 +595,9 @@ class MockBleService implements BleServiceInterface {
 
   @override
   void resumeMeshRelay() {}
+
+  @override
+  void updateBlockedPeerIds(Set<String> blockedIds) {}
 
   @override
   Future<void> sendHandshakeMessage(

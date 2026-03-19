@@ -4,7 +4,7 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
-import 'package:drift/drift.dart' show Value;
+import 'package:drift/drift.dart' show InsertMode, Value;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../../core/utils/logger.dart';
@@ -12,6 +12,9 @@ import '../../data/local_database/database.dart';
 import 'encryption_models.dart';
 import 'noise_handshake.dart';
 import 'noise_xx_handshake.dart';
+import 'rate_limiter.dart';
+import 'traffic_padding.dart';
+import '../mesh/mesh_packet.dart';
 
 // ---------------------------------------------------------------------------
 // EncryptionService
@@ -77,6 +80,10 @@ class EncryptionService {
   final _ed25519 = Ed25519();
   final _random = Random.secure();
 
+  /// Rate limiter for Noise handshake attempts (prevents DoS).
+  /// Per-peer: max 10/min.  Global: max 30/min.
+  final HandshakeRateLimiter _handshakeRateLimiter = HandshakeRateLimiter();
+
   // Long-term X25519 key pair loaded once from secure storage.
   Uint8List? _localPrivateKey;
   Uint8List? _localPublicKey;
@@ -126,12 +133,14 @@ class EncryptionService {
   /// Must be called once at app start (after secure storage is available).
   Future<void> initialize() async {
     await _loadOrGenerateKeyPair();
+    await _loadPersistedSessions();
     // Schedule session cleanup to run after 1/4 of the session timeout.
     // This adapts automatically if _kSessionTimeout changes, rather than
     // using a hardcoded 15-minute interval.
     _scheduleSessionCleanup();
     Logger.info(
-        'EncryptionService initialised — pubkey: ${_publicKeyHex().substring(0, 12)}…',
+        'EncryptionService initialised — pubkey: ${_publicKeyHex().substring(0, 12)}…, '
+        '${_sessions.length} restored session(s)',
         'E2EE');
   }
 
@@ -143,10 +152,47 @@ class EncryptionService {
     _handshakeTimers.clear();
     _sessions.clear();
     _pending.clear();
+    _handshakeRateLimiter.clear();
     await _outboundHandshakeController.close();
     await _sessionEstablishedController.close();
     await _peerKeyStoredController.close();
     await _handshakeTimeoutController.close();
+  }
+
+  /// Destroy all cryptographic material: long-term keys from secure storage,
+  /// in-memory session keys, and peer public keys from the database.
+  ///
+  /// Called by panic mode. After this, the app cannot decrypt any existing
+  /// messages or establish new sessions without reinitializing.
+  Future<void> destroyAllKeys() async {
+    // 1. Zero in-memory private key bytes
+    if (_localPrivateKey != null) {
+      _localPrivateKey!.fillRange(0, _localPrivateKey!.length, 0);
+      _localPrivateKey = null;
+    }
+    _localPublicKey = null;
+
+    // 2. Clear all E2EE sessions (ephemeral keys) — both in-memory and persisted.
+    _sessions.clear();
+    _pending.clear();
+    try {
+      await _database.delete(_database.noiseSessions).go();
+    } catch (_) {}
+
+    // 3. Delete long-term keys from secure storage
+    await _secureStorage.delete(key: _kPrivateKeyStorageKey);
+    await _secureStorage.delete(key: _kPublicKeyStorageKey);
+    await _secureStorage.delete(key: _kEd25519PrivateKeyStorageKey);
+    await _secureStorage.delete(key: _kEd25519PublicKeyStorageKey);
+
+    // 4. Clear handshake timers
+    for (final t in _handshakeTimers.values) {
+      t.cancel();
+    }
+    _handshakeTimers.clear();
+    _handshakeRateLimiter.clear();
+
+    Logger.info('EncryptionService: All keys destroyed (panic mode)', 'Crypto');
   }
 
   // ── Key management ────────────────────────────────────────────────────────
@@ -232,33 +278,30 @@ class EncryptionService {
       _cancelPendingHandshake(peerId);
     }
 
-    // Insert or update the peer's public keys on the discovered_peers table.
-    // The peer might not exist yet (e.g., key arrives before profile read),
-    // so we create a minimal placeholder row if needed.
+    // Ensure the canonical peer row exists BEFORE dedup so FK constraints
+    // are satisfied when migrating conversations, drops, etc. to this peerId.
     final peerRow = await (_database.select(_database.discoveredPeers)
           ..where((t) => t.peerId.equals(peerId)))
         .getSingleOrNull();
 
-    if (peerRow != null) {
-      await (_database.update(_database.discoveredPeers)
-            ..where((t) => t.peerId.equals(peerId)))
-          .write(DiscoveredPeersCompanion(
-        publicKeyHex: Value(publicKeyHex),
-        ed25519PublicKeyHex: Value(ed25519PublicKeyHex),
-      ));
-    } else {
+    if (peerRow == null) {
       await _database.into(_database.discoveredPeers).insert(
             DiscoveredPeersCompanion.insert(
               peerId: peerId,
               name: 'Unknown',
-              age: const Value(0),
-              bio: const Value(''),
               lastSeenAt: DateTime.now(),
-              publicKeyHex: Value(publicKeyHex),
-              ed25519PublicKeyHex: Value(ed25519PublicKeyHex),
             ),
+            mode: InsertMode.insertOrIgnore,
           );
     }
+
+    // Always update the public keys.
+    await (_database.update(_database.discoveredPeers)
+          ..where((t) => t.peerId.equals(peerId)))
+        .write(DiscoveredPeersCompanion(
+      publicKeyHex: Value(publicKeyHex),
+      ed25519PublicKeyHex: Value(ed25519PublicKeyHex),
+    ));
 
     Logger.info(
         'Stored public key for peer $peerId (${publicKeyHex.substring(0, 8)}…) — handshake can now proceed',
@@ -281,6 +324,22 @@ class EncryptionService {
       return false;
     }
     return true;
+  }
+
+  /// Find the session peer ID whose truncated hash (FNV-1a) matches
+  /// [truncatedId]. Returns null if no match found. This is used when a
+  /// binary MeshPacket arrives from an unknown Central UUID — we can still
+  /// identify the sender by matching the truncated hash against existing
+  /// session keys (which are canonical peer IDs / userIds).
+  String? findSessionByTruncatedId(String truncatedId) {
+    for (final peerId in _sessions.keys) {
+      if (MeshPacket.truncateIdSync(peerId) == truncatedId) {
+        if (!_isSessionExpired(_sessions[peerId]!)) {
+          return peerId;
+        }
+      }
+    }
+    return null;
   }
 
   /// Check if a session has exceeded the timeout.
@@ -308,6 +367,7 @@ class EncryptionService {
     });
     for (final peerId in expired) {
       _sessions.remove(peerId);
+      _deletePersistedSession(peerId);
       Logger.info(
         'E2EE session cleanup: expired session for $peerId',
         'E2EE',
@@ -335,6 +395,12 @@ class EncryptionService {
   Future<HandshakeResult> initiateHandshake(String peerId) async {
     if (_pending.containsKey(peerId)) {
       return const HandshakeResult(error: 'Handshake already in progress');
+    }
+
+    // Rate-limit outbound handshake initiations to prevent abuse.
+    if (!_handshakeRateLimiter.tryAcquire(peerId)) {
+      return const HandshakeResult(
+          error: 'Handshake rate-limited — try again later');
     }
 
     final peerKeyHex = await _getPeerPublicKeyHex(peerId);
@@ -444,6 +510,20 @@ class EncryptionService {
     int step,
     Uint8List payload,
   ) async {
+    // Rate-limit inbound handshake initiation messages (step 1 or XX step 11).
+    // Steps 2/3 are responses to our own initiation and don't count as new
+    // handshake attempts — only initial messages from the peer are limited.
+    if (step == 1 || step == kXXStep1) {
+      if (!_handshakeRateLimiter.tryAcquire(peerId)) {
+        Logger.warning(
+          'Inbound handshake rate-limited for $peerId (step $step)',
+          'E2EE',
+        );
+        return const HandshakeResult(
+            error: 'Handshake rate-limited — too many attempts');
+      }
+    }
+
     // XK steps: 1, 2, 3
     // XX steps: 11, 12, 13
     if (isXXHandshakeStep(step)) {
@@ -855,6 +935,10 @@ class EncryptionService {
   /// Returns null if no session exists or session expired
   /// (caller should send unencrypted with v:0).
   ///
+  /// Plaintext is PKCS#7-padded to a fixed block size before encryption to
+  /// resist traffic analysis (all messages within the same block size are
+  /// indistinguishable by ciphertext length).
+  ///
   /// XChaCha20-Poly1305 with a random 24-byte nonce.
   /// Wire format: nonce (24 bytes) || ciphertext || tag (16 bytes)
   Future<EncryptedPayload?> encrypt(String peerId, Uint8List plaintext) async {
@@ -866,11 +950,14 @@ class EncryptionService {
       return null;
     }
 
+    // Pad plaintext to fixed block size before encryption to prevent
+    // traffic analysis based on ciphertext length.
+    final padded = TrafficPadding.pad(plaintext);
     final nonce = _randomNonce(24);
 
     try {
       final box = await _xchacha.encrypt(
-        plaintext,
+        padded,
         secretKey: SecretKey(session.sendKey),
         nonce: nonce,
       );
@@ -878,6 +965,19 @@ class EncryptionService {
         ..setRange(0, box.cipherText.length, box.cipherText)
         ..setRange(box.cipherText.length,
             box.cipherText.length + box.mac.bytes.length, box.mac.bytes);
+
+      session.messageCount++;
+
+      // Trigger automatic rekey after threshold messages for forward secrecy
+      if (session.needsRekey) {
+        Logger.info(
+          'E2EE session for $peerId reached rekey threshold '
+          '(${session.messageCount} messages) — scheduling re-handshake',
+          'E2EE',
+        );
+        _sessions.remove(peerId);
+        _handshakeTimeoutController.add(peerId);
+      }
 
       return EncryptedPayload(
           nonce: Uint8List.fromList(nonce), ciphertext: ciphertext);
@@ -890,6 +990,10 @@ class EncryptionService {
   /// Decrypt an [EncryptedPayload] received from [peerId].
   ///
   /// Returns null if no session or decryption fails (caller should drop message).
+  ///
+  /// After decryption, PKCS#7 padding is removed to recover the original
+  /// plaintext.  Invalid padding causes the message to be dropped (possible
+  /// tampering or version mismatch).
   ///
   /// SECURITY: failed decryption (wrong key or tampered ciphertext) throws
   /// [SecretBoxAuthenticationError].  We catch it and return null — do NOT
@@ -909,11 +1013,19 @@ class EncryptionService {
     final box = SecretBox(ciphertext, nonce: payload.nonce, mac: tag);
 
     try {
-      final plaintext = await _xchacha.decrypt(
+      final paddedPlaintext = await _xchacha.decrypt(
         box,
         secretKey: SecretKey(session.receiveKey),
       );
-      return Uint8List.fromList(plaintext);
+
+      // Remove PKCS#7 padding added by the sender.
+      final plaintext = TrafficPadding.unpad(Uint8List.fromList(paddedPlaintext));
+      if (plaintext == null) {
+        Logger.warning(
+            'Invalid padding from peer $peerId — message dropped', 'E2EE');
+        return null;
+      }
+      return plaintext;
     } on SecretBoxAuthenticationError {
       // SECURITY: authentication tag mismatch — ciphertext was tampered or
       // wrong session key.  Drop the message silently (no error leakage).
@@ -1082,14 +1194,78 @@ class EncryptionService {
     required Uint8List sendKey,
     required Uint8List receiveKey,
   }) {
-    _sessions[peerId] = NoiseSession(
+    final session = NoiseSession(
       peerId: peerId,
       sendKey: sendKey,
       receiveKey: receiveKey,
       establishedAt: DateTime.now(),
     );
+    _sessions[peerId] = session;
     _cancelPendingHandshake(peerId);
     _sessionEstablishedController.add(peerId);
+
+    // Persist to DB so the session survives app restarts.
+    _persistSession(session);
+  }
+
+  /// Save a session to the database.
+  Future<void> _persistSession(NoiseSession session) async {
+    try {
+      await _database.into(_database.noiseSessions).insertOnConflictUpdate(
+            NoiseSessionsCompanion.insert(
+              peerId: session.peerId,
+              sendKeyHex: _bytesToHex(session.sendKey),
+              receiveKeyHex: _bytesToHex(session.receiveKey),
+              establishedAt: session.establishedAt,
+              messageCount: Value(session.messageCount),
+            ),
+          );
+    } catch (e) {
+      Logger.error('Failed to persist E2EE session', e, null, 'E2EE');
+    }
+  }
+
+  /// Load persisted sessions from the database on startup.
+  Future<void> _loadPersistedSessions() async {
+    try {
+      final rows = await _database.select(_database.noiseSessions).get();
+      final now = DateTime.now();
+      for (final row in rows) {
+        final age = now.difference(row.establishedAt);
+        if (age > _kSessionTimeout) {
+          // Expired — delete from DB.
+          await (_database.delete(_database.noiseSessions)
+                ..where((t) => t.peerId.equals(row.peerId)))
+              .go();
+          continue;
+        }
+        _sessions[row.peerId] = NoiseSession(
+          peerId: row.peerId,
+          sendKey: _hexToBytes(row.sendKeyHex),
+          receiveKey: _hexToBytes(row.receiveKeyHex),
+          establishedAt: row.establishedAt,
+        )..messageCount = row.messageCount;
+      }
+      if (_sessions.isNotEmpty) {
+        Logger.info(
+          'E2EE: Restored ${_sessions.length} persisted session(s)',
+          'E2EE',
+        );
+      }
+    } catch (e) {
+      Logger.error('Failed to load persisted E2EE sessions', e, null, 'E2EE');
+    }
+  }
+
+  /// Delete a persisted session from the database.
+  Future<void> _deletePersistedSession(String peerId) async {
+    try {
+      await (_database.delete(_database.noiseSessions)
+            ..where((t) => t.peerId.equals(peerId)))
+          .go();
+    } catch (e) {
+      Logger.error('Failed to delete persisted session', e, null, 'E2EE');
+    }
   }
 
   void _cancelPendingHandshake(String peerId) {

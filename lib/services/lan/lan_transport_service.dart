@@ -131,6 +131,12 @@ abstract class LanTransportService {
   /// TransportManager subscribes to this and routes to EncryptionService.
   Stream<ble.NoiseHandshakeReceived> get noiseHandshakeStream;
 
+  // ==================== Raw Binary ====================
+
+  /// Send raw binary bytes to a peer (used by gossip sync and other
+  /// binary-only protocols that bypass the message codec).
+  Future<bool> sendRawBytes(String peerId, Uint8List data);
+
   // ==================== Utilities ====================
 
   /// Whether a peer is currently reachable (i.e. has been seen recently).

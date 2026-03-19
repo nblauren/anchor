@@ -50,12 +50,24 @@ class MessageSendService {
   })  : _transportManager = transportManager,
         _imageService = imageService,
         _chatRepository = chatRepository,
-        _retryQueue = retryQueue;
+        _retryQueue = retryQueue {
+    // Forward retry queue delivery updates into our deliveryStream so
+    // ChatBloc gets notified when a queued message is eventually delivered
+    // or permanently abandoned.
+    _retryDeliverySub = retryQueue?.deliveryStream.listen((update) {
+      _emitDelivery(
+        update.messageId,
+        update.delivered ? MessageStatus.sent : MessageStatus.failed,
+      );
+      _conversationsChangedController.add(null);
+    });
+  }
 
   final TransportManager _transportManager;
   final ImageService _imageService;
   final ChatRepository _chatRepository;
   final TransportRetryQueue? _retryQueue;
+  StreamSubscription<RetryDeliveryUpdate>? _retryDeliverySub;
 
   final _deliveryController = StreamController<SendDeliveryUpdate>.broadcast();
   final _pendingPhotoController = StreamController<PendingPhoto>.broadcast();
@@ -140,7 +152,9 @@ class MessageSendService {
           type: PendingSendType.text,
           payload: payload,
         ));
-        // Leave status as pending — retry queue will update on success/failure.
+        // Show clock icon — retry queue will update to sent/failed later.
+        _emitDelivery(message.id, MessageStatus.queued);
+        _conversationsChangedController.add(null);
       } else {
         _emitDelivery(message.id, MessageStatus.failed);
         _conversationsChangedController.add(null);
@@ -278,6 +292,7 @@ class MessageSendService {
   }
 
   void dispose() {
+    _retryDeliverySub?.cancel();
     _deliveryController.close();
     _pendingPhotoController.close();
     _conversationsChangedController.close();

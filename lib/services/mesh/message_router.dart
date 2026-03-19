@@ -7,6 +7,7 @@ import '../../core/utils/logger.dart';
 import '../encryption/encryption.dart';
 import '../transport/transport_enums.dart';
 import 'bloom_filter.dart';
+import 'gossip_sync_service.dart';
 import 'mesh_packet.dart';
 import 'peer_registry.dart';
 
@@ -108,9 +109,11 @@ class MessageRouter {
   MessageRouter({
     required PeerRegistry peerRegistry,
     EncryptionService? encryptionService,
+    GossipSyncService? gossipSyncService,
     RouterConfig config = const RouterConfig(),
   })  : _peers = peerRegistry,
         _encryption = encryptionService,
+        _gossipSync = gossipSyncService,
         _config = config,
         _bloomFilter = RotatingBloomFilter(
           expectedInsertions: config.dedupCapacity,
@@ -119,6 +122,7 @@ class MessageRouter {
 
   final PeerRegistry _peers;
   final EncryptionService? _encryption;
+  final GossipSyncService? _gossipSync;
   final RouterConfig _config;
   final RotatingBloomFilter _bloomFilter;
   final _random = Random();
@@ -383,6 +387,7 @@ class MessageRouter {
     if (messageId.isEmpty) return;
     _bloomFilter.add(messageId);
     _recentIds[messageId] = DateTime.now();
+    _gossipSync?.addMessageId(messageId);
 
     // Evict oldest entries from LRU if over capacity
     if (_recentIds.length > _maxRecentIds) {
@@ -411,13 +416,15 @@ class MessageRouter {
       case PacketType.peerAnnounce:
       case PacketType.neighborList:
         return true;
-      // Never relay heavy data or handshakes
+      // Never relay heavy data, handshakes, or gossip (peer-to-peer only)
       case PacketType.handshake:
       case PacketType.photoPreview:
       case PacketType.photoRequest:
       case PacketType.photoData:
       case PacketType.wifiTransferReady:
       case PacketType.ack:
+      case PacketType.gossipSync:
+      case PacketType.gossipRequest:
         return false;
     }
   }

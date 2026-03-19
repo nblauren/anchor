@@ -147,7 +147,7 @@ lib/
     └── home/                        # Bottom navigation shell
 ```
 
-> **Note**: `flutter_blue_plus_ble_service.dart` is named for historical reasons but actually uses the `bluetooth_low_energy` package, which provides both Central and Peripheral managers in a single API.
+> **Note**: The BLE entry point is `ble_facade.dart`, which delegates to focused sub-modules (`connection/`, `discovery/`, `gatt/`, `mesh/`, `transfer/`). All UUIDs are centralized in `BleUuids` (`ble_config.dart`).
 
 ---
 
@@ -163,14 +163,17 @@ Both roles run simultaneously on the same device, enabling true peer-to-peer dis
 
 ### Service and Characteristic UUIDs
 
+All UUIDs are centralized in `BleUuids` (`lib/services/ble/ble_config.dart`). These are proper 128-bit random UUIDs (not the BLE SIG `0000xxxx` range) to avoid collisions with third-party devices.
+
 ```
-Main Service:           0000fff0-0000-1000-8000-00805f9b34fb
+Service:   b4b605d3-7718-42a5-88ec-6fbe8c6c3cb9
 
 Characteristics:
-  fff1  Profile metadata    READ, NOTIFY   name, age, position ID, interest IDs, userId, pk (X25519 public key hex)
-  fff2  Primary thumbnail   READ, NOTIFY   JPEG bytes, 10–30 KB
-  fff3  Messaging           WRITE, NOTIFY  JSON-encoded messages (text, photo events, anchor drop)
-  fff4  Full photo set      READ           On-demand; serves all profile thumbnails concatenated
+  Profile (fff1):   02c57431-…-37a1efa02bc6   READ, NOTIFY   name, age, positionId, interestIds, userId, pk (X25519), spk (Ed25519)
+  Thumbnail (fff2): e353cf0a-…-8a0fa1bfb1f1   READ, NOTIFY   JPEG bytes, 10–30 KB
+  Messaging (fff3): 6c4c3e0a-…-2d19ee02d398   WRITE, NOTIFY  Binary MeshPacket or JSON messages
+  Photos (fff4):    79118c43-…-d28a0a9dbc72   READ, NOTIFY   On-demand full photo set
+  Reverse (fff5):   9386c87b-…-d0e6a0fffd03   WRITE, NOTIFY  Reverse-path writes (peer → server)
 ```
 
 ### Discovery Protocol
@@ -178,14 +181,15 @@ Characteristics:
 ```
 Device A (Central)                         Device B (Peripheral)
       |                                           |
-      |-- scan for fff0 service UUID ------------>|
-      |<-- advertisement (fff0 + local name) -----|
+      |-- scan (unfiltered; match by svc UUID  -->|
+      |     or "A<version>" local name)           |
+      |<-- advertisement (svc UUID + "A3") -------|
       |                                           |
       |-- GATT connect -------------------------->|
-      |-- read fff1 (profile metadata) ---------->|
+      |-- read profile char (metadata) ---------->|
       |<-- { userId, name, age, positionId,       |
-      |       interestIds, hopCount, pk } --------|
-      |-- read fff2 (primary thumbnail) --------->|
+      |       interestIds, hopCount, pk, spk } ---|
+      |-- read thumbnail char ------------------>|
       |<-- JPEG bytes (≤30 KB) ------------------|
       |                                           |
       |  emit DiscoveredPeer to stream            |
@@ -202,11 +206,11 @@ Device A (Central)                         Device B (Peripheral)
 Sender (Central)                           Receiver (Peripheral / GATT server)
       |                                           |
       |-- connect (if not already) ------------->|
-      |-- subscribe to fff3 NOTIFY ------------->|
-      |-- write to fff3 (JSON payload) --------->|
+      |-- subscribe to messaging char NOTIFY --->|
+      |-- write to messaging char (payload) ---->|
       |                                           |
-      |   { messageId, senderId, timestamp,       |
-      |     type, content, ttl? }                 |
+      |   Binary MeshPacket (signed, encrypted)   |
+      |   or JSON (legacy / handshake)            |
       |                                           |
       |                         messageReceived stream emits
       |                         ChatBloc saves to DB, updates UI
@@ -223,11 +227,11 @@ Message types (`MessageType` enum): `text`, `photo`, `typing`, `read`, `photoPre
 Photo sharing uses a consent-first flow with Wi-Fi Direct high-speed transfer:
 
 ```
-Step 1 — Preview notification (Sender → Receiver via BLE fff3)
+Step 1 — Preview notification (Sender → Receiver via BLE messaging char)
   { type: "photoPreview", messageId, photoId, originalSize }
   Note: No thumbnail data is sent — the receiver sees "Photo — Tap to download"
 
-Step 2 — Consent request (Receiver → Sender via BLE fff3)
+Step 2 — Consent request (Receiver → Sender via BLE messaging char)
   { type: "photoRequest", photoId, accepted: true }
 
 Step 3 — Full photo transfer (Wi-Fi Direct preferred, BLE fallback)
@@ -235,7 +239,7 @@ Step 3 — Full photo transfer (Wi-Fi Direct preferred, BLE fallback)
   b. Sender sends wifiTransferReady BLE signal with sender's Nearby ID
   c. Receiver starts browsing → discovers → invites → connects
   d. Sender streams base64-encoded chunks over Wi-Fi Direct text channel
-  e. If Wi-Fi Direct times out (15 s), sender falls back to BLE chunking via fff3
+  e. If Wi-Fi Direct times out (15 s), sender falls back to BLE chunking via messaging char
 
 Step 4 — Transfer complete
   Receiver saves photo, upgrades preview bubble to full photo in UI
@@ -272,6 +276,20 @@ Each relay node:
 - Photos are **never** relayed; only text-type messages are eligible for mesh relay
 - Relay is toggled via `BleConnectionBloc` → `SetMeshRelay` event
 - In high-density environments, relay probability is throttled (`highDensityRelayProbability = 0.65`)
+
+### Gossip Sync (GCS)
+
+Anchor uses **Golomb-Coded Sets** (GCS) for probabilistic gossip-based message synchronization — inspired by Bitchat's approach:
+
+1. **Periodically** (every 30s), each peer encodes its recent message IDs into a GCS and broadcasts to connected neighbors.
+2. **Receiver** decodes the GCS, computes the set difference against local message IDs.
+3. **Missing messages** are requested from the sender.
+
+GCS is ~1.5x more compact than Bloom filters at the same false-positive rate and is decodable (unlike Bloom filters), enabling set difference computation.
+
+Key files:
+- `lib/services/mesh/golomb_coded_set.dart` — GCS encode/decode/set-difference
+- `lib/services/mesh/gossip_sync_service.dart` — Periodic gossip sync orchestration
 
 ### Connection Management
 
@@ -499,11 +517,12 @@ All writes go through repositories; Blocs never access the database directly.
 
 ### Adaptive Scanning
 
-| Mode | Scan Duration | Pause | Notes |
-|---|---|---|---|
-| Normal | 5 s | 15 s | Default |
-| Battery Saver | 2 s | 30 s | User-toggled in Settings |
-| High Density (auto) | 5 s | 12 s | Auto-engaged when ≥15 peers visible; relay probability reduced to 0.65 |
+| Mode | Scan Duration | Pause | RSSI Floor | Notes |
+|---|---|---|---|---|
+| Zero Peers | 5 s | 0 s (continuous) | -90 dBm | Scans non-stop until a peer is found |
+| Normal | 5 s | 15 s | -90 dBm | Default |
+| Battery Saver | 2 s | 30 s | -90 dBm | User-toggled in Settings |
+| High Density (auto) | 2 s | 12 s | -78 dBm | Auto-engaged when ≥15 peers visible; relay probability reduced to 0.65; tighter RSSI floor drops weak/distant peers |
 
 ### Connection Pooling
 
@@ -513,7 +532,7 @@ All writes go through repositories; Blocs never access the database directly.
 
 ### Photo Thumbnail Budget
 
-Primary thumbnails are capped at 30 KB and compressed by `ImageService` before being written to the `fff2` characteristic. This limits both broadcast size and battery cost of serving thumbnails to scanning peers.
+Primary thumbnails are capped at 30 KB and compressed by `ImageService` before being written to the thumbnail characteristic. This limits both broadcast size and battery cost of serving thumbnails to scanning peers.
 
 ---
 
@@ -527,9 +546,17 @@ Primary thumbnails are capped at 30 KB and compressed by `ImageService` before b
 
 ### BLE Broadcast Minimisation
 
+- Advertisement contains only "A<version>" + service UUID — no personal identity data
 - Only integer IDs (not free text) for position and interests — prevents arbitrary text injection into the mesh and keeps payload size small
 - Primary photo screened by on-device NSFW classifier before broadcast is permitted
 - No GPS coordinates broadcast or stored; BLE RSSI gives approximate proximity only
+- Periodic re-announce (90s) restarts advertising to defeat platform caching
+
+### Anti-Enumeration
+
+- Profile char GATT reads are rate-limited to 20 unique centrals per 60-second window
+- Known centrals (already read) are always allowed through
+- Exceeding the limit returns empty data — prevents passive enumeration of Anchor users
 
 ### Message Security
 
@@ -539,6 +566,7 @@ All chat messages are **end-to-end encrypted** using the Noise_XK protocol. See 
 
 - Block any peer locally at any time
 - Blocked peers: cannot discover you, cannot message you, are hidden from your grid
+- Transport-layer filtering: block list is pushed to BLE layer on block/unblock and at discovery startup; messages from blocked peers are rejected before consuming queue space
 - Visibility can be toggled (stop broadcasting)
 
 ---
@@ -594,7 +622,7 @@ void setupDependencies(BleConfig config) {
   getIt.registerLazySingleton<NsfwDetectionService>(() => NsfwDetectionService());
 
   getIt.registerLazySingleton<BleServiceInterface>(() =>
-    config.useMockService ? MockBleService() : FlutterBluePlusBleService(config: config));
+    config.useMockService ? MockBleService() : BleFacade(config: config));
 
   getIt.registerFactory<ProfileRepository>(
       () => ProfileRepository(getIt<DatabaseService>().database));
@@ -649,6 +677,20 @@ void setupDependencies(BleConfig config) {
 
 ## End-to-End Encryption
 
+### Traffic Padding
+
+All encrypted payloads are padded to fixed block sizes before encryption to resist traffic analysis.  Without padding, an eavesdropper can fingerprint message types by ciphertext length (a 3-char text message vs. a photo preview vs. a Noise handshake are all distinguishable by size).
+
+**Format**: `[2-byte BE original length][original data][zero fill to block boundary]`
+
+**Block sizes**: 64, 128, 256, 512, 1024, 2048, 4096 bytes.  Payloads larger than 4094 bytes are padded to the next 4096-byte boundary.
+
+The 2-byte length prefix supports payloads up to 65535 bytes.  Zero fill is deterministic and does not leak information.  Padding is applied in `EncryptionService.encrypt()` and removed in `EncryptionService.decrypt()`.
+
+| File | Purpose |
+|---|---|
+| `lib/services/encryption/traffic_padding.dart` | Pad/unpad logic with length-prefix format |
+
 ### Protocol
 
 Anchor uses **Noise_XK** — a 3-message handshake that gives mutual authentication (receiver's static key is known ahead of time from BLE/LAN profile exchange) plus forward secrecy via ephemeral X25519 key pairs.
@@ -675,11 +717,12 @@ Initiator (I)                   Responder (R)
 | `lib/services/encryption/encryption_service.dart` | Key gen/storage, session management, handshake lifecycle |
 | `lib/services/encryption/noise_handshake.dart` | Pure Noise_XK state machine (`NoiseHandshakeProcessor`) |
 | `lib/services/encryption/encryption_models.dart` | `NoiseSession`, `EncryptedPayload`, `HandshakeResult`, `HandshakeMessageOut` |
+| `lib/services/encryption/rate_limiter.dart` | Handshake rate limiting: 10/min/peer, 30/min global (prevents DoS) |
 | `lib/services/transport/transport_manager.dart` | Routes inbound and outbound handshake messages across BLE and LAN transports |
 
 ### Key Exchange
 
-**BLE**: The device's X25519 public key is serialized as `pk` in the `fff1` GATT characteristic (JSON field alongside `userId`, `name`, etc.). It is read during every GATT profile read and passed through `DiscoveredPeer.publicKeyHex`.
+**BLE**: The device's X25519 public key (`pk`) and Ed25519 signing key (`spk`) are serialized in the profile GATT characteristic (JSON fields alongside `userId`, `name`, etc.). They are read during every GATT profile read and passed through `DiscoveredPeer.publicKeyHex` / `signingPublicKeyHex`.
 
 **LAN**: The public key is included as `pk` in the `anchor_hello` UDP beacon. `TransportManager.broadcastProfile()` injects the key from `EncryptionService` into `BroadcastPayload` before forwarding to LAN and Wi-Fi Aware transports.
 
@@ -718,7 +761,7 @@ outboundHandshakeStream  ──────► _routeOutboundHandshake()
 
 ### Wire Formats
 
-**Handshake message** (BLE fff3 / LAN TCP frame):
+**Handshake message** (BLE messaging char / LAN TCP frame):
 ```json
 {"type": "noise_hs", "step": 1, "payload": "<base64>", "sender_id": "..."}
 ```
@@ -751,6 +794,8 @@ Messages without `v` or with `v=0` are treated as plaintext (backward compatibil
 | Forward secrecy | Ephemeral DH per session; session compromise doesn't reveal past messages |
 | Authentication | Poly1305 AEAD tag on every message; tampered messages dropped silently |
 | Nonce | 24-byte random (XChaCha20); collision probability negligible |
+| Rate limiting | 10 handshakes/min/peer, 30/min global; prevents CPU exhaustion via DH flooding |
+| Traffic padding | Plaintext padded to fixed block sizes (64–4096 bytes) before encryption; resists ciphertext size fingerprinting |
 
 ---
 

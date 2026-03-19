@@ -1,5 +1,6 @@
 import 'package:drift/drift.dart';
 
+import '../../core/utils/logger.dart';
 import '../local_database/database.dart';
 
 /// Repository for managing discovered peers and blocking logic.
@@ -45,6 +46,13 @@ class PeerRepository {
   /// Upsert a discovered peer (insert or update if exists).
   ///
   /// [peerId] is the peer's stable app-level userId (canonical UUID).
+  /// No public-key dedup — alias table prevents duplicate rows upstream.
+  /// Upsert a discovered peer (insert or update if exists).
+  ///
+  /// [peerId] is the peer's stable app-level userId (canonical UUID).
+  /// [transportId] / [transportType] are the original transport-level ID and
+  /// type (e.g. BLE UUID / "ble"). When provided, a PeerAliases row is
+  /// persisted after the peer row is guaranteed to exist, satisfying the FK.
   Future<DiscoveredPeerEntry> upsertPeer({
     required String peerId,
     required String name,
@@ -54,11 +62,16 @@ class PeerRepository {
     String? interests,
     Uint8List? thumbnailData,
     int? rssi,
+    String? publicKeyHex,
+    String? transportId,
+    String? transportType,
   }) async {
     final now = DateTime.now();
 
-    // Check if peer exists
+    // Check if peer exists (by peerId)
     final existing = await getPeerById(peerId);
+
+    DiscoveredPeerEntry result;
 
     if (existing != null) {
       // Update existing peer
@@ -74,13 +87,16 @@ class PeerRepository {
             thumbnailData != null ? Value(thumbnailData) : const Value.absent(),
         lastSeenAt: Value(now),
         rssi: rssi != null ? Value(rssi) : const Value.absent(),
+        publicKeyHex: publicKeyHex != null
+            ? Value(publicKeyHex)
+            : const Value.absent(),
       );
 
       await (_db.update(_db.discoveredPeers)
             ..where((t) => t.peerId.equals(peerId)))
           .write(companion);
 
-      return DiscoveredPeerEntry(
+      result = DiscoveredPeerEntry(
         peerId: peerId,
         name: name,
         age: age ?? existing.age,
@@ -91,6 +107,8 @@ class PeerRepository {
         lastSeenAt: now,
         rssi: rssi ?? existing.rssi,
         isBlocked: existing.isBlocked,
+        publicKeyHex: publicKeyHex ?? existing.publicKeyHex,
+        ed25519PublicKeyHex: existing.ed25519PublicKeyHex,
       );
     } else {
       // Insert new peer
@@ -105,11 +123,12 @@ class PeerRepository {
         lastSeenAt: now,
         rssi: Value(rssi),
         isBlocked: const Value(false),
+        publicKeyHex: Value(publicKeyHex),
       );
 
       await _db.into(_db.discoveredPeers).insertOnConflictUpdate(entry);
 
-      return DiscoveredPeerEntry(
+      result = DiscoveredPeerEntry(
         peerId: peerId,
         name: name,
         age: age,
@@ -120,8 +139,36 @@ class PeerRepository {
         lastSeenAt: now,
         rssi: rssi,
         isBlocked: false,
+        publicKeyHex: publicKeyHex,
       );
     }
+
+    // ── Persist transport alias (peer row guaranteed to exist) ──
+    if (transportId != null && transportType != null) {
+      await registerAlias(transportId, peerId, transportType);
+    }
+
+    // ── Diagnostic: warn if another peerId shares the same public key ──
+    // This should never happen with alias-based resolution, but if it does
+    // it means PeerRegistry returned different canonical IDs for the same
+    // physical person. Log loudly so it's visible in debug output.
+    if (publicKeyHex != null && publicKeyHex.isNotEmpty) {
+      final dupes = await (_db.select(_db.discoveredPeers)
+            ..where((t) =>
+                t.publicKeyHex.equals(publicKeyHex) &
+                t.peerId.isNotValue(peerId)))
+          .get();
+      if (dupes.isNotEmpty) {
+        Logger.warning(
+          'PeerRepository: duplicate public key detected! '
+          'peerId=$peerId shares key ${publicKeyHex.substring(0, 8)}… with '
+          '${dupes.map((d) => d.peerId).join(', ')} — alias resolution may have a bug',
+          'DB',
+        );
+      }
+    }
+
+    return result;
   }
 
   /// Update peer's last seen time and RSSI
@@ -134,7 +181,7 @@ class PeerRepository {
     ));
   }
 
-  /// Delete a peer and their conversations/messages
+  /// Delete a peer and their conversations/messages/aliases
   Future<void> deletePeer(String peerId) async {
     await _db.transaction(() async {
       // Delete messages in conversations with this peer
@@ -156,6 +203,11 @@ class PeerRepository {
       // Delete from blocked users if present
       await (_db.delete(_db.blockedUsers)
             ..where((t) => t.peerId.equals(peerId)))
+          .go();
+
+      // Delete aliases pointing to this peer
+      await (_db.delete(_db.peerAliases)
+            ..where((t) => t.canonicalPeerId.equals(peerId)))
           .go();
 
       // Delete peer
@@ -299,5 +351,45 @@ class PeerRepository {
           ..where((t) => t.name.like('%$query%') & t.isBlocked.equals(false))
           ..orderBy([(t) => OrderingTerm.desc(t.lastSeenAt)]))
         .get();
+  }
+
+  // ==================== Peer Aliases ====================
+
+  /// Look up the canonical peerId for a transport-level ID.
+  /// Returns null if no alias exists.
+  Future<String?> resolveAlias(String transportId) async {
+    final row = await (_db.select(_db.peerAliases)
+          ..where((t) => t.transportId.equals(transportId)))
+        .getSingleOrNull();
+    return row?.canonicalPeerId;
+  }
+
+  /// Register a transport ID → canonical peerId mapping.
+  /// Idempotent (insertOrIgnore).
+  Future<void> registerAlias(
+    String transportId,
+    String canonicalPeerId,
+    String transportType,
+  ) async {
+    await _db.into(_db.peerAliases).insertOnConflictUpdate(
+          PeerAliasesCompanion.insert(
+            transportId: transportId,
+            canonicalPeerId: canonicalPeerId,
+            transportType: transportType,
+            createdAt: DateTime.now(),
+          ),
+        );
+  }
+
+  /// Get all persisted aliases (for PeerRegistry hydration at startup).
+  Future<List<PeerAliasEntry>> getAllAliases() async {
+    return await _db.select(_db.peerAliases).get();
+  }
+
+  /// Delete all aliases pointing to a given canonical peerId.
+  Future<void> deleteAliasesForPeer(String canonicalPeerId) async {
+    await (_db.delete(_db.peerAliases)
+          ..where((t) => t.canonicalPeerId.equals(canonicalPeerId)))
+        .go();
   }
 }

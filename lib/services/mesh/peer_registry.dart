@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import '../../core/utils/logger.dart';
+import '../../data/local_database/database.dart';
 import '../transport/transport_enums.dart';
 
 /// Single source of truth for all peer identity resolution.
@@ -304,6 +305,37 @@ class PeerRegistry {
   void clear() {
     _byUserId.clear();
     _toUserId.clear();
+  }
+
+  /// Populate in-memory maps from persisted [PeerAliasEntry] rows.
+  ///
+  /// Called once at startup so that transport ID → userId resolution works
+  /// immediately, before any BLE/LAN discovery events arrive.
+  void hydrateFromAliases(List<PeerAliasEntry> aliases) {
+    for (final alias in aliases) {
+      final transport = _parseTransportType(alias.transportType);
+      if (transport == null) continue;
+
+      registerTransport(
+        transportId: alias.transportId,
+        transport: transport,
+        userId: alias.canonicalPeerId,
+      );
+    }
+    if (aliases.isNotEmpty) {
+      Logger.info(
+        'PeerRegistry: Hydrated ${aliases.length} aliases → '
+        '${_byUserId.length} peers',
+        'Mesh',
+      );
+    }
+  }
+
+  static TransportType? _parseTransportType(String name) {
+    for (final t in TransportType.values) {
+      if (t.name == name) return t;
+    }
+    return null;
   }
 
   /// Remove a specific peer by userId.

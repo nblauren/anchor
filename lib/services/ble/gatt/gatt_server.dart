@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
@@ -6,6 +7,7 @@ import 'dart:typed_data';
 import 'package:bluetooth_low_energy/bluetooth_low_energy.dart';
 
 import '../../../core/utils/logger.dart';
+import '../ble_config.dart';
 import '../ble_models.dart';
 
 /// Manages the BLE GATT server (peripheral side): service setup, read
@@ -23,19 +25,13 @@ class GattServer {
 
   final PeripheralManager _peripheral;
 
-  // UUIDs
-  static final _serviceUuid =
-      UUID.fromString('0000fff0-0000-1000-8000-00805f9b34fb');
-  static final _profileCharUuid =
-      UUID.fromString('0000fff1-0000-1000-8000-00805f9b34fb');
-  static final _thumbnailCharUuid =
-      UUID.fromString('0000fff2-0000-1000-8000-00805f9b34fb');
-  static final _messagingCharUuid =
-      UUID.fromString('0000fff3-0000-1000-8000-00805f9b34fb');
-  static final _fullPhotosCharUuid =
-      UUID.fromString('0000fff4-0000-1000-8000-00805f9b34fb');
-  static final _reversePathCharUuid =
-      UUID.fromString('0000fff5-0000-1000-8000-00805f9b34fb');
+  // UUIDs — centralized in BleUuids
+  static final _serviceUuid = BleUuids.service;
+  static final _profileCharUuid = BleUuids.profileChar;
+  static final _thumbnailCharUuid = BleUuids.thumbnailChar;
+  static final _messagingCharUuid = BleUuids.messagingChar;
+  static final _fullPhotosCharUuid = BleUuids.fullPhotosChar;
+  static final _reversePathCharUuid = BleUuids.reversePathChar;
 
   // GATT characteristics (server side)
   GATTCharacteristic? _profileChar;
@@ -84,6 +80,21 @@ class GattServer {
   StreamSubscription? _charReadSubscription;
   StreamSubscription? _charWriteSubscription;
   StreamSubscription? _charNotifyStateSubscription;
+
+  /// Periodic timer that restarts advertising to prevent stale BLE caches.
+  /// Both iOS and Android cache advertisement data aggressively — restarting
+  /// every 90 seconds ensures fresh discovery in long sessions.
+  Timer? _reAnnounceTimer;
+
+  /// Re-announce interval. 90 seconds balances freshness vs. battery cost.
+  static const _reAnnounceInterval = Duration(seconds: 90);
+
+  // ── Anti-enumeration rate limiting ─────────────────────────────────────
+  /// Sliding window of unique central UUIDs that read our profile (fff1).
+  /// If >20 unique centrals read within 60s, new centrals get empty data.
+  final Queue<_ProfileReadRecord> _profileReadWindow = Queue();
+  static const _maxProfileReadsPerMinute = 20;
+  static const _profileReadWindowDuration = Duration(seconds: 60);
 
   // ==================== Callbacks ====================
 
@@ -346,6 +357,8 @@ class GattServer {
 
   /// Stop advertising.
   Future<void> stopAdvertising() async {
+    _reAnnounceTimer?.cancel();
+    _reAnnounceTimer = null;
     Logger.info('GattServer: Stopped broadcasting', 'BLE');
     try {
       await _peripheral.stopAdvertising();
@@ -372,6 +385,8 @@ class GattServer {
 
   /// Dispose all subscriptions and timers.
   Future<void> dispose() async {
+    _reAnnounceTimer?.cancel();
+    _reAnnounceTimer = null;
     _peripheralReadySub?.cancel();
     _peripheralReadySub = null;
     await _stateSubscription?.cancel();
@@ -514,11 +529,68 @@ class GattServer {
       }
 
       _isBroadcasting = true;
+      _scheduleReAnnounce(payload);
       Logger.info('GattServer: Advertising started successfully', 'BLE');
     } catch (e) {
       Logger.error('GattServer: Advertising failed', e, null, 'BLE');
       _isBroadcasting = false;
+      _reAnnounceTimer?.cancel();
+
+      // Retry once after a short delay — Android occasionally rejects the
+      // first advertising attempt after GATT server setup completes, but
+      // succeeds on a second try once the adapter stabilises.
+      Future.delayed(const Duration(seconds: 2), () async {
+        if (_isBroadcasting || !_isReady) return;
+        Logger.info(
+          'GattServer: Retrying advertising after initial failure',
+          'BLE',
+        );
+        try {
+          await _peripheral.startAdvertising(Advertisement(
+            serviceUUIDs: [_serviceUuid],
+          ));
+          _isBroadcasting = true;
+          _scheduleReAnnounce(payload);
+          Logger.info(
+            'GattServer: Advertising started successfully (retry)',
+            'BLE',
+          );
+        } catch (retryErr) {
+          Logger.error(
+            'GattServer: Advertising retry also failed — device will not be '
+            'discoverable until next broadcast update',
+            retryErr,
+            null,
+            'BLE',
+          );
+        }
+      });
     }
+  }
+
+  /// Schedule periodic re-advertising to defeat platform advertisement caching.
+  void _scheduleReAnnounce(BroadcastPayload payload) {
+    _reAnnounceTimer?.cancel();
+    _reAnnounceTimer = Timer.periodic(_reAnnounceInterval, (_) async {
+      if (!_isBroadcasting || !_isReady) return;
+      Logger.debug('GattServer: Re-announcing advertisement for freshness', 'BLE');
+      try {
+        await _peripheral.stopAdvertising();
+        final compactName = _encodeLocalName(payload);
+        try {
+          await _peripheral.startAdvertising(Advertisement(
+            name: compactName,
+            serviceUUIDs: [_serviceUuid],
+          ));
+        } catch (_) {
+          await _peripheral.startAdvertising(Advertisement(
+            serviceUUIDs: [_serviceUuid],
+          ));
+        }
+      } catch (e) {
+        Logger.warning('GattServer: Re-announce failed: $e', 'BLE');
+      }
+    });
   }
 
   /// Encode local name: "A<profileVersion>" (e.g. "A3", "A17").
@@ -558,6 +630,8 @@ class GattServer {
       },
       // E2EE: include our X25519 public key so the peer can initiate Noise_XK.
       if (payload.publicKeyHex != null) 'pk': payload.publicKeyHex,
+      // Ed25519 signing public key for mesh packet signature verification.
+      if (payload.signingPublicKeyHex != null) 'spk': payload.signingPublicKeyHex,
       // Profile version for change detection — scanners skip re-reads when unchanged.
       'pv': _profileVersion,
     };
@@ -576,6 +650,22 @@ class GattServer {
     try {
       final charUuid = args.characteristic.uuid;
       final offset = args.request.offset;
+
+      // Anti-enumeration: rate-limit profile reads from unique centrals
+      if (charUuid == _profileCharUuid && offset == 0) {
+        final centralId = args.central.uuid.toString();
+        if (_isProfileReadRateLimited(centralId)) {
+          Logger.warning(
+            'GattServer: Rate-limited profile read from $centralId',
+            'BLE',
+          );
+          await _peripheral.respondReadRequestWithValue(
+            args.request,
+            value: Uint8List(0),
+          );
+          return;
+        }
+      }
 
       final Uint8List sourceData;
       final String charName;
@@ -865,4 +955,41 @@ class GattServer {
       'BLE',
     );
   }
+
+  /// Check if a profile read should be rate-limited.
+  /// Returns true if too many unique centrals have read our profile recently.
+  bool _isProfileReadRateLimited(String centralId) {
+    final now = DateTime.now();
+    final cutoff = now.subtract(_profileReadWindowDuration);
+
+    // Purge expired entries
+    while (_profileReadWindow.isNotEmpty &&
+        _profileReadWindow.first.timestamp.isBefore(cutoff)) {
+      _profileReadWindow.removeFirst();
+    }
+
+    // Allow re-reads from known centrals (they already have our profile)
+    final isKnown = _profileReadWindow.any((r) => r.centralId == centralId);
+    if (isKnown) return false;
+
+    // Check if we've hit the unique-central limit
+    final uniqueCentrals = <String>{};
+    for (final r in _profileReadWindow) {
+      uniqueCentrals.add(r.centralId);
+    }
+    if (uniqueCentrals.length >= _maxProfileReadsPerMinute) {
+      return true;
+    }
+
+    // Record this read
+    _profileReadWindow.add(_ProfileReadRecord(centralId, now));
+    return false;
+  }
+}
+
+/// Record of a profile (fff1) read for anti-enumeration tracking.
+class _ProfileReadRecord {
+  _ProfileReadRecord(this.centralId, this.timestamp);
+  final String centralId;
+  final DateTime timestamp;
 }

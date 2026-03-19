@@ -166,6 +166,8 @@ class DiscoveredPeer extends Equatable {
     this.fullPhotoCount = 0,
     this.publicKeyHex,
     this.signingPublicKeyHex,
+    this.transportId,
+    this.transportType,
   });
 
   final String peerId;
@@ -198,6 +200,11 @@ class DiscoveredPeer extends Equatable {
   /// Peer's Ed25519 signing public key (64-char hex) for mesh announcement verification.
   /// Null if the peer's client does not support signed announcements.
   final String? signingPublicKeyHex;
+  /// Original transport-level ID before canonical resolution (e.g. BLE UUID).
+  /// Null for relayed peers or when the transport ID equals the canonical ID.
+  final String? transportId;
+  /// Transport type that discovered this peer ("ble", "lan", "wifiAware").
+  final String? transportType;
 
   /// Estimated distance based on RSSI
   String? get distanceEstimate {
@@ -234,6 +241,8 @@ class DiscoveredPeer extends Equatable {
     int? fullPhotoCount,
     String? publicKeyHex,
     String? signingPublicKeyHex,
+    String? transportId,
+    String? transportType,
   }) {
     return DiscoveredPeer(
       peerId: peerId ?? this.peerId,
@@ -252,6 +261,8 @@ class DiscoveredPeer extends Equatable {
       fullPhotoCount: fullPhotoCount ?? this.fullPhotoCount,
       publicKeyHex: publicKeyHex ?? this.publicKeyHex,
       signingPublicKeyHex: signingPublicKeyHex ?? this.signingPublicKeyHex,
+      transportId: transportId ?? this.transportId,
+      transportType: transportType ?? this.transportType,
     );
   }
 
@@ -260,6 +271,7 @@ class DiscoveredPeer extends Equatable {
         peerId, name, userId, age, bio, position, interests,
         thumbnailBytes, photoThumbnails,
         rssi, timestamp, isRelayed, hopCount, fullPhotoCount, publicKeyHex, signingPublicKeyHex,
+        transportId, transportType,
       ];
 }
 

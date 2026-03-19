@@ -7,7 +7,9 @@ import 'dart:typed_data';
 import 'package:uuid/uuid.dart';
 
 import '../../core/utils/logger.dart';
+import '../ble/binary_message_codec.dart';
 import '../ble/ble_models.dart' as ble;
+import '../mesh/mesh_packet.dart';
 import 'lan_transport_service.dart';
 
 // ==================== Internal Data Structures ====================
@@ -354,19 +356,14 @@ class LanTransportServiceImpl implements LanTransportService {
     final socket = await _getOrConnectSocket(peerId);
     if (socket == null) return false;
 
-    final envelope = {
-      'v': 1,
-      'type': 'chat_message',
-      'fromPeerId': _lanPeerId,
-      'fromUserId': _ownUserId,
-      'payload': {
-        'messageId': payload.messageId,
-        'messageType': payload.type.name,
-        'content': payload.content,
-        if (payload.replyToId != null) 'replyToId': payload.replyToId,
-      },
-    };
-    return _sendFrame(socket, envelope);
+    final binaryData = BinaryMessageCodec.encodeMessage(
+      senderId: _ownUserId ?? '',
+      messageId: payload.messageId,
+      messageType: payload.type,
+      content: payload.content,
+      replyToId: payload.replyToId,
+    );
+    return _sendBinaryFrame(socket, binaryData);
   }
 
   @override
@@ -512,16 +509,10 @@ class LanTransportServiceImpl implements LanTransportService {
     final socket = await _getOrConnectSocket(peerId);
     if (socket == null) return false;
 
-    final envelope = {
-      'v': 1,
-      'type': 'drop_anchor',
-      'fromPeerId': _lanPeerId,
-      'fromUserId': _ownUserId,
-      'payload': {
-        'timestamp': DateTime.now().toIso8601String(),
-      },
-    };
-    return _sendFrame(socket, envelope);
+    final binaryData = BinaryMessageCodec.encodeAnchorDrop(
+      senderId: _ownUserId ?? '',
+    );
+    return _sendBinaryFrame(socket, binaryData);
   }
 
   @override
@@ -540,18 +531,13 @@ class LanTransportServiceImpl implements LanTransportService {
     final socket = await _getOrConnectSocket(peerId);
     if (socket == null) return false;
 
-    final envelope = {
-      'v': 1,
-      'type': 'reaction',
-      'fromPeerId': _lanPeerId,
-      'fromUserId': _ownUserId,
-      'payload': {
-        'messageId': messageId,
-        'emoji': emoji,
-        'action': action,
-      },
-    };
-    return _sendFrame(socket, envelope);
+    final binaryData = BinaryMessageCodec.encodeReaction(
+      senderId: _ownUserId ?? '',
+      targetMessageId: messageId,
+      emoji: emoji,
+      action: action,
+    );
+    return _sendBinaryFrame(socket, binaryData);
   }
 
   @override
@@ -803,6 +789,13 @@ class LanTransportServiceImpl implements LanTransportService {
 
   void _handleFrame(Uint8List frame, String fromIp, Socket replySocket) {
     try {
+      // Binary MeshPacket detection: version byte 0x01
+      if (frame.isNotEmpty && BinaryMessageCodec.isBinary(frame) && frame[0] == 0x01) {
+        _handleBinaryFrame(frame, fromIp);
+        return;
+      }
+
+      // Legacy JSON path
       final json = jsonDecode(utf8.decode(frame)) as Map<String, dynamic>;
       final type = json['type'] as String?;
       final fromPeerId = json['fromPeerId'] as String?;
@@ -894,6 +887,81 @@ class LanTransportServiceImpl implements LanTransportService {
     } catch (e) {
       Logger.error('LAN: Failed to handle frame', e, null, _tag);
     }
+  }
+
+  /// Handle a binary MeshPacket received via TCP.
+  void _handleBinaryFrame(Uint8List frame, String fromIp) {
+    final decoded = BinaryMessageCodec.decode(frame);
+    if (decoded == null) {
+      Logger.warning('LAN: Failed to decode binary MeshPacket', _tag);
+      return;
+    }
+
+    final packet = decoded.packet;
+    // Resolve sender: look up userId from IP → peer mapping
+    final fromPeerId = _resolveUserIdFromIp(fromIp) ?? packet.senderId;
+
+    switch (packet.type) {
+      case PacketType.message:
+        final chat = BinaryMessageCodec.decodeChatPayload(packet);
+        if (chat == null) return;
+        _messageReceivedController.add(ble.ReceivedMessage(
+          fromPeerId: fromPeerId,
+          messageId: packet.messageId,
+          type: chat.messageType,
+          content: chat.content ?? '',
+          timestamp: packet.timestamp,
+          replyToId: chat.replyToId,
+          isEncrypted: chat.isEncrypted,
+        ));
+
+      case PacketType.handshake:
+        final hs = BinaryMessageCodec.decodeHandshakePayload(packet);
+        if (hs != null) {
+          _noiseHandshakeController.add(ble.NoiseHandshakeReceived(
+            fromPeerId: fromPeerId,
+            step: hs.step,
+            payload: hs.payload,
+          ));
+        }
+
+      case PacketType.anchorDrop:
+        _anchorDropReceivedController.add(ble.AnchorDropReceived(
+          fromPeerId: fromPeerId,
+          timestamp: packet.timestamp,
+        ));
+
+      case PacketType.reaction:
+        final reaction = BinaryMessageCodec.decodeReactionPayload(packet);
+        if (reaction != null) {
+          _reactionReceivedController.add(ble.ReactionReceived(
+            fromPeerId: fromPeerId,
+            messageId: reaction.targetMessageId,
+            emoji: reaction.emoji,
+            action: reaction.action,
+            timestamp: packet.timestamp,
+          ));
+        }
+
+      case PacketType.gossipSync:
+      case PacketType.gossipRequest:
+        // Gossip sync is handled at the BLE layer (GossipSyncService).
+        // LAN gossip support can be added later if needed.
+        Logger.debug('LAN: gossip packet ignored (handled via BLE)', _tag);
+
+      default:
+        Logger.debug('LAN: unhandled binary packet type: ${packet.type.name}', _tag);
+    }
+  }
+
+  /// Resolve a userId from IP address by looking up known peers.
+  String? _resolveUserIdFromIp(String ip) {
+    for (final entry in _peers.entries) {
+      if (entry.value.ipAddress == ip) {
+        return entry.value.userId;
+      }
+    }
+    return null;
   }
 
   void _handlePhotoChunk(String fromPeerId, Map<String, dynamic> payload) {
@@ -1058,6 +1126,20 @@ class LanTransportServiceImpl implements LanTransportService {
     }
   }
 
+  /// Write a length-prefixed binary frame to [socket].
+  Future<bool> _sendBinaryFrame(Socket socket, Uint8List data) async {
+    try {
+      final header = ByteData(4)..setUint32(0, data.length);
+      socket.add(Uint8List.view(header.buffer));
+      socket.add(data);
+      await socket.flush();
+      return true;
+    } catch (e) {
+      Logger.error('LAN: binary send failed', e, null, _tag);
+      return false;
+    }
+  }
+
   ble.DiscoveredPeer _buildDiscoveredPeer(_LanPeerMeta meta) {
     return ble.DiscoveredPeer(
       peerId: meta.lanPeerId,
@@ -1083,17 +1165,20 @@ class LanTransportServiceImpl implements LanTransportService {
       String peerId, int step, Uint8List payload) async {
     final socket = await _getOrConnectSocket(peerId);
     if (socket == null) return false;
-    final envelope = {
-      'v': 1,
-      'type': 'noise_hs',
-      'fromPeerId': _lanPeerId,
-      'fromUserId': _ownUserId,
-      'payload': {
-        'step': step,
-        'data': base64Encode(payload),
-      },
-    };
-    return _sendFrame(socket, envelope);
+
+    final binaryData = BinaryMessageCodec.encodeHandshake(
+      senderId: _ownUserId ?? '',
+      step: step,
+      handshakePayload: payload,
+    );
+    return _sendBinaryFrame(socket, binaryData);
+  }
+
+  @override
+  Future<bool> sendRawBytes(String peerId, Uint8List data) async {
+    final socket = await _getOrConnectSocket(peerId);
+    if (socket == null) return false;
+    return _sendBinaryFrame(socket, data);
   }
 }
 

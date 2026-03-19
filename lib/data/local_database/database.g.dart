@@ -3141,6 +3141,640 @@ class MessageReactionsCompanion extends UpdateCompanion<ReactionEntry> {
   }
 }
 
+class $NoiseSessionsTable extends NoiseSessions
+    with TableInfo<$NoiseSessionsTable, PersistedNoiseSession> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $NoiseSessionsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _peerIdMeta = const VerificationMeta('peerId');
+  @override
+  late final GeneratedColumn<String> peerId = GeneratedColumn<String>(
+      'peer_id', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _sendKeyHexMeta =
+      const VerificationMeta('sendKeyHex');
+  @override
+  late final GeneratedColumn<String> sendKeyHex = GeneratedColumn<String>(
+      'send_key_hex', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _receiveKeyHexMeta =
+      const VerificationMeta('receiveKeyHex');
+  @override
+  late final GeneratedColumn<String> receiveKeyHex = GeneratedColumn<String>(
+      'receive_key_hex', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _establishedAtMeta =
+      const VerificationMeta('establishedAt');
+  @override
+  late final GeneratedColumn<DateTime> establishedAt =
+      GeneratedColumn<DateTime>('established_at', aliasedName, false,
+          type: DriftSqlType.dateTime, requiredDuringInsert: true);
+  static const VerificationMeta _messageCountMeta =
+      const VerificationMeta('messageCount');
+  @override
+  late final GeneratedColumn<int> messageCount = GeneratedColumn<int>(
+      'message_count', aliasedName, false,
+      type: DriftSqlType.int,
+      requiredDuringInsert: false,
+      defaultValue: const Constant(0));
+  @override
+  List<GeneratedColumn> get $columns =>
+      [peerId, sendKeyHex, receiveKeyHex, establishedAt, messageCount];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'noise_sessions';
+  @override
+  VerificationContext validateIntegrity(
+      Insertable<PersistedNoiseSession> instance,
+      {bool isInserting = false}) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('peer_id')) {
+      context.handle(_peerIdMeta,
+          peerId.isAcceptableOrUnknown(data['peer_id']!, _peerIdMeta));
+    } else if (isInserting) {
+      context.missing(_peerIdMeta);
+    }
+    if (data.containsKey('send_key_hex')) {
+      context.handle(
+          _sendKeyHexMeta,
+          sendKeyHex.isAcceptableOrUnknown(
+              data['send_key_hex']!, _sendKeyHexMeta));
+    } else if (isInserting) {
+      context.missing(_sendKeyHexMeta);
+    }
+    if (data.containsKey('receive_key_hex')) {
+      context.handle(
+          _receiveKeyHexMeta,
+          receiveKeyHex.isAcceptableOrUnknown(
+              data['receive_key_hex']!, _receiveKeyHexMeta));
+    } else if (isInserting) {
+      context.missing(_receiveKeyHexMeta);
+    }
+    if (data.containsKey('established_at')) {
+      context.handle(
+          _establishedAtMeta,
+          establishedAt.isAcceptableOrUnknown(
+              data['established_at']!, _establishedAtMeta));
+    } else if (isInserting) {
+      context.missing(_establishedAtMeta);
+    }
+    if (data.containsKey('message_count')) {
+      context.handle(
+          _messageCountMeta,
+          messageCount.isAcceptableOrUnknown(
+              data['message_count']!, _messageCountMeta));
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {peerId};
+  @override
+  PersistedNoiseSession map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return PersistedNoiseSession(
+      peerId: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}peer_id'])!,
+      sendKeyHex: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}send_key_hex'])!,
+      receiveKeyHex: attachedDatabase.typeMapping.read(
+          DriftSqlType.string, data['${effectivePrefix}receive_key_hex'])!,
+      establishedAt: attachedDatabase.typeMapping.read(
+          DriftSqlType.dateTime, data['${effectivePrefix}established_at'])!,
+      messageCount: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}message_count'])!,
+    );
+  }
+
+  @override
+  $NoiseSessionsTable createAlias(String alias) {
+    return $NoiseSessionsTable(attachedDatabase, alias);
+  }
+}
+
+class PersistedNoiseSession extends DataClass
+    implements Insertable<PersistedNoiseSession> {
+  /// Canonical peer ID (same key used in EncryptionService._sessions).
+  final String peerId;
+
+  /// 32-byte send key (hex-encoded).
+  final String sendKeyHex;
+
+  /// 32-byte receive key (hex-encoded).
+  final String receiveKeyHex;
+
+  /// When the session was established.
+  final DateTime establishedAt;
+
+  /// Number of messages sent with this session (for rekey tracking).
+  final int messageCount;
+  const PersistedNoiseSession(
+      {required this.peerId,
+      required this.sendKeyHex,
+      required this.receiveKeyHex,
+      required this.establishedAt,
+      required this.messageCount});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['peer_id'] = Variable<String>(peerId);
+    map['send_key_hex'] = Variable<String>(sendKeyHex);
+    map['receive_key_hex'] = Variable<String>(receiveKeyHex);
+    map['established_at'] = Variable<DateTime>(establishedAt);
+    map['message_count'] = Variable<int>(messageCount);
+    return map;
+  }
+
+  NoiseSessionsCompanion toCompanion(bool nullToAbsent) {
+    return NoiseSessionsCompanion(
+      peerId: Value(peerId),
+      sendKeyHex: Value(sendKeyHex),
+      receiveKeyHex: Value(receiveKeyHex),
+      establishedAt: Value(establishedAt),
+      messageCount: Value(messageCount),
+    );
+  }
+
+  factory PersistedNoiseSession.fromJson(Map<String, dynamic> json,
+      {ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return PersistedNoiseSession(
+      peerId: serializer.fromJson<String>(json['peerId']),
+      sendKeyHex: serializer.fromJson<String>(json['sendKeyHex']),
+      receiveKeyHex: serializer.fromJson<String>(json['receiveKeyHex']),
+      establishedAt: serializer.fromJson<DateTime>(json['establishedAt']),
+      messageCount: serializer.fromJson<int>(json['messageCount']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'peerId': serializer.toJson<String>(peerId),
+      'sendKeyHex': serializer.toJson<String>(sendKeyHex),
+      'receiveKeyHex': serializer.toJson<String>(receiveKeyHex),
+      'establishedAt': serializer.toJson<DateTime>(establishedAt),
+      'messageCount': serializer.toJson<int>(messageCount),
+    };
+  }
+
+  PersistedNoiseSession copyWith(
+          {String? peerId,
+          String? sendKeyHex,
+          String? receiveKeyHex,
+          DateTime? establishedAt,
+          int? messageCount}) =>
+      PersistedNoiseSession(
+        peerId: peerId ?? this.peerId,
+        sendKeyHex: sendKeyHex ?? this.sendKeyHex,
+        receiveKeyHex: receiveKeyHex ?? this.receiveKeyHex,
+        establishedAt: establishedAt ?? this.establishedAt,
+        messageCount: messageCount ?? this.messageCount,
+      );
+  PersistedNoiseSession copyWithCompanion(NoiseSessionsCompanion data) {
+    return PersistedNoiseSession(
+      peerId: data.peerId.present ? data.peerId.value : this.peerId,
+      sendKeyHex:
+          data.sendKeyHex.present ? data.sendKeyHex.value : this.sendKeyHex,
+      receiveKeyHex: data.receiveKeyHex.present
+          ? data.receiveKeyHex.value
+          : this.receiveKeyHex,
+      establishedAt: data.establishedAt.present
+          ? data.establishedAt.value
+          : this.establishedAt,
+      messageCount: data.messageCount.present
+          ? data.messageCount.value
+          : this.messageCount,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('PersistedNoiseSession(')
+          ..write('peerId: $peerId, ')
+          ..write('sendKeyHex: $sendKeyHex, ')
+          ..write('receiveKeyHex: $receiveKeyHex, ')
+          ..write('establishedAt: $establishedAt, ')
+          ..write('messageCount: $messageCount')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+      peerId, sendKeyHex, receiveKeyHex, establishedAt, messageCount);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is PersistedNoiseSession &&
+          other.peerId == this.peerId &&
+          other.sendKeyHex == this.sendKeyHex &&
+          other.receiveKeyHex == this.receiveKeyHex &&
+          other.establishedAt == this.establishedAt &&
+          other.messageCount == this.messageCount);
+}
+
+class NoiseSessionsCompanion extends UpdateCompanion<PersistedNoiseSession> {
+  final Value<String> peerId;
+  final Value<String> sendKeyHex;
+  final Value<String> receiveKeyHex;
+  final Value<DateTime> establishedAt;
+  final Value<int> messageCount;
+  final Value<int> rowid;
+  const NoiseSessionsCompanion({
+    this.peerId = const Value.absent(),
+    this.sendKeyHex = const Value.absent(),
+    this.receiveKeyHex = const Value.absent(),
+    this.establishedAt = const Value.absent(),
+    this.messageCount = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  NoiseSessionsCompanion.insert({
+    required String peerId,
+    required String sendKeyHex,
+    required String receiveKeyHex,
+    required DateTime establishedAt,
+    this.messageCount = const Value.absent(),
+    this.rowid = const Value.absent(),
+  })  : peerId = Value(peerId),
+        sendKeyHex = Value(sendKeyHex),
+        receiveKeyHex = Value(receiveKeyHex),
+        establishedAt = Value(establishedAt);
+  static Insertable<PersistedNoiseSession> custom({
+    Expression<String>? peerId,
+    Expression<String>? sendKeyHex,
+    Expression<String>? receiveKeyHex,
+    Expression<DateTime>? establishedAt,
+    Expression<int>? messageCount,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (peerId != null) 'peer_id': peerId,
+      if (sendKeyHex != null) 'send_key_hex': sendKeyHex,
+      if (receiveKeyHex != null) 'receive_key_hex': receiveKeyHex,
+      if (establishedAt != null) 'established_at': establishedAt,
+      if (messageCount != null) 'message_count': messageCount,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  NoiseSessionsCompanion copyWith(
+      {Value<String>? peerId,
+      Value<String>? sendKeyHex,
+      Value<String>? receiveKeyHex,
+      Value<DateTime>? establishedAt,
+      Value<int>? messageCount,
+      Value<int>? rowid}) {
+    return NoiseSessionsCompanion(
+      peerId: peerId ?? this.peerId,
+      sendKeyHex: sendKeyHex ?? this.sendKeyHex,
+      receiveKeyHex: receiveKeyHex ?? this.receiveKeyHex,
+      establishedAt: establishedAt ?? this.establishedAt,
+      messageCount: messageCount ?? this.messageCount,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (peerId.present) {
+      map['peer_id'] = Variable<String>(peerId.value);
+    }
+    if (sendKeyHex.present) {
+      map['send_key_hex'] = Variable<String>(sendKeyHex.value);
+    }
+    if (receiveKeyHex.present) {
+      map['receive_key_hex'] = Variable<String>(receiveKeyHex.value);
+    }
+    if (establishedAt.present) {
+      map['established_at'] = Variable<DateTime>(establishedAt.value);
+    }
+    if (messageCount.present) {
+      map['message_count'] = Variable<int>(messageCount.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('NoiseSessionsCompanion(')
+          ..write('peerId: $peerId, ')
+          ..write('sendKeyHex: $sendKeyHex, ')
+          ..write('receiveKeyHex: $receiveKeyHex, ')
+          ..write('establishedAt: $establishedAt, ')
+          ..write('messageCount: $messageCount, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $PeerAliasesTable extends PeerAliases
+    with TableInfo<$PeerAliasesTable, PeerAliasEntry> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $PeerAliasesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _transportIdMeta =
+      const VerificationMeta('transportId');
+  @override
+  late final GeneratedColumn<String> transportId = GeneratedColumn<String>(
+      'transport_id', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _canonicalPeerIdMeta =
+      const VerificationMeta('canonicalPeerId');
+  @override
+  late final GeneratedColumn<String> canonicalPeerId = GeneratedColumn<String>(
+      'canonical_peer_id', aliasedName, false,
+      type: DriftSqlType.string,
+      requiredDuringInsert: true,
+      defaultConstraints: GeneratedColumn.constraintIsAlways(
+          'REFERENCES discovered_peers (peer_id)'));
+  static const VerificationMeta _transportTypeMeta =
+      const VerificationMeta('transportType');
+  @override
+  late final GeneratedColumn<String> transportType = GeneratedColumn<String>(
+      'transport_type', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _createdAtMeta =
+      const VerificationMeta('createdAt');
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+      'created_at', aliasedName, false,
+      type: DriftSqlType.dateTime, requiredDuringInsert: true);
+  @override
+  List<GeneratedColumn> get $columns =>
+      [transportId, canonicalPeerId, transportType, createdAt];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'peer_aliases';
+  @override
+  VerificationContext validateIntegrity(Insertable<PeerAliasEntry> instance,
+      {bool isInserting = false}) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('transport_id')) {
+      context.handle(
+          _transportIdMeta,
+          transportId.isAcceptableOrUnknown(
+              data['transport_id']!, _transportIdMeta));
+    } else if (isInserting) {
+      context.missing(_transportIdMeta);
+    }
+    if (data.containsKey('canonical_peer_id')) {
+      context.handle(
+          _canonicalPeerIdMeta,
+          canonicalPeerId.isAcceptableOrUnknown(
+              data['canonical_peer_id']!, _canonicalPeerIdMeta));
+    } else if (isInserting) {
+      context.missing(_canonicalPeerIdMeta);
+    }
+    if (data.containsKey('transport_type')) {
+      context.handle(
+          _transportTypeMeta,
+          transportType.isAcceptableOrUnknown(
+              data['transport_type']!, _transportTypeMeta));
+    } else if (isInserting) {
+      context.missing(_transportTypeMeta);
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(_createdAtMeta,
+          createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta));
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {transportId};
+  @override
+  PeerAliasEntry map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return PeerAliasEntry(
+      transportId: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}transport_id'])!,
+      canonicalPeerId: attachedDatabase.typeMapping.read(
+          DriftSqlType.string, data['${effectivePrefix}canonical_peer_id'])!,
+      transportType: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}transport_type'])!,
+      createdAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.dateTime, data['${effectivePrefix}created_at'])!,
+    );
+  }
+
+  @override
+  $PeerAliasesTable createAlias(String alias) {
+    return $PeerAliasesTable(attachedDatabase, alias);
+  }
+}
+
+class PeerAliasEntry extends DataClass implements Insertable<PeerAliasEntry> {
+  /// Transport-specific ID (BLE UUID, LAN ID, Wi-Fi Aware ID, etc.)
+  final String transportId;
+
+  /// Canonical peer identity — FK to DiscoveredPeers.peerId.
+  /// Safe because registerAlias is called inside upsertPeer() after the
+  /// peer row is guaranteed to exist.
+  final String canonicalPeerId;
+
+  /// Transport type: "ble", "lan", "wifiAware"
+  final String transportType;
+
+  /// When this alias was first recorded
+  final DateTime createdAt;
+  const PeerAliasEntry(
+      {required this.transportId,
+      required this.canonicalPeerId,
+      required this.transportType,
+      required this.createdAt});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['transport_id'] = Variable<String>(transportId);
+    map['canonical_peer_id'] = Variable<String>(canonicalPeerId);
+    map['transport_type'] = Variable<String>(transportType);
+    map['created_at'] = Variable<DateTime>(createdAt);
+    return map;
+  }
+
+  PeerAliasesCompanion toCompanion(bool nullToAbsent) {
+    return PeerAliasesCompanion(
+      transportId: Value(transportId),
+      canonicalPeerId: Value(canonicalPeerId),
+      transportType: Value(transportType),
+      createdAt: Value(createdAt),
+    );
+  }
+
+  factory PeerAliasEntry.fromJson(Map<String, dynamic> json,
+      {ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return PeerAliasEntry(
+      transportId: serializer.fromJson<String>(json['transportId']),
+      canonicalPeerId: serializer.fromJson<String>(json['canonicalPeerId']),
+      transportType: serializer.fromJson<String>(json['transportType']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'transportId': serializer.toJson<String>(transportId),
+      'canonicalPeerId': serializer.toJson<String>(canonicalPeerId),
+      'transportType': serializer.toJson<String>(transportType),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+    };
+  }
+
+  PeerAliasEntry copyWith(
+          {String? transportId,
+          String? canonicalPeerId,
+          String? transportType,
+          DateTime? createdAt}) =>
+      PeerAliasEntry(
+        transportId: transportId ?? this.transportId,
+        canonicalPeerId: canonicalPeerId ?? this.canonicalPeerId,
+        transportType: transportType ?? this.transportType,
+        createdAt: createdAt ?? this.createdAt,
+      );
+  PeerAliasEntry copyWithCompanion(PeerAliasesCompanion data) {
+    return PeerAliasEntry(
+      transportId:
+          data.transportId.present ? data.transportId.value : this.transportId,
+      canonicalPeerId: data.canonicalPeerId.present
+          ? data.canonicalPeerId.value
+          : this.canonicalPeerId,
+      transportType: data.transportType.present
+          ? data.transportType.value
+          : this.transportType,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('PeerAliasEntry(')
+          ..write('transportId: $transportId, ')
+          ..write('canonicalPeerId: $canonicalPeerId, ')
+          ..write('transportType: $transportType, ')
+          ..write('createdAt: $createdAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode =>
+      Object.hash(transportId, canonicalPeerId, transportType, createdAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is PeerAliasEntry &&
+          other.transportId == this.transportId &&
+          other.canonicalPeerId == this.canonicalPeerId &&
+          other.transportType == this.transportType &&
+          other.createdAt == this.createdAt);
+}
+
+class PeerAliasesCompanion extends UpdateCompanion<PeerAliasEntry> {
+  final Value<String> transportId;
+  final Value<String> canonicalPeerId;
+  final Value<String> transportType;
+  final Value<DateTime> createdAt;
+  final Value<int> rowid;
+  const PeerAliasesCompanion({
+    this.transportId = const Value.absent(),
+    this.canonicalPeerId = const Value.absent(),
+    this.transportType = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  PeerAliasesCompanion.insert({
+    required String transportId,
+    required String canonicalPeerId,
+    required String transportType,
+    required DateTime createdAt,
+    this.rowid = const Value.absent(),
+  })  : transportId = Value(transportId),
+        canonicalPeerId = Value(canonicalPeerId),
+        transportType = Value(transportType),
+        createdAt = Value(createdAt);
+  static Insertable<PeerAliasEntry> custom({
+    Expression<String>? transportId,
+    Expression<String>? canonicalPeerId,
+    Expression<String>? transportType,
+    Expression<DateTime>? createdAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (transportId != null) 'transport_id': transportId,
+      if (canonicalPeerId != null) 'canonical_peer_id': canonicalPeerId,
+      if (transportType != null) 'transport_type': transportType,
+      if (createdAt != null) 'created_at': createdAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  PeerAliasesCompanion copyWith(
+      {Value<String>? transportId,
+      Value<String>? canonicalPeerId,
+      Value<String>? transportType,
+      Value<DateTime>? createdAt,
+      Value<int>? rowid}) {
+    return PeerAliasesCompanion(
+      transportId: transportId ?? this.transportId,
+      canonicalPeerId: canonicalPeerId ?? this.canonicalPeerId,
+      transportType: transportType ?? this.transportType,
+      createdAt: createdAt ?? this.createdAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (transportId.present) {
+      map['transport_id'] = Variable<String>(transportId.value);
+    }
+    if (canonicalPeerId.present) {
+      map['canonical_peer_id'] = Variable<String>(canonicalPeerId.value);
+    }
+    if (transportType.present) {
+      map['transport_type'] = Variable<String>(transportType.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('PeerAliasesCompanion(')
+          ..write('transportId: $transportId, ')
+          ..write('canonicalPeerId: $canonicalPeerId, ')
+          ..write('transportType: $transportType, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -3154,6 +3788,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $BlockedUsersTable blockedUsers = $BlockedUsersTable(this);
   late final $MessageReactionsTable messageReactions =
       $MessageReactionsTable(this);
+  late final $NoiseSessionsTable noiseSessions = $NoiseSessionsTable(this);
+  late final $PeerAliasesTable peerAliases = $PeerAliasesTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -3166,7 +3802,9 @@ abstract class _$AppDatabase extends GeneratedDatabase {
         messages,
         anchorDrops,
         blockedUsers,
-        messageReactions
+        messageReactions,
+        noiseSessions,
+        peerAliases
       ];
 }
 
@@ -3824,6 +4462,21 @@ final class $$DiscoveredPeersTableReferences extends BaseReferences<
     return ProcessedTableManager(
         manager.$state.copyWith(prefetchedData: cache));
   }
+
+  static MultiTypedResultKey<$PeerAliasesTable, List<PeerAliasEntry>>
+      _peerAliasesRefsTable(_$AppDatabase db) =>
+          MultiTypedResultKey.fromTable(db.peerAliases,
+              aliasName: $_aliasNameGenerator(
+                  db.discoveredPeers.peerId, db.peerAliases.canonicalPeerId));
+
+  $$PeerAliasesTableProcessedTableManager get peerAliasesRefs {
+    final manager = $$PeerAliasesTableTableManager($_db, $_db.peerAliases)
+        .filter((f) => f.canonicalPeerId.peerId($_item.peerId));
+
+    final cache = $_typedResult.readTableOrNull(_peerAliasesRefsTable($_db));
+    return ProcessedTableManager(
+        manager.$state.copyWith(prefetchedData: cache));
+  }
 }
 
 class $$DiscoveredPeersTableFilterComposer
@@ -3885,6 +4538,27 @@ class $$DiscoveredPeersTableFilterComposer
             $$ConversationsTableFilterComposer(
               $db: $db,
               $table: $db.conversations,
+              $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+              joinBuilder: joinBuilder,
+              $removeJoinBuilderFromRootComposer:
+                  $removeJoinBuilderFromRootComposer,
+            ));
+    return f(composer);
+  }
+
+  Expression<bool> peerAliasesRefs(
+      Expression<bool> Function($$PeerAliasesTableFilterComposer f) f) {
+    final $$PeerAliasesTableFilterComposer composer = $composerBuilder(
+        composer: this,
+        getCurrentColumn: (t) => t.peerId,
+        referencedTable: $db.peerAliases,
+        getReferencedColumn: (t) => t.canonicalPeerId,
+        builder: (joinBuilder,
+                {$addJoinBuilderToRootComposer,
+                $removeJoinBuilderFromRootComposer}) =>
+            $$PeerAliasesTableFilterComposer(
+              $db: $db,
+              $table: $db.peerAliases,
               $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
               joinBuilder: joinBuilder,
               $removeJoinBuilderFromRootComposer:
@@ -4008,6 +4682,27 @@ class $$DiscoveredPeersTableAnnotationComposer
             ));
     return f(composer);
   }
+
+  Expression<T> peerAliasesRefs<T extends Object>(
+      Expression<T> Function($$PeerAliasesTableAnnotationComposer a) f) {
+    final $$PeerAliasesTableAnnotationComposer composer = $composerBuilder(
+        composer: this,
+        getCurrentColumn: (t) => t.peerId,
+        referencedTable: $db.peerAliases,
+        getReferencedColumn: (t) => t.canonicalPeerId,
+        builder: (joinBuilder,
+                {$addJoinBuilderToRootComposer,
+                $removeJoinBuilderFromRootComposer}) =>
+            $$PeerAliasesTableAnnotationComposer(
+              $db: $db,
+              $table: $db.peerAliases,
+              $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+              joinBuilder: joinBuilder,
+              $removeJoinBuilderFromRootComposer:
+                  $removeJoinBuilderFromRootComposer,
+            ));
+    return f(composer);
+  }
 }
 
 class $$DiscoveredPeersTableTableManager extends RootTableManager<
@@ -4021,7 +4716,7 @@ class $$DiscoveredPeersTableTableManager extends RootTableManager<
     $$DiscoveredPeersTableUpdateCompanionBuilder,
     (DiscoveredPeerEntry, $$DiscoveredPeersTableReferences),
     DiscoveredPeerEntry,
-    PrefetchHooks Function({bool conversationsRefs})> {
+    PrefetchHooks Function({bool conversationsRefs, bool peerAliasesRefs})> {
   $$DiscoveredPeersTableTableManager(
       _$AppDatabase db, $DiscoveredPeersTable table)
       : super(TableManagerState(
@@ -4099,11 +4794,13 @@ class $$DiscoveredPeersTableTableManager extends RootTableManager<
                     $$DiscoveredPeersTableReferences(db, table, e)
                   ))
               .toList(),
-          prefetchHooksCallback: ({conversationsRefs = false}) {
+          prefetchHooksCallback: (
+              {conversationsRefs = false, peerAliasesRefs = false}) {
             return PrefetchHooks(
               db: db,
               explicitlyWatchedTables: [
-                if (conversationsRefs) db.conversations
+                if (conversationsRefs) db.conversations,
+                if (peerAliasesRefs) db.peerAliases
               ],
               addJoins: null,
               getPrefetchedDataCallback: (items) async {
@@ -4119,6 +4816,18 @@ class $$DiscoveredPeersTableTableManager extends RootTableManager<
                         referencedItemsForCurrentItem:
                             (item, referencedItems) => referencedItems
                                 .where((e) => e.peerId == item.peerId),
+                        typedResults: items),
+                  if (peerAliasesRefs)
+                    await $_getPrefetchedData(
+                        currentTable: table,
+                        referencedTable: $$DiscoveredPeersTableReferences
+                            ._peerAliasesRefsTable(db),
+                        managerFromTypedResult: (p0) =>
+                            $$DiscoveredPeersTableReferences(db, table, p0)
+                                .peerAliasesRefs,
+                        referencedItemsForCurrentItem:
+                            (item, referencedItems) => referencedItems
+                                .where((e) => e.canonicalPeerId == item.peerId),
                         typedResults: items)
                 ];
               },
@@ -4138,7 +4847,7 @@ typedef $$DiscoveredPeersTableProcessedTableManager = ProcessedTableManager<
     $$DiscoveredPeersTableUpdateCompanionBuilder,
     (DiscoveredPeerEntry, $$DiscoveredPeersTableReferences),
     DiscoveredPeerEntry,
-    PrefetchHooks Function({bool conversationsRefs})>;
+    PrefetchHooks Function({bool conversationsRefs, bool peerAliasesRefs})>;
 typedef $$ConversationsTableCreateCompanionBuilder = ConversationsCompanion
     Function({
   required String id,
@@ -5494,6 +6203,444 @@ typedef $$MessageReactionsTableProcessedTableManager = ProcessedTableManager<
     (ReactionEntry, $$MessageReactionsTableReferences),
     ReactionEntry,
     PrefetchHooks Function({bool messageId})>;
+typedef $$NoiseSessionsTableCreateCompanionBuilder = NoiseSessionsCompanion
+    Function({
+  required String peerId,
+  required String sendKeyHex,
+  required String receiveKeyHex,
+  required DateTime establishedAt,
+  Value<int> messageCount,
+  Value<int> rowid,
+});
+typedef $$NoiseSessionsTableUpdateCompanionBuilder = NoiseSessionsCompanion
+    Function({
+  Value<String> peerId,
+  Value<String> sendKeyHex,
+  Value<String> receiveKeyHex,
+  Value<DateTime> establishedAt,
+  Value<int> messageCount,
+  Value<int> rowid,
+});
+
+class $$NoiseSessionsTableFilterComposer
+    extends Composer<_$AppDatabase, $NoiseSessionsTable> {
+  $$NoiseSessionsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get peerId => $composableBuilder(
+      column: $table.peerId, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get sendKeyHex => $composableBuilder(
+      column: $table.sendKeyHex, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get receiveKeyHex => $composableBuilder(
+      column: $table.receiveKeyHex, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<DateTime> get establishedAt => $composableBuilder(
+      column: $table.establishedAt, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<int> get messageCount => $composableBuilder(
+      column: $table.messageCount, builder: (column) => ColumnFilters(column));
+}
+
+class $$NoiseSessionsTableOrderingComposer
+    extends Composer<_$AppDatabase, $NoiseSessionsTable> {
+  $$NoiseSessionsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get peerId => $composableBuilder(
+      column: $table.peerId, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get sendKeyHex => $composableBuilder(
+      column: $table.sendKeyHex, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get receiveKeyHex => $composableBuilder(
+      column: $table.receiveKeyHex,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<DateTime> get establishedAt => $composableBuilder(
+      column: $table.establishedAt,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<int> get messageCount => $composableBuilder(
+      column: $table.messageCount,
+      builder: (column) => ColumnOrderings(column));
+}
+
+class $$NoiseSessionsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $NoiseSessionsTable> {
+  $$NoiseSessionsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get peerId =>
+      $composableBuilder(column: $table.peerId, builder: (column) => column);
+
+  GeneratedColumn<String> get sendKeyHex => $composableBuilder(
+      column: $table.sendKeyHex, builder: (column) => column);
+
+  GeneratedColumn<String> get receiveKeyHex => $composableBuilder(
+      column: $table.receiveKeyHex, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get establishedAt => $composableBuilder(
+      column: $table.establishedAt, builder: (column) => column);
+
+  GeneratedColumn<int> get messageCount => $composableBuilder(
+      column: $table.messageCount, builder: (column) => column);
+}
+
+class $$NoiseSessionsTableTableManager extends RootTableManager<
+    _$AppDatabase,
+    $NoiseSessionsTable,
+    PersistedNoiseSession,
+    $$NoiseSessionsTableFilterComposer,
+    $$NoiseSessionsTableOrderingComposer,
+    $$NoiseSessionsTableAnnotationComposer,
+    $$NoiseSessionsTableCreateCompanionBuilder,
+    $$NoiseSessionsTableUpdateCompanionBuilder,
+    (
+      PersistedNoiseSession,
+      BaseReferences<_$AppDatabase, $NoiseSessionsTable, PersistedNoiseSession>
+    ),
+    PersistedNoiseSession,
+    PrefetchHooks Function()> {
+  $$NoiseSessionsTableTableManager(_$AppDatabase db, $NoiseSessionsTable table)
+      : super(TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$NoiseSessionsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$NoiseSessionsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$NoiseSessionsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback: ({
+            Value<String> peerId = const Value.absent(),
+            Value<String> sendKeyHex = const Value.absent(),
+            Value<String> receiveKeyHex = const Value.absent(),
+            Value<DateTime> establishedAt = const Value.absent(),
+            Value<int> messageCount = const Value.absent(),
+            Value<int> rowid = const Value.absent(),
+          }) =>
+              NoiseSessionsCompanion(
+            peerId: peerId,
+            sendKeyHex: sendKeyHex,
+            receiveKeyHex: receiveKeyHex,
+            establishedAt: establishedAt,
+            messageCount: messageCount,
+            rowid: rowid,
+          ),
+          createCompanionCallback: ({
+            required String peerId,
+            required String sendKeyHex,
+            required String receiveKeyHex,
+            required DateTime establishedAt,
+            Value<int> messageCount = const Value.absent(),
+            Value<int> rowid = const Value.absent(),
+          }) =>
+              NoiseSessionsCompanion.insert(
+            peerId: peerId,
+            sendKeyHex: sendKeyHex,
+            receiveKeyHex: receiveKeyHex,
+            establishedAt: establishedAt,
+            messageCount: messageCount,
+            rowid: rowid,
+          ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ));
+}
+
+typedef $$NoiseSessionsTableProcessedTableManager = ProcessedTableManager<
+    _$AppDatabase,
+    $NoiseSessionsTable,
+    PersistedNoiseSession,
+    $$NoiseSessionsTableFilterComposer,
+    $$NoiseSessionsTableOrderingComposer,
+    $$NoiseSessionsTableAnnotationComposer,
+    $$NoiseSessionsTableCreateCompanionBuilder,
+    $$NoiseSessionsTableUpdateCompanionBuilder,
+    (
+      PersistedNoiseSession,
+      BaseReferences<_$AppDatabase, $NoiseSessionsTable, PersistedNoiseSession>
+    ),
+    PersistedNoiseSession,
+    PrefetchHooks Function()>;
+typedef $$PeerAliasesTableCreateCompanionBuilder = PeerAliasesCompanion
+    Function({
+  required String transportId,
+  required String canonicalPeerId,
+  required String transportType,
+  required DateTime createdAt,
+  Value<int> rowid,
+});
+typedef $$PeerAliasesTableUpdateCompanionBuilder = PeerAliasesCompanion
+    Function({
+  Value<String> transportId,
+  Value<String> canonicalPeerId,
+  Value<String> transportType,
+  Value<DateTime> createdAt,
+  Value<int> rowid,
+});
+
+final class $$PeerAliasesTableReferences
+    extends BaseReferences<_$AppDatabase, $PeerAliasesTable, PeerAliasEntry> {
+  $$PeerAliasesTableReferences(super.$_db, super.$_table, super.$_typedResult);
+
+  static $DiscoveredPeersTable _canonicalPeerIdTable(_$AppDatabase db) =>
+      db.discoveredPeers.createAlias($_aliasNameGenerator(
+          db.peerAliases.canonicalPeerId, db.discoveredPeers.peerId));
+
+  $$DiscoveredPeersTableProcessedTableManager? get canonicalPeerId {
+    if ($_item.canonicalPeerId == null) return null;
+    final manager =
+        $$DiscoveredPeersTableTableManager($_db, $_db.discoveredPeers)
+            .filter((f) => f.peerId($_item.canonicalPeerId!));
+    final item = $_typedResult.readTableOrNull(_canonicalPeerIdTable($_db));
+    if (item == null) return manager;
+    return ProcessedTableManager(
+        manager.$state.copyWith(prefetchedData: [item]));
+  }
+}
+
+class $$PeerAliasesTableFilterComposer
+    extends Composer<_$AppDatabase, $PeerAliasesTable> {
+  $$PeerAliasesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get transportId => $composableBuilder(
+      column: $table.transportId, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get transportType => $composableBuilder(
+      column: $table.transportType, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+      column: $table.createdAt, builder: (column) => ColumnFilters(column));
+
+  $$DiscoveredPeersTableFilterComposer get canonicalPeerId {
+    final $$DiscoveredPeersTableFilterComposer composer = $composerBuilder(
+        composer: this,
+        getCurrentColumn: (t) => t.canonicalPeerId,
+        referencedTable: $db.discoveredPeers,
+        getReferencedColumn: (t) => t.peerId,
+        builder: (joinBuilder,
+                {$addJoinBuilderToRootComposer,
+                $removeJoinBuilderFromRootComposer}) =>
+            $$DiscoveredPeersTableFilterComposer(
+              $db: $db,
+              $table: $db.discoveredPeers,
+              $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+              joinBuilder: joinBuilder,
+              $removeJoinBuilderFromRootComposer:
+                  $removeJoinBuilderFromRootComposer,
+            ));
+    return composer;
+  }
+}
+
+class $$PeerAliasesTableOrderingComposer
+    extends Composer<_$AppDatabase, $PeerAliasesTable> {
+  $$PeerAliasesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get transportId => $composableBuilder(
+      column: $table.transportId, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get transportType => $composableBuilder(
+      column: $table.transportType,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+      column: $table.createdAt, builder: (column) => ColumnOrderings(column));
+
+  $$DiscoveredPeersTableOrderingComposer get canonicalPeerId {
+    final $$DiscoveredPeersTableOrderingComposer composer = $composerBuilder(
+        composer: this,
+        getCurrentColumn: (t) => t.canonicalPeerId,
+        referencedTable: $db.discoveredPeers,
+        getReferencedColumn: (t) => t.peerId,
+        builder: (joinBuilder,
+                {$addJoinBuilderToRootComposer,
+                $removeJoinBuilderFromRootComposer}) =>
+            $$DiscoveredPeersTableOrderingComposer(
+              $db: $db,
+              $table: $db.discoveredPeers,
+              $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+              joinBuilder: joinBuilder,
+              $removeJoinBuilderFromRootComposer:
+                  $removeJoinBuilderFromRootComposer,
+            ));
+    return composer;
+  }
+}
+
+class $$PeerAliasesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $PeerAliasesTable> {
+  $$PeerAliasesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get transportId => $composableBuilder(
+      column: $table.transportId, builder: (column) => column);
+
+  GeneratedColumn<String> get transportType => $composableBuilder(
+      column: $table.transportType, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  $$DiscoveredPeersTableAnnotationComposer get canonicalPeerId {
+    final $$DiscoveredPeersTableAnnotationComposer composer = $composerBuilder(
+        composer: this,
+        getCurrentColumn: (t) => t.canonicalPeerId,
+        referencedTable: $db.discoveredPeers,
+        getReferencedColumn: (t) => t.peerId,
+        builder: (joinBuilder,
+                {$addJoinBuilderToRootComposer,
+                $removeJoinBuilderFromRootComposer}) =>
+            $$DiscoveredPeersTableAnnotationComposer(
+              $db: $db,
+              $table: $db.discoveredPeers,
+              $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+              joinBuilder: joinBuilder,
+              $removeJoinBuilderFromRootComposer:
+                  $removeJoinBuilderFromRootComposer,
+            ));
+    return composer;
+  }
+}
+
+class $$PeerAliasesTableTableManager extends RootTableManager<
+    _$AppDatabase,
+    $PeerAliasesTable,
+    PeerAliasEntry,
+    $$PeerAliasesTableFilterComposer,
+    $$PeerAliasesTableOrderingComposer,
+    $$PeerAliasesTableAnnotationComposer,
+    $$PeerAliasesTableCreateCompanionBuilder,
+    $$PeerAliasesTableUpdateCompanionBuilder,
+    (PeerAliasEntry, $$PeerAliasesTableReferences),
+    PeerAliasEntry,
+    PrefetchHooks Function({bool canonicalPeerId})> {
+  $$PeerAliasesTableTableManager(_$AppDatabase db, $PeerAliasesTable table)
+      : super(TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$PeerAliasesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$PeerAliasesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$PeerAliasesTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback: ({
+            Value<String> transportId = const Value.absent(),
+            Value<String> canonicalPeerId = const Value.absent(),
+            Value<String> transportType = const Value.absent(),
+            Value<DateTime> createdAt = const Value.absent(),
+            Value<int> rowid = const Value.absent(),
+          }) =>
+              PeerAliasesCompanion(
+            transportId: transportId,
+            canonicalPeerId: canonicalPeerId,
+            transportType: transportType,
+            createdAt: createdAt,
+            rowid: rowid,
+          ),
+          createCompanionCallback: ({
+            required String transportId,
+            required String canonicalPeerId,
+            required String transportType,
+            required DateTime createdAt,
+            Value<int> rowid = const Value.absent(),
+          }) =>
+              PeerAliasesCompanion.insert(
+            transportId: transportId,
+            canonicalPeerId: canonicalPeerId,
+            transportType: transportType,
+            createdAt: createdAt,
+            rowid: rowid,
+          ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (
+                    e.readTable(table),
+                    $$PeerAliasesTableReferences(db, table, e)
+                  ))
+              .toList(),
+          prefetchHooksCallback: ({canonicalPeerId = false}) {
+            return PrefetchHooks(
+              db: db,
+              explicitlyWatchedTables: [],
+              addJoins: <
+                  T extends TableManagerState<
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic>>(state) {
+                if (canonicalPeerId) {
+                  state = state.withJoin(
+                    currentTable: table,
+                    currentColumn: table.canonicalPeerId,
+                    referencedTable:
+                        $$PeerAliasesTableReferences._canonicalPeerIdTable(db),
+                    referencedColumn: $$PeerAliasesTableReferences
+                        ._canonicalPeerIdTable(db)
+                        .peerId,
+                  ) as T;
+                }
+
+                return state;
+              },
+              getPrefetchedDataCallback: (items) async {
+                return [];
+              },
+            );
+          },
+        ));
+}
+
+typedef $$PeerAliasesTableProcessedTableManager = ProcessedTableManager<
+    _$AppDatabase,
+    $PeerAliasesTable,
+    PeerAliasEntry,
+    $$PeerAliasesTableFilterComposer,
+    $$PeerAliasesTableOrderingComposer,
+    $$PeerAliasesTableAnnotationComposer,
+    $$PeerAliasesTableCreateCompanionBuilder,
+    $$PeerAliasesTableUpdateCompanionBuilder,
+    (PeerAliasEntry, $$PeerAliasesTableReferences),
+    PeerAliasEntry,
+    PrefetchHooks Function({bool canonicalPeerId})>;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -5514,4 +6661,8 @@ class $AppDatabaseManager {
       $$BlockedUsersTableTableManager(_db, _db.blockedUsers);
   $$MessageReactionsTableTableManager get messageReactions =>
       $$MessageReactionsTableTableManager(_db, _db.messageReactions);
+  $$NoiseSessionsTableTableManager get noiseSessions =>
+      $$NoiseSessionsTableTableManager(_db, _db.noiseSessions);
+  $$PeerAliasesTableTableManager get peerAliases =>
+      $$PeerAliasesTableTableManager(_db, _db.peerAliases);
 }

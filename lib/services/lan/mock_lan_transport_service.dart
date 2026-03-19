@@ -165,5 +165,8 @@ class MockLanTransportService implements LanTransportService {
       _noiseHandshakeController.stream;
 
   @override
+  Future<bool> sendRawBytes(String peerId, Uint8List data) async => false;
+
+  @override
   bool isPeerReachable(String peerId) => false;
 }

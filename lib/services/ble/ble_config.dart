@@ -1,3 +1,36 @@
+import 'package:bluetooth_low_energy/bluetooth_low_energy.dart';
+
+/// Anchor BLE GATT service and characteristic UUIDs.
+///
+/// Centralized here so every sub-module references the same constants.
+/// These are proper 128-bit random UUIDs (not the BLE SIG 0000xxxx range)
+/// to avoid collisions with other apps and third-party BLE devices.
+abstract class BleUuids {
+  /// Primary Anchor GATT service.
+  static final service =
+      UUID.fromString('b4b605d3-7718-42a5-88ec-6fbe8c6c3cb9');
+
+  /// fff1 equivalent — Profile metadata (READ, NOTIFY).
+  static final profileChar =
+      UUID.fromString('02c57431-2cc9-4b9c-9472-37a1efa02bc6');
+
+  /// fff2 equivalent — Thumbnail data (READ).
+  static final thumbnailChar =
+      UUID.fromString('e353cf0a-85c2-4d2a-b4b1-8a0fa1bfb1f1');
+
+  /// fff3 equivalent — Messaging (WRITE, NOTIFY).
+  static final messagingChar =
+      UUID.fromString('6c4c3e0a-8d29-48b6-83c3-2d19ee02d398');
+
+  /// fff4 equivalent — Full photos (READ, NOTIFY).
+  static final fullPhotosChar =
+      UUID.fromString('79118c43-92a1-48b7-98af-d28a0a9dbc72');
+
+  /// fff5 equivalent — Reverse path (WRITE, NOTIFY).
+  static final reversePathChar =
+      UUID.fromString('9386c87b-79fb-4b5c-ab38-d0e6a0fffd03');
+}
+
 /// Runtime configuration for the Anchor BLE service.
 ///
 /// Shared between [BleFacade] (production, uses
@@ -23,6 +56,12 @@ class BleConfig {
     this.highDensityScanPause = const Duration(seconds: 12),
     this.normalScanPause = const Duration(seconds: 5),
     this.highDensityRelayProbability = 0.65,
+    this.rssiFloorNormal = -90,
+    this.rssiFloorHighDensity = -78,
+    this.dutyCyclePeriod = const Duration(seconds: 15),
+    this.dutyCycleNormal = 0.33,
+    this.dutyCycleBatterySaver = 0.13,
+    this.dutyCycleHighDensity = 0.20,
   });
 
   /// Use [MockBleService] instead of the real BLE stack.
@@ -78,6 +117,32 @@ class BleConfig {
   /// in high-density mode. Probabilistic dropping reduces mesh flooding when
   /// many peers are simultaneously relaying the same message.
   final double highDensityRelayProbability;
+
+  /// Minimum acceptable RSSI in normal mode. Peers weaker than this are
+  /// ignored by the scanner. -90 dBm is extremely weak but still usable
+  /// for text messaging in metal ship corridors.
+  final int rssiFloorNormal;
+
+  /// Minimum acceptable RSSI in high-density mode. When many peers are
+  /// visible, tighten the RSSI floor to focus on peers actually in useful
+  /// range and reduce connection churn from distant/flaky peripherals.
+  final int rssiFloorHighDensity;
+
+  /// Total period for one duty cycle (ON + OFF).
+  /// E.g. 15 seconds: scan for 5s ON, then 10s OFF at 0.33 ratio.
+  final Duration dutyCyclePeriod;
+
+  /// Fraction of [dutyCyclePeriod] spent scanning in normal mode.
+  /// 0.33 = 5s ON / 10s OFF in a 15s period.
+  final double dutyCycleNormal;
+
+  /// Fraction of [dutyCyclePeriod] spent scanning in battery saver mode.
+  /// 0.13 = ~2s ON / 13s OFF in a 15s period.
+  final double dutyCycleBatterySaver;
+
+  /// Fraction of [dutyCyclePeriod] spent scanning in high-density mode.
+  /// 0.20 = 3s ON / 12s OFF in a 15s period.
+  final double dutyCycleHighDensity;
 
   /// Create config from environment variables
   factory BleConfig.fromEnvironment() {

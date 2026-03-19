@@ -42,6 +42,9 @@ class PeerDiscovered extends DiscoveryEvent {
     this.isRelayed = false,
     this.hopCount = 0,
     this.fullPhotoCount = 0,
+    this.publicKeyHex,
+    this.transportId,
+    this.transportType,
   });
 
   final String peerId;
@@ -63,10 +66,17 @@ class PeerDiscovered extends DiscoveryEvent {
   final int hopCount;
   /// Total number of profile photos available via fff4.
   final int fullPhotoCount;
+  /// X25519 public key hex — the true cryptographic identity for dedup.
+  final String? publicKeyHex;
+  /// Original transport-level ID (BLE UUID, LAN session ID) before canonical
+  /// resolution. null when transport ID equals canonical ID.
+  final String? transportId;
+  /// Transport type that discovered this peer ("ble", "lan", "wifiAware").
+  final String? transportType;
 
   @override
   List<Object?> get props =>
-      [peerId, name, userId, age, bio, position, interests, thumbnailData, photoThumbnails, rssi, isRelayed, hopCount, fullPhotoCount];
+      [peerId, name, userId, age, bio, position, interests, thumbnailData, photoThumbnails, rssi, isRelayed, hopCount, fullPhotoCount, publicKeyHex, transportId, transportType];
 }
 
 /// Peer data updated (signal strength, new info)

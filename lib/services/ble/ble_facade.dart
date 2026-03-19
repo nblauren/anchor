@@ -17,6 +17,9 @@ import 'discovery/ble_scanner.dart';
 import 'discovery/profile_reader.dart';
 import 'gatt/gatt_server.dart';
 import 'gatt/gatt_write_queue.dart';
+import '../mesh/gossip_sync_service.dart';
+import '../mesh/mesh_packet.dart';
+import 'binary_message_codec.dart';
 import 'mesh/mesh_relay_service.dart';
 import 'transfer/photo_transfer_handler.dart';
 
@@ -41,6 +44,7 @@ class BleFacade implements BleServiceInterface {
   BleFacade({
     required this.config,
     this.encryptionService,
+    this.gossipSyncService,
   });
 
   final BleConfig config;
@@ -49,6 +53,9 @@ class BleFacade implements BleServiceInterface {
   /// Noise_XK / XChaCha20-Poly1305.  When null, encryption is skipped
   /// (backward-compatible plaintext mode).
   final EncryptionService? encryptionService;
+
+  /// Optional gossip sync service for GCS-based message reconciliation.
+  final GossipSyncService? gossipSyncService;
 
   final _noiseHandshakeController =
       StreamController<NoiseHandshakeReceived>.broadcast();
@@ -63,19 +70,21 @@ class BleFacade implements BleServiceInterface {
   late final PhotoTransferHandler _photoTransfer;
   late final GattServer _gattServer;
 
-  // UUIDs (used by central-side notification routing)
-  static final _thumbnailCharUuid =
-      UUID.fromString('0000fff2-0000-1000-8000-00805f9b34fb');
-  static final _messagingCharUuid =
-      UUID.fromString('0000fff3-0000-1000-8000-00805f9b34fb');
-  static final _fullPhotosCharUuid =
-      UUID.fromString('0000fff4-0000-1000-8000-00805f9b34fb');
-  static final _reversePathCharUuid =
-      UUID.fromString('0000fff5-0000-1000-8000-00805f9b34fb');
+  // UUIDs — centralized in BleUuids (ble_config.dart)
+  static final _thumbnailCharUuid = BleUuids.thumbnailChar;
+  static final _messagingCharUuid = BleUuids.messagingChar;
+  static final _fullPhotosCharUuid = BleUuids.fullPhotosChar;
+  static final _reversePathCharUuid = BleUuids.reversePathChar;
 
   // Status
   BleStatus _status = BleStatus.disabled;
   bool _isInitialized = false;
+
+  /// Cached set of blocked peer IDs.  Checked at the transport layer to
+  /// reject messages from blocked peers before they consume BLE bandwidth
+  /// or queue space.  Updated by the presentation layer (SettingsBloc /
+  /// DiscoveryBloc) whenever the block list changes.
+  final Set<String> _blockedPeerIds = {};
 
   // Stream controllers
   final _statusController = StreamController<BleStatus>.broadcast();
@@ -180,6 +189,11 @@ class BleFacade implements BleServiceInterface {
         final peer = _visiblePeers[peerId];
         return peer != null && !peer.isRelayed;
       };
+      // Ed25519 announce signing: wire EncryptionService sign/verify into mesh relay
+      _meshRelay.signData = (data) async =>
+          await encryptionService?.sign(data);
+      _meshRelay.verifySignature = (data, sig, pk) async =>
+          await encryptionService?.verify(data, sig, pk) ?? false;
 
       // PhotoTransferHandler: photo send/receive, preview, requests
       _photoTransfer = PhotoTransferHandler(
@@ -351,7 +365,14 @@ class BleFacade implements BleServiceInterface {
         return;
       }
 
-      // JSON payload (text messages, photo_start, legacy photo_chunk)
+      // ── Binary MeshPacket (version byte 0x01) ─────────────────────────
+      // First byte != '{' (0x7B) and is 0x01 → binary MeshPacket wire format.
+      if (BinaryMessageCodec.isBinary(data) && data[0] == 0x01) {
+        _handleBinaryPacket(data, centralId, centralUuid);
+        return;
+      }
+
+      // ── Legacy JSON payload (text messages, photo_start, etc.) ─────────
       final jsonStr = utf8.decode(data);
       final json = jsonDecode(jsonStr) as Map<String, dynamic>;
 
@@ -373,6 +394,17 @@ class BleFacade implements BleServiceInterface {
       if (fromPeerId != centralId && fromPeerId.isNotEmpty) {
         final senderName = json['sender_name'] as String?;
         _registerCentralAsPeer(centralId, fromPeerId, senderName);
+      }
+
+      // Transport-layer block filtering: reject messages from blocked peers
+      // before they consume queue space or processing time.
+      if (_blockedPeerIds.contains(fromPeerId) ||
+          _blockedPeerIds.contains(centralId)) {
+        Logger.debug(
+          'BLE: Rejected message from blocked peer $fromPeerId (type=$type)',
+          'BLE',
+        );
+        return;
       }
 
       // Peer is alive — refresh their timeout timer.
@@ -415,6 +447,304 @@ class BleFacade implements BleServiceInterface {
     } catch (e) {
       Logger.error('BleService: Write receive failed', e, null, 'BLE');
     }
+  }
+
+  /// Handle an incoming binary MeshPacket (version byte 0x01).
+  ///
+  /// Decodes the packet, resolves sender identity, applies block filtering,
+  /// and dispatches to the appropriate handler based on [PacketType].
+  void _handleBinaryPacket(Uint8List data, String centralId, UUID centralUuid) {
+    final decoded = BinaryMessageCodec.decode(data);
+    if (decoded == null) {
+      Logger.warning('BLE: Failed to decode binary MeshPacket (${data.length}B)', 'BLE');
+      return;
+    }
+
+    final packet = decoded.packet;
+
+    // Resolve the Central UUID to the peer ID we use for E2EE sessions and
+    // _visiblePeers. On iOS, a device's Central UUID differs from its
+    // Peripheral UUID (which is how we originally discovered and keyed them).
+    // Without this resolution, enc.decrypt(centralId) finds no session and
+    // silently drops the message.
+    //
+    // Resolution order:
+    //   1. _visiblePeers[centralId] exists → Central is already keyed (Android
+    //      or pre-registered via _registerCentralAsPeer)
+    //   2. Look up userId from _visiblePeers keyed by centralId, then find
+    //      the Peripheral UUID entry with the same userId
+    //   3. Fall back to centralId (first message before profile read)
+    final fromPeerId = _resolveIncomingPeerId(
+      centralId,
+      truncatedSenderId: packet.senderId,
+    );
+
+    // Ed25519 signature verification (non-blocking, graceful degradation).
+    // If the packet has a signature, attempt to verify it using the sender's
+    // stored Ed25519 public key. Failures are logged but the packet is still
+    // processed to avoid breaking connectivity during rollout.
+    if (packet.signature != null && encryptionService != null) {
+      final parts = MeshPacket.extractSignature(data);
+      if (parts != null) {
+        encryptionService!
+            .verifyFromPeer(fromPeerId, parts.unsigned, parts.signature)
+            .then((valid) {
+          if (!valid) {
+            Logger.warning(
+              'BLE: Ed25519 signature verification failed for packet from '
+              '${centralId.substring(0, min(8, centralId.length))}',
+              'BLE',
+            );
+          } else {
+            Logger.debug(
+              'BLE: Ed25519 signature verified for packet from '
+              '${centralId.substring(0, min(8, centralId.length))}',
+              'BLE',
+            );
+          }
+        }, onError: (e) {
+          Logger.debug(
+            'BLE: Ed25519 verification error: $e',
+            'BLE',
+          );
+        });
+      }
+    }
+
+    Logger.info(
+      'BleService: [RECV] binary type=${packet.type.name} from '
+      'central=${centralId.substring(0, min(8, centralId.length))} '
+      '(${data.length}B)',
+      'BLE',
+    );
+
+    // Block filtering
+    if (_blockedPeerIds.contains(fromPeerId) ||
+        _blockedPeerIds.contains(centralId)) {
+      Logger.debug(
+        'BLE: Rejected binary packet from blocked peer $fromPeerId',
+        'BLE',
+      );
+      return;
+    }
+
+    _refreshPeerTimeout(centralId);
+
+    // Cache raw bytes for gossip fulfillment (relayable types only)
+    if (packet.messageId.isNotEmpty) {
+      gossipSyncService?.cacheMessage(packet.messageId, data);
+    }
+
+    switch (packet.type) {
+      case PacketType.message:
+        _handleBinaryChatMessage(packet, fromPeerId);
+      case PacketType.handshake:
+        final hs = BinaryMessageCodec.decodeHandshakePayload(packet);
+        if (hs != null) {
+          _handleBinaryHandshake(hs, fromPeerId);
+        }
+      case PacketType.anchorDrop:
+        _handleDropAnchor(fromPeerId);
+      case PacketType.reaction:
+        final reaction = BinaryMessageCodec.decodeReactionPayload(packet);
+        if (reaction != null) {
+          _handleBinaryReaction(reaction, fromPeerId, packet.timestamp);
+        }
+      case PacketType.peerAnnounce:
+      case PacketType.neighborList:
+        // Mesh control messages — keep as JSON in payload for now
+        try {
+          final json = jsonDecode(utf8.decode(packet.payload)) as Map<String, dynamic>;
+          if (packet.type == PacketType.peerAnnounce) {
+            _meshRelay.handlePeerAnnounce(json, fromPeerId);
+          } else {
+            _meshRelay.handleNeighborList(json);
+          }
+        } catch (e) {
+          Logger.warning('BLE: Failed to parse mesh payload from binary packet', 'BLE');
+        }
+      case PacketType.gossipSync:
+        _handleGossipSync(packet, fromPeerId);
+      case PacketType.gossipRequest:
+        _handleGossipRequest(packet, fromPeerId);
+      default:
+        Logger.debug('BLE: Unhandled binary packet type: ${packet.type.name}', 'BLE');
+    }
+  }
+
+  /// Handle a binary-encoded chat message.
+  void _handleBinaryChatMessage(MeshPacket packet, String fromPeerId) {
+    final chat = BinaryMessageCodec.decodeChatPayload(packet);
+    if (chat == null) {
+      Logger.warning('BLE: Failed to decode binary chat payload', 'BLE');
+      return;
+    }
+
+    final messageId = packet.messageId;
+
+    // Deduplicate
+    if (messageId.isNotEmpty) {
+      if (!_seenMessageIds.tryAdd(messageId)) {
+        Logger.info('BleService: Duplicate binary message ignored: $messageId', 'BLE');
+        return;
+      }
+    }
+
+    // If the binary payload carries the full sender userId (bit2 flag),
+    // always use it as the canonical peer ID — it's the authoritative identity.
+    // This definitively resolves the sender even when _resolveIncomingPeerId
+    // returned a wrong/stale ID or the raw Central UUID.
+    var resolvedPeerId = fromPeerId;
+    final senderUserId = chat.senderUserId;
+    if (senderUserId != null && senderUserId.isNotEmpty) {
+      resolvedPeerId = senderUserId;
+      // Register the mapping so future packets (reactions, drops) from this
+      // Central UUID also resolve correctly.
+      _registerCentralAsPeer(fromPeerId, senderUserId, chat.senderName);
+    }
+
+    // Check if message is for us (using truncated IDs)
+    final ownUserId = _gattServer.ownUserId;
+    final ownTruncated = MeshPacket.truncateIdSync(ownUserId);
+    final isForUs = packet.isBroadcast || packet.recipientId == ownTruncated;
+
+    if (isForUs) {
+      if (chat.isEncrypted && chat.nonce != null && chat.ciphertext != null) {
+        // Encrypted path
+        final enc = encryptionService;
+        if (enc != null) {
+          final encPayload = EncryptedPayload(
+            nonce: chat.nonce!,
+            ciphertext: chat.ciphertext!,
+          );
+          enc.decrypt(resolvedPeerId, encPayload).then((plaintextBytes) {
+            if (plaintextBytes == null) {
+              Logger.warning(
+                'E2EE binary decrypt failed for ${resolvedPeerId.substring(0, min(8, resolvedPeerId.length))}',
+                'E2EE',
+              );
+              return;
+            }
+            try {
+              final inner =
+                  jsonDecode(utf8.decode(plaintextBytes)) as Map<String, dynamic>;
+              final message = ReceivedMessage(
+                fromPeerId: resolvedPeerId,
+                messageId: messageId,
+                type: chat.messageType,
+                content: inner['content'] as String? ?? '',
+                timestamp: packet.timestamp,
+                replyToId: inner['reply_to_id'] as String?,
+                isEncrypted: true,
+              );
+              _messageReceivedController.add(message);
+            } catch (e) {
+              Logger.error('E2EE binary inner envelope parse failed', e, null, 'E2EE');
+            }
+          });
+          return;
+        }
+      }
+
+      // Plaintext path
+      final message = ReceivedMessage(
+        fromPeerId: resolvedPeerId,
+        messageId: messageId,
+        type: chat.messageType,
+        content: chat.content ?? '',
+        timestamp: packet.timestamp,
+        replyToId: chat.replyToId,
+        isEncrypted: false,
+      );
+      _messageReceivedController.add(message);
+    } else {
+      // Not for us — relay via mesh (full binary path, no JSON conversion).
+      _meshRelay.maybeRelayBinaryPacket(packet, resolvedPeerId);
+    }
+  }
+
+  /// Handle a binary-encoded handshake message.
+  ///
+  /// Emits on [noiseHandshakeStream] so TransportManager can resolve the
+  /// BLE Central UUID → canonical userId before calling EncryptionService.
+  /// This avoids the ID mismatch where _pending stores under canonical ID
+  /// but the Central UUID differs (especially on iOS where Central ≠ Peripheral).
+  void _handleBinaryHandshake(DecodedHandshake hs, String fromPeerId) {
+    Logger.info(
+      'E2EE: Binary handshake step ${hs.step} from '
+      '${fromPeerId.substring(0, min(8, fromPeerId.length))}',
+      'E2EE',
+    );
+
+    // Route through noiseHandshakeStream → TransportManager for canonical
+    // ID resolution, just like JSON handshakes (line 861).
+    // TransportManager resolves Central UUID → canonical userId via
+    // PeerRegistry, then calls enc.processHandshakeMessage(canonicalId).
+    // Outbound replies are routed via enc.outboundHandshakeStream →
+    // TransportManager._routeOutboundHandshake.
+    _noiseHandshakeController.add(NoiseHandshakeReceived(
+      fromPeerId: fromPeerId,
+      step: hs.step,
+      payload: hs.payload,
+    ));
+  }
+
+  /// Handle a binary-encoded reaction.
+  void _handleBinaryReaction(DecodedReaction reaction, String fromPeerId, DateTime timestamp) {
+    _reactionReceivedController.add(ReactionReceived(
+      fromPeerId: fromPeerId,
+      messageId: reaction.targetMessageId,
+      emoji: reaction.emoji,
+      action: reaction.action,
+      timestamp: timestamp,
+    ));
+    Logger.info(
+      'BleService: Binary reaction ${reaction.emoji} (${reaction.action}) from '
+      '${fromPeerId.substring(0, min(8, fromPeerId.length))}',
+      'BLE',
+    );
+  }
+
+  /// Handle an incoming gossip sync (GCS) from a peer. Delegates to
+  /// GossipSyncService for set reconciliation.
+  void _handleGossipSync(MeshPacket packet, String fromPeerId) {
+    final gossipSync = BinaryMessageCodec.decodeGossipSyncPayload(packet);
+    if (gossipSync == null) return;
+
+    final gossip = gossipSyncService;
+    if (gossip == null) return;
+
+    // Convert back to the Map format GossipSyncService expects
+    final payload = {
+      'gcs': base64Encode(gossipSync.gcsBytes),
+      'n': gossipSync.messageCount,
+    };
+    gossip.handleGossipSync(fromPeerId, payload);
+
+    Logger.debug(
+      'BLE: Received gossip sync from ${fromPeerId.substring(0, min(8, fromPeerId.length))} '
+      '(n=${gossipSync.messageCount})',
+      'BLE',
+    );
+  }
+
+  /// Handle an incoming gossip request from a peer.
+  void _handleGossipRequest(MeshPacket packet, String fromPeerId) {
+    final gossipReq = BinaryMessageCodec.decodeGossipRequestPayload(packet);
+    if (gossipReq == null) return;
+
+    Logger.debug(
+      'BLE: Received gossip request from ${fromPeerId.substring(0, min(8, fromPeerId.length))} '
+      '(${gossipReq.missingIndices.length} missing, originalN=${gossipReq.originalN})',
+      'BLE',
+    );
+
+    // Forward to GossipSyncService for fulfillment
+    gossipSyncService?.handleGossipRequest(
+      fromPeerId,
+      gossipReq.missingIndices,
+      gossipReq.originalN,
+    );
   }
 
   /// Resolve the sender's canonical peer ID from the payload's sender_id
@@ -600,19 +930,23 @@ class BleFacade implements BleServiceInterface {
       // Direct outbound connection unavailable. Try bidirectional path: if
       // the peer connected to OUR GATT server as a Central and subscribed to
       // fff3 notify, we can push the handshake via fff3. Falls back to fff5.
-      final hsJson = <String, dynamic>{
-        'type': 'noise_hs',
-        'step': step,
-        'payload': base64.encode(payload),
-        'sender_id': _gattServer.ownUserId,
-      };
-      final hsData = Uint8List.fromList(utf8.encode(jsonEncode(hsJson)));
+      final hsData = BinaryMessageCodec.encodeHandshake(
+        senderId: _gattServer.ownUserId,
+        step: step,
+        handshakePayload: payload,
+      );
+
+      // On iOS, Central UUID ≠ Peripheral UUID. peerId is the Peripheral
+      // UUID, but GattServer tracks Centrals by Central UUID.
+      final centralId = _resolveToCentralId(peerId);
+      final targetId = centralId ?? peerId;
 
       // Try fff3 bidirectional first, falls back to fff5 reverse-path.
-      final sent = await _gattServer.sendToCentralViaFff3(peerId, hsData);
+      final sent = await _gattServer.sendToCentralViaFff3(targetId, hsData);
       if (sent) {
         Logger.info(
-          'Handshake step $step sent via GATT notify to $peerId',
+          'Handshake step $step sent via GATT notify to '
+          '${targetId.substring(0, min(8, targetId.length))}',
           'E2EE',
         );
         return;
@@ -625,15 +959,13 @@ class BleFacade implements BleServiceInterface {
       );
       return;
     }
-    final json = <String, dynamic>{
-      'type': 'noise_hs',
-      'step': step,
-      'payload': base64.encode(payload),
-      'sender_id': _gattServer.ownUserId,
-    };
-    final data = Uint8List.fromList(utf8.encode(jsonEncode(json)));
+    final data = BinaryMessageCodec.encodeHandshake(
+      senderId: _gattServer.ownUserId,
+      step: step,
+      handshakePayload: payload,
+    );
     Logger.info(
-      'sendHandshakeMessage step $step: writing ${data.length}B via fff3 to '
+      'sendHandshakeMessage step $step: writing ${data.length}B binary via fff3 to '
       '${peerId.substring(0, min(8, peerId.length))}',
       'E2EE',
     );
@@ -657,10 +989,145 @@ class BleFacade implements BleServiceInterface {
   }
 
   @override
-  String? resolveToPeripheralId(String peerId) {
-    // PeerRegistry handles Central → Peripheral resolution at a higher level.
-    // This BLE-level method no longer maintains its own mapping.
+  String? resolveToPeripheralId(String centralId) {
+    // Check if this centralId has been registered (via _registerCentralAsPeer)
+    // with a userId that matches an existing Peripheral entry.
+    final directEntry = _visiblePeers[centralId];
+    if (directEntry?.userId != null) {
+      final userId = directEntry!.userId!;
+      // Look for a different BLE UUID (the Peripheral UUID from scanning)
+      // that shares this userId.
+      for (final entry in _visiblePeers.entries) {
+        if (entry.key != centralId && entry.value.userId == userId) {
+          return entry.key;
+        }
+      }
+    }
     return null;
+  }
+
+  /// Reverse of [resolveToPeripheralId]: given a Peripheral UUID (from
+  /// scanning), find the Central UUID that the same physical device used
+  /// when it connected to our GATT server. On iOS, these differ.
+  String? _resolveToCentralId(String peripheralId) {
+    final entry = _visiblePeers[peripheralId];
+    final userId = entry?.userId;
+    if (userId == null) return null;
+
+    // Look for a DIFFERENT key in _visiblePeers with the same userId —
+    // that's the Central UUID registered via _registerCentralAsPeer.
+    for (final other in _visiblePeers.entries) {
+      if (other.key != peripheralId && other.value.userId == userId) {
+        return other.key;
+      }
+    }
+    return null;
+  }
+
+  /// Resolve a BLE Central UUID to the peer ID used for E2EE sessions and
+  /// _visiblePeers. On iOS, Central UUID ≠ Peripheral UUID, so we need to
+  /// map the Central to the Peripheral UUID that was used when the peer was
+  /// originally scanned and the E2EE session was established.
+  ///
+  /// Uses the MeshPacket's truncated sender ID (FNV-1a of the sender's app
+  /// userId) to find the matching visible peer entry. This is the most
+  /// reliable cross-reference because:
+  ///   - The sender encodes their app userId when creating the MeshPacket
+  ///   - We learned the peer's app userId during GATT profile reading (fff1)
+  ///   - The truncated hash is deterministic and collision-resistant
+  ///
+  /// Falls back to [centralId] if no match is found.
+  String _resolveIncomingPeerId(String centralId,
+      {String? truncatedSenderId}) {
+    // Fast path: centralId is already a known peer with an E2EE session.
+    if (encryptionService?.hasSession(centralId) == true) {
+      return centralId;
+    }
+
+    // Use the truncated sender ID from the MeshPacket header to find the
+    // visible peer whose app userId produces the same hash. This works even
+    // when Central UUID ≠ Peripheral UUID (iOS).
+    if (truncatedSenderId != null && truncatedSenderId.isNotEmpty) {
+      for (final entry in _visiblePeers.entries) {
+        final userId = entry.value.userId;
+        if (userId != null && userId.isNotEmpty) {
+          final truncated = MeshPacket.truncateIdSync(userId);
+          if (truncated == truncatedSenderId) {
+            // Found the peer — use whichever ID has an active E2EE session.
+            if (encryptionService?.hasSession(entry.key) == true) {
+              Logger.info(
+                'BLE: Resolved Central ${centralId.substring(0, min(8, centralId.length))} '
+                '→ Peripheral ${entry.key.substring(0, min(8, entry.key.length))} '
+                'via truncated sender ID match (userId=${userId.substring(0, min(8, userId.length))})',
+                'BLE',
+              );
+              return entry.key;
+            }
+            // Also try the userId directly — TransportManager may have
+            // established the session under the canonical userId.
+            if (encryptionService?.hasSession(userId) == true) {
+              Logger.info(
+                'BLE: Resolved Central ${centralId.substring(0, min(8, centralId.length))} '
+                '→ userId ${userId.substring(0, min(8, userId.length))} '
+                'via truncated sender ID match',
+                'BLE',
+              );
+              return userId;
+            }
+            // No session yet but we know which peer this is — return the
+            // Peripheral UUID so the message at least routes correctly.
+            Logger.debug(
+              'BLE: Matched Central ${centralId.substring(0, min(8, centralId.length))} '
+              'to peer ${entry.key.substring(0, min(8, entry.key.length))} but no '
+              'E2EE session found under any ID',
+              'BLE',
+            );
+            return entry.key;
+          }
+        }
+      }
+    }
+
+    // Check _visiblePeers[centralId] for a userId, then look for a sibling
+    // entry (different BLE UUID, same userId) that has a session.
+    final directEntry = _visiblePeers[centralId];
+    if (directEntry?.userId != null) {
+      final userId = directEntry!.userId!;
+      for (final entry in _visiblePeers.entries) {
+        if (entry.key != centralId && entry.value.userId == userId) {
+          if (encryptionService?.hasSession(entry.key) == true) {
+            Logger.info(
+              'BLE: Resolved Central ${centralId.substring(0, min(8, centralId.length))} '
+              '→ sibling ${entry.key.substring(0, min(8, entry.key.length))} '
+              '(shared userId)',
+              'BLE',
+            );
+            return entry.key;
+          }
+        }
+      }
+    }
+
+    // Last resort: check E2EE sessions by truncated hash. This handles the
+    // case where a peer reconnects with a new Central UUID before their profile
+    // has been read — _visiblePeers won't have the entry yet, but we may have
+    // a persisted session from a previous connection.
+    if (truncatedSenderId != null && truncatedSenderId.isNotEmpty) {
+      final enc = encryptionService;
+      if (enc != null) {
+        final sessionPeerId = enc.findSessionByTruncatedId(truncatedSenderId);
+        if (sessionPeerId != null) {
+          Logger.info(
+            'BLE: Resolved Central ${centralId.substring(0, min(8, centralId.length))} '
+            '→ session peer $sessionPeerId via E2EE session truncated ID match',
+            'BLE',
+          );
+          return sessionPeerId;
+        }
+      }
+    }
+
+    return centralId;
   }
 
   /// Returns the app userId for a given BLE peripheral UUID, or null if
@@ -697,6 +1164,17 @@ class BleFacade implements BleServiceInterface {
   @override
   void resumeMeshRelay() {
     _meshRelay.resumeBroadcasts();
+  }
+
+  @override
+  void updateBlockedPeerIds(Set<String> blockedIds) {
+    _blockedPeerIds
+      ..clear()
+      ..addAll(blockedIds);
+    Logger.info(
+      'BLE block list updated: ${blockedIds.length} blocked peers',
+      'BLE',
+    );
   }
 
   /// Called by MeshRelayService when a relayed peer is discovered via mesh.
@@ -804,6 +1282,7 @@ class BleFacade implements BleServiceInterface {
           'broadcastProfile: embedding pk ${myPublicKeyHex.substring(0, 8)}…',
           'E2EE');
     }
+    final myEd25519PublicKeyHex = encryptionService?.localEd25519PublicKeyHex;
     final payloadWithKey = myPublicKeyHex != null
         ? BroadcastPayload(
             userId: payload.userId,
@@ -815,6 +1294,7 @@ class BleFacade implements BleServiceInterface {
             thumbnailBytes: payload.thumbnailBytes,
             thumbnailsList: payload.thumbnailsList,
             publicKeyHex: myPublicKeyHex,
+            signingPublicKeyHex: myEd25519PublicKeyHex,
           )
         : payload;
     await _gattServer.broadcastProfile(payloadWithKey);
@@ -923,10 +1403,11 @@ class BleFacade implements BleServiceInterface {
 
     final userId = json['userId'] as String?;
 
-    // Extract E2EE public key now; store it AFTER _emitPeer so that
+    // Extract E2EE public keys now; store AFTER _emitPeer so that
     // TransportManager._migrateIfNeeded (triggered by _emitPeer) sets
     // _bleIdForCanonical before peerKeyStoredStream fires.
     final peerPublicKeyHex = json['pk'] as String?;
+    final peerEd25519KeyHex = json['spk'] as String?;
 
     // If this peer was previously tracked under a different BLE UUID
     // (e.g. MAC rotation), emit PeerIdChanged so consumers can update
@@ -997,16 +1478,16 @@ class BleFacade implements BleServiceInterface {
       // Include E2EE public key so TransportManager stores it under the
       // canonical peer ID (after _migrateIfNeeded resolves BLE UUID → LAN UUID).
       publicKeyHex: peerPublicKeyHex?.length == 64 ? peerPublicKeyHex : null,
+      signingPublicKeyHex: peerEd25519KeyHex?.length == 64 ? peerEd25519KeyHex : null,
     );
 
     _emitPeer(updatedPeer);
 
-    // Store the peer's E2EE public key directly — the DiscoveredPeer relay
-    // path (peer.publicKeyHex → TransportManager) can be null if the key is
-    // absent from the profile, but we always have the raw JSON here.
-    if (peerPublicKeyHex != null && peerPublicKeyHex.length == 64) {
-      encryptionService?.storePeerPublicKey(peerId, peerPublicKeyHex);
-    }
+    // NOTE: Do NOT call storePeerPublicKey(peerId, ...) here — `peerId` is
+    // the BLE peripheral UUID, not the canonical userId. Storing the key
+    // under the BLE UUID creates a duplicate discovered_peers row.
+    // TransportManager handles storePeerPublicKey under the canonical ID
+    // after resolving via PeerRegistry.
 
     // Record the profile version from the GATT read so the scanner can
     // skip future reads when the advertised version hasn't changed.
@@ -1125,13 +1606,30 @@ class BleFacade implements BleServiceInterface {
   /// is identified by their Peripheral UUID (which we connected to as Central).
   void _onFff3Notification(String peerId, Uint8List data) {
     try {
+      if (data.isEmpty) return;
+
       // Binary photo chunks use the same dispatch as write-received.
-      if (data.isNotEmpty && (data[0] == 0x02 || data[0] == 0x03)) {
+      if (data[0] == 0x02 || data[0] == 0x03) {
         if (data[0] == 0x02) {
           _photoTransfer.handleBinaryPhotoChunk(data, peerId);
         } else {
           _photoTransfer.handleBinaryThumbnailChunk(data, peerId);
         }
+        return;
+      }
+
+      // Binary MeshPacket (version byte 0x01) — same dispatch as write path.
+      // Without this check, binary data falls through to utf8.decode() and crashes.
+      if (BinaryMessageCodec.isBinary(data) && data[0] == 0x01) {
+        Logger.debug(
+          'BleService: [RECV] binary MeshPacket via fff3-notify '
+          '(${data.length}B) from ${peerId.substring(0, min(8, peerId.length))}',
+          'BLE',
+        );
+        // Synthesize a UUID from the peerId string for the binary handler.
+        // On the notify path the peerId is the Peripheral UUID we connected to.
+        final peerUuid = UUID.fromString(peerId);
+        _handleBinaryPacket(data, peerId, peerUuid);
         return;
       }
 
@@ -1169,6 +1667,20 @@ class BleFacade implements BleServiceInterface {
   /// ConnectionManager and _visiblePeers mappings.
   void _onReversePathNotification(String peerId, Uint8List data) {
     try {
+      if (data.isEmpty) return;
+
+      // Binary MeshPacket on the reverse path — dispatch to binary handler.
+      if (BinaryMessageCodec.isBinary(data) && data[0] == 0x01) {
+        Logger.debug(
+          'BleService: [RECV] binary MeshPacket via reverse-path '
+          '(${data.length}B) from ${peerId.substring(0, min(8, peerId.length))}',
+          'BLE',
+        );
+        final peerUuid = UUID.fromString(peerId);
+        _handleBinaryPacket(data, peerId, peerUuid);
+        return;
+      }
+
       final jsonStr = utf8.decode(data);
       final json = jsonDecode(jsonStr) as Map<String, dynamic>;
       final type = json['type'] as String? ?? 'message';
@@ -1366,6 +1878,24 @@ class BleFacade implements BleServiceInterface {
           }
         }
 
+        // Try bidirectional path: if the peer connected to our GATT server
+        // as a Central, push the message back via fff3/fff5 GATT notification.
+        final centralId = _resolveToCentralId(peerId);
+        final targetId = centralId ?? peerId;
+        final biData = _serializeMessagePayload(
+          payload,
+          destinationUserId: destinationUserId,
+        );
+        final sent = await _gattServer.sendToCentralViaFff3(targetId, biData);
+        if (sent) {
+          Logger.info(
+            'BleService: Message sent via fff3 bidirectional to '
+            '${targetId.substring(0, min(8, targetId.length))}',
+            'BLE',
+          );
+          return true;
+        }
+
         Logger.info(
             'BleService: Peer not reachable: $peerId — triggering scan', 'BLE');
         _scanner.triggerImmediateScan();
@@ -1439,18 +1969,13 @@ class BleFacade implements BleServiceInterface {
       final ownUserId = _gattServer.ownUserId;
       final ownName = _gattServer.pendingPayload?.name;
       final destinationUserId = _getAppUserIdForPeer(peerId);
-      final anchorPayload = <String, dynamic>{
-        'type': 'drop_anchor',
-        'sender_id': ownUserId,
-        if (ownName != null && ownName.isNotEmpty) 'sender_name': ownName,
-        'timestamp': DateTime.now().toIso8601String(),
-        if (_meshRelay.enabled) ...{
-          'destination_id': destinationUserId ?? '',
-          'ttl': config.meshTtl,
-          'relay_path': <String>[ownUserId],
-        },
-      };
-      final data = Uint8List.fromList(utf8.encode(jsonEncode(anchorPayload)));
+      final data = BinaryMessageCodec.encodeAnchorDrop(
+        senderId: ownUserId,
+        senderName: ownName,
+        destinationUserId: destinationUserId,
+        ttl: config.meshTtl,
+        meshEnabled: _meshRelay.enabled,
+      );
 
       if (conn == null || !conn.canSendMessages) {
         // Direct connection unavailable — try mesh relay
@@ -1538,17 +2063,12 @@ class BleFacade implements BleServiceInterface {
       }
 
       final ownUserId = _gattServer.ownUserId;
-      final ownName = _gattServer.pendingPayload?.name;
-      final payload = <String, dynamic>{
-        'type': 'reaction',
-        'sender_id': ownUserId,
-        if (ownName != null && ownName.isNotEmpty) 'sender_name': ownName,
-        'message_id': messageId,
-        'emoji': emoji,
-        'action': action,
-        'timestamp': DateTime.now().toIso8601String(),
-      };
-      final data = Uint8List.fromList(utf8.encode(jsonEncode(payload)));
+      final data = BinaryMessageCodec.encodeReaction(
+        senderId: ownUserId,
+        targetMessageId: messageId,
+        emoji: emoji,
+        action: action,
+      );
 
       if (conn == null || !conn.canSendMessages) {
         Logger.info(
@@ -1572,6 +2092,34 @@ class BleFacade implements BleServiceInterface {
       return success;
     } catch (e) {
       Logger.error('BleService: Reaction send failed', e, null, 'BLE');
+      return false;
+    }
+  }
+
+  @override
+  Future<bool> sendRawBytes(String peerId, Uint8List data) async {
+    _ensureInitialized();
+
+    try {
+      var conn = _connectionManager.getConnection(peerId);
+      if (conn == null || !conn.canSendMessages) {
+        final peripheral = _connectionManager.getPeripheral(peerId);
+        if (peripheral != null) {
+          conn = await _connectionManager.connect(peerId, peripheral);
+        }
+      }
+
+      if (conn == null || !conn.canSendMessages) return false;
+
+      return _writeQueue.enqueue(
+        peerId: peerId,
+        peripheral: conn.peripheral,
+        characteristic: conn.messagingChar!,
+        data: data,
+        priority: WritePriority.meshRelay,
+      );
+    } catch (e) {
+      Logger.error('BleService: sendRawBytes failed', e, null, 'BLE');
       return false;
     }
   }
@@ -1610,53 +2158,34 @@ class BleFacade implements BleServiceInterface {
     );
   }
 
-  /// Serialize a [MessagePayload] to bytes for writing to fff3.
+  /// Serialize a [MessagePayload] to binary MeshPacket bytes for writing to fff3.
   ///
-  /// When an E2EE session exists for [peerId] (and [encryptionService] is
-  /// injected), the message content is encrypted with XChaCha20-Poly1305.
-  /// The outer JSON carries `v:1, n:<nonce>, c:<ciphertext>` and the
-  /// plaintext `content` field is OMITTED.
-  ///
-  /// Old clients (no E2EE) omit `v` and carry plaintext `content` as before.
   /// Synchronous serialization (used for mesh relay path — no E2EE for relayed
   /// messages since we don't know the final hop's session state).
   Uint8List _serializeMessagePayload(MessagePayload payload,
       {String? destinationUserId}) {
     final ownUserId = _gattServer.ownUserId;
     final ownName = _gattServer.pendingPayload?.name;
-    final json = <String, dynamic>{
-      'type': 'message',
-      'sender_id': ownUserId,
-      // Include sender name so the receiver can display it immediately even
-      // before GATT profile reading completes (common on Android where GATT
-      // reads are less reliable).
-      if (ownName != null && ownName.isNotEmpty) 'sender_name': ownName,
-      'message_type': payload.type.index,
-      'message_id': payload.messageId,
-      'content': payload.content,
-      'timestamp': DateTime.now().toIso8601String(),
-    };
-    if (payload.replyToId != null) {
-      json['reply_to_id'] = payload.replyToId;
-    }
-    if (_meshRelay.enabled) {
-      json['origin_id'] = ownUserId;
-      json['destination_id'] = destinationUserId ?? '';
-      json['ttl'] = config.meshTtl;
-      json['relay_path'] = <String>[ownUserId];
-    }
-    return Uint8List.fromList(utf8.encode(jsonEncode(json)));
+    return BinaryMessageCodec.encodeMessage(
+      senderId: ownUserId,
+      messageId: payload.messageId,
+      messageType: payload.type,
+      content: payload.content,
+      senderName: ownName,
+      replyToId: payload.replyToId,
+      destinationUserId: destinationUserId,
+      ttl: config.meshTtl,
+      meshEnabled: _meshRelay.enabled,
+    );
   }
 
   /// Async serialization with optional E2EE encryption.
   ///
   /// When [EncryptionService] has an active session for [peerId], the message
-  /// content is encrypted with XChaCha20-Poly1305 before serialisation.
-  /// Outer JSON: `{ ..., "v":1, "n":"<nonce>", "c":"<ciphertext>" }`.
-  /// Plaintext `content` is OMITTED from the outer JSON when encrypted.
+  /// content is encrypted with XChaCha20-Poly1305 before binary serialisation.
+  /// The encrypted flag is set in the MeshPacket header.
   ///
-  /// Fallback: if encryption fails or no session exists, sends unencrypted
-  /// with `"v":0` (or omits `v`) so old clients still understand the message.
+  /// Fallback: if encryption fails or no session exists, sends unencrypted.
   Future<Uint8List> _serializeMessagePayloadEncrypted(
     MessagePayload payload, {
     required String peerId,
@@ -1677,22 +2206,17 @@ class BleFacade implements BleServiceInterface {
       final encrypted = await enc.encrypt(peerId, innerBytes);
       if (encrypted != null) {
         final ownName = _gattServer.pendingPayload?.name;
-        final json = <String, dynamic>{
-          'type': 'message',
-          'sender_id': ownUserId,
-          if (ownName != null && ownName.isNotEmpty) 'sender_name': ownName,
-          'message_type': payload.type.index,
-          'message_id': payload.messageId,
-          'timestamp': DateTime.now().toIso8601String(),
-          ...enc.encryptedFields(encrypted), // adds v, n, c
-        };
-        if (_meshRelay.enabled) {
-          json['origin_id'] = ownUserId;
-          json['destination_id'] = destinationUserId ?? '';
-          json['ttl'] = config.meshTtl;
-          json['relay_path'] = <String>[ownUserId];
-        }
-        return Uint8List.fromList(utf8.encode(jsonEncode(json)));
+        return BinaryMessageCodec.encodeEncryptedMessage(
+          senderId: ownUserId,
+          messageId: payload.messageId,
+          messageType: payload.type,
+          nonce: encrypted.nonce,
+          ciphertext: encrypted.ciphertext,
+          senderName: ownName,
+          destinationUserId: destinationUserId,
+          ttl: config.meshTtl,
+          meshEnabled: _meshRelay.enabled,
+        );
       }
     }
 
@@ -1749,13 +2273,57 @@ class BleFacade implements BleServiceInterface {
     required String peerId,
     required String messageId,
     required String photoId,
-  }) {
+  }) async {
     _ensureInitialized();
-    return _photoTransfer.sendPhotoRequest(
+
+    // Try direct Central→Peripheral GATT write first.
+    final directSuccess = await _photoTransfer.sendPhotoRequest(
       peerId: peerId,
       messageId: messageId,
       photoId: photoId,
     );
+    if (directSuccess) return true;
+
+    // Direct write failed (no Central connection to this peer).
+    // Fall back to bidirectional path: if the peer connected to OUR GATT
+    // server as a Central and subscribed to fff3 notify, push the request
+    // back via GATT notification. This handles the common case where only
+    // ONE device established the Central→Peripheral connection.
+    Logger.info(
+      'BleService: Direct photo_request write failed for $peerId — '
+      'trying fff3 bidirectional fallback',
+      'BLE',
+    );
+
+    final requestPayload = Uint8List.fromList(utf8.encode(jsonEncode({
+      'type': 'photo_request',
+      'sender_id': _gattServer.ownUserId,
+      'message_id': messageId,
+      'photo_id': photoId,
+    })));
+
+    // On iOS, Central UUID ≠ Peripheral UUID. peerId is the Peripheral UUID
+    // (from scanning), but GattServer tracks Centrals by Central UUID.
+    // Resolve: find the Central UUID that shares the same userId as peerId.
+    final centralId = _resolveToCentralId(peerId);
+    final targetId = centralId ?? peerId;
+
+    final sent = await _gattServer.sendToCentralViaFff3(targetId, requestPayload);
+    if (sent) {
+      Logger.info(
+        'BleService: photo_request sent via fff3 bidirectional to '
+        '${targetId.substring(0, min(8, targetId.length))}',
+        'BLE',
+      );
+      return true;
+    }
+
+    Logger.info(
+      'BleService: photo_request failed — peer $peerId unreachable via '
+      'both direct write and fff3 bidirectional',
+      'BLE',
+    );
+    return false;
   }
 
   @override

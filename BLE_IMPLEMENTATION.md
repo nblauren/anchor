@@ -16,9 +16,9 @@ Anchor's BLE layer enables fully offline peer-to-peer profile discovery, messagi
 
 ## What Is Implemented
 
-### Core BLE Service (`FlutterBluePlusBleService`)
+### Core BLE Service (`BleFacade`)
 
-Despite the historical filename, this class uses `bluetooth_low_energy` internally.
+Entry point: `lib/services/ble/ble_facade.dart`. Delegates to focused sub-modules (`connection/`, `discovery/`, `gatt/`, `mesh/`, `transfer/`).
 
 | Capability | Status |
 |---|---|
@@ -48,22 +48,27 @@ Despite the historical filename, this class uses `bluetooth_low_energy` internal
 
 ## Service and Characteristic UUIDs
 
+All UUIDs are centralized in `BleUuids` (`lib/services/ble/ble_config.dart`). These are proper 128-bit random UUIDs (not the BLE SIG `0000xxxx` range) to avoid collisions with third-party devices.
+
 ```
-Main Service:           0000fff0-0000-1000-8000-00805f9b34fb
+Service:   b4b605d3-7718-42a5-88ec-6fbe8c6c3cb9
 
-fff1  Profile metadata    READ, NOTIFY
-      Payload: JSON { userId, name, age, positionId, interestIds[], hopCount }
+Profile (fff1):   02c57431-2cc9-4b9c-9472-37a1efa02bc6   READ, NOTIFY
+      Payload: JSON { userId, name, age, positionId, interestIds[], hopCount, pk, spk }
 
-fff2  Primary thumbnail   READ, NOTIFY
+Thumbnail (fff2): e353cf0a-85c2-4d2a-b4b1-8a0fa1bfb1f1   READ, NOTIFY
       Payload: raw JPEG bytes, capped at 30 KB
       Note: NSFW-screened locally before being written here
 
-fff3  Messaging           WRITE, NOTIFY
-      Payload: JSON { messageId, senderId, timestamp, type, content, ttl? }
+Messaging (fff3): 6c4c3e0a-8d29-48b6-83c3-2d19ee02d398   WRITE, NOTIFY
+      Payload: Binary MeshPacket (signed, encrypted) or JSON (legacy/handshake)
       Message types: text | photo | typing | read | photoPreview | photoRequest | anchorDrop
 
-fff4  Full photo set      READ
-      Payload: profile photo thumbnails concatenated; served on-demand when central subscribes
+Photos (fff4):    79118c43-92a1-48b7-98af-d28a0a9dbc72   READ, NOTIFY
+      Payload: profile photo thumbnails concatenated; served on-demand
+
+Reverse (fff5):   9386c87b-79fb-4b5c-ab38-d0e6a0fffd03   WRITE, NOTIFY
+      Payload: reverse-path writes from peer to server
 ```
 
 ---
@@ -91,13 +96,13 @@ fff4  Full photo set      READ
 ```
 Device A (Central)                      Device B (Peripheral)
       |                                        |
-      |─── scan for fff0 UUID ────────────────>|
-      |<── advertisement (fff0 + local name) ──|
+      |─── scan (match svc UUID or "A<ver>") ─>|
+      |<── advertisement (svc UUID + "A3") ────|
       |─── GATT connect ──────────────────────>|
-      |─── read fff1 ─────────────────────────>|
+      |─── read profile char ─────────────────>|
       |<── { userId, name, age, positionId,    |
-      |      interestIds, hopCount } ──────────|
-      |─── read fff2 ─────────────────────────>|
+      |      interestIds, hopCount, pk, spk } ─|
+      |─── read thumbnail char ───────────────>|
       |<── JPEG bytes (≤30 KB) ────────────────|
       |                                        |
       |  emit DiscoveredPeer                   |
@@ -110,7 +115,7 @@ Device A (Central)                      Device B (Peripheral)
 
 ## Messaging Protocol
 
-Messages are JSON-encoded and written to fff3. The receiver's GATT server notifies subscribed centrals.
+Messages are written to the messaging characteristic as binary MeshPackets (signed + encrypted) or JSON (legacy/handshake). The receiver's GATT server notifies subscribed centrals.
 
 ```json
 {
@@ -133,17 +138,17 @@ Messages are JSON-encoded and written to fff3. The receiver's GATT server notifi
 1. Sender selects photo in UI
    └─> ImageService compresses to target size, generates thumbnail
    └─> ChatBloc emits SendPhotoMessage
-   └─> BLE: write photoPreview to fff3 { messageId, thumbnailBytes, type:"photoPreview" }
+   └─> BLE: write photoPreview to messaging char { messageId, thumbnailBytes, type:"photoPreview" }
 
 2. Receiver's GATT server receives photoPreview
    └─> ChatBloc emits PhotoPreviewReceived
    └─> UI shows preview with Accept / Decline
 
 3. Receiver taps Accept
-   └─> BLE: write photoRequest to fff3 { messageId, accepted:true, type:"photoRequest" }
+   └─> BLE: write photoRequest to messaging char { messageId, accepted:true, type:"photoRequest" }
 
 4. Sender receives photoRequest { accepted:true }
-   └─> Full photo transfer begins over fff3/fff4 in MTU-sized chunks
+   └─> Full photo transfer begins over messaging/photos chars in MTU-sized chunks
    └─> Progress reported via photoProgressStream (0.0 → 1.0)
 
 5. Transfer complete
@@ -176,7 +181,7 @@ Messages are JSON-encoded and written to fff3. The receiver's GATT server notifi
 | `photoChunkSize` | 4096 B | Adjusted per negotiated MTU |
 | `messageTimeout` | 30 s | GATT write timeout |
 | `peerLostTimeout` | 2 min | Emit peerLost after this idle time |
-| `maxThumbnailSize` | 30 KB | fff2 cap |
+| `maxThumbnailSize` | 30 KB | Thumbnail char cap |
 | `maxPhotoSize` | 500 KB | Full photo cap before compression |
 | `highDensityPeerThreshold` | 15 | Peers visible before high-density mode |
 | `highDensityScanPause` | 12 s | Scan pause in high-density mode |

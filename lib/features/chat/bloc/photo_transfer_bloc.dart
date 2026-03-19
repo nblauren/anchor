@@ -13,7 +13,6 @@ import '../../../data/repositories/chat_repository.dart';
 import '../../../data/repositories/peer_repository.dart';
 import '../../../services/ble/ble.dart' as ble;
 import '../../../services/chat_event_bus.dart';
-import '../../../services/encryption/encryption.dart';
 import '../../../services/image_service.dart';
 import '../../../services/message_send_service.dart';
 import '../../../services/nearby/nearby.dart';
@@ -225,7 +224,6 @@ class PhotoTransferBloc
     required MessageSendService messageSendService,
     String? ownUserId,
     HighSpeedTransferService? highSpeedTransferService,
-    EncryptionService? encryptionService,
   })  : _chatRepository = chatRepository,
         _peerRepository = peerRepository,
         _imageService = imageService,
@@ -234,7 +232,6 @@ class PhotoTransferBloc
         _chatEventBus = chatEventBus,
         _messageSendService = messageSendService,
         _highSpeedService = highSpeedTransferService,
-        _encryptionService = encryptionService,
         super(const PhotoTransferState()) {
     on<PhotoProgressUpdated>(_onPhotoTransferProgress);
     on<PhotoPreviewArrived>(_onPhotoPreviewReceived);
@@ -337,7 +334,6 @@ class PhotoTransferBloc
   final ChatEventBus _chatEventBus;
   final MessageSendService _messageSendService;
   final HighSpeedTransferService? _highSpeedService;
-  final EncryptionService? _encryptionService;
 
   StreamSubscription<ble.PhotoTransferProgress>? _photoProgressSub;
   StreamSubscription<ble.ReceivedPhoto>? _photoReceivedSub;
@@ -530,11 +526,20 @@ class PhotoTransferBloc
       var pending = state.pendingOutgoingPhotos[request.photoId];
 
       if (pending == null) {
+        Logger.info(
+          'PhotoTransferBloc: photoId ${request.photoId} not in pendingOutgoingPhotos '
+          '(${state.pendingOutgoingPhotos.length} entries: '
+          '${state.pendingOutgoingPhotos.keys.join(', ')}), '
+          'trying DB fallback…',
+          'PhotoTransfer',
+        );
         final storedMessage =
             await _chatRepository.findMessageByPhotoId(request.photoId);
         if (storedMessage == null || storedMessage.photoPath == null) {
           Logger.warning(
-            'PhotoTransferBloc: photo_request for unknown photoId ${request.photoId} — not found in DB',
+            'PhotoTransferBloc: photo_request for unknown photoId ${request.photoId} — '
+            'not found in DB (storedMessage=${storedMessage != null}, '
+            'photoPath=${storedMessage?.photoPath})',
             'PhotoTransfer',
           );
           return;
@@ -770,10 +775,13 @@ class PhotoTransferBloc
     try {
       final payload = event.payload;
 
-      final bleDeviceId =
+      // Resolve the canonical peerId: prefer the mapping from the BLE
+      // wifiTransferReady signal (guaranteed canonical), fall back to the
+      // Nearby payload's fromPeerId (sender's userId from transfer header).
+      final canonicalPeerId =
           _transferToBleId.remove(payload.transferId) ?? payload.fromPeerId;
 
-      if (await _peerRepository.isPeerBlocked(bleDeviceId)) return;
+      if (await _peerRepository.isPeerBlocked(canonicalPeerId)) return;
 
       // ── Preview / thumbnail transfer ──────────────────────────────────
       if (payload.transferId.startsWith('preview-')) {
@@ -784,7 +792,7 @@ class PhotoTransferBloc
         );
 
         final conversation =
-            await _chatRepository.getOrCreateConversation(bleDeviceId);
+            await _chatRepository.getOrCreateConversation(canonicalPeerId);
 
         final thumbnailPath =
             await _imageService.saveChatThumbnail(payload.data);
@@ -801,16 +809,16 @@ class PhotoTransferBloc
 
         final message = await _chatRepository.receivePhotoPreview(
           conversationId: conversation.id,
-          senderId: bleDeviceId,
+          senderId: canonicalPeerId,
           textContent: metadata,
           thumbnailPath: thumbnailPath,
         );
 
         if (message == null) return; // Duplicate
 
-        final wifiSender = await _peerRepository.getPeerById(bleDeviceId);
+        final wifiSender = await _peerRepository.getPeerById(canonicalPeerId);
         await _notificationService.showMessageNotification(
-          fromPeerId: bleDeviceId,
+          fromPeerId: canonicalPeerId,
           fromName: wifiSender?.name ?? activePeerName ?? 'Someone nearby',
           messagePreview: 'Photo – Tap to download',
         );
@@ -822,22 +830,9 @@ class PhotoTransferBloc
 
       // ── Full photo transfer ───────────────────────────────────────────
       final conversation =
-          await _chatRepository.getOrCreateConversation(bleDeviceId);
+          await _chatRepository.getOrCreateConversation(canonicalPeerId);
 
-      Uint8List photoBytes = payload.data;
-      if (photoBytes.length > 25 && photoBytes[0] == 0x01) {
-        final enc = _encryptionService;
-        if (enc != null) {
-          final decrypted = await enc.decryptBytes(
-            bleDeviceId,
-            EncryptedPayload(
-              nonce: photoBytes.sublist(1, 25),
-              ciphertext: photoBytes.sublist(25),
-            ),
-          );
-          if (decrypted != null) photoBytes = decrypted;
-        }
-      }
+      final Uint8List photoBytes = payload.data;
 
       final photoPath = await _imageService.saveReceivedPhoto(photoBytes);
 
@@ -856,7 +851,7 @@ class PhotoTransferBloc
       } else {
         final message = await _chatRepository.receiveMessage(
           conversationId: conversation.id,
-          senderId: bleDeviceId,
+          senderId: canonicalPeerId,
           contentType: MessageContentType.photo,
           photoPath: photoPath,
         );
@@ -866,7 +861,7 @@ class PhotoTransferBloc
       }
 
       Logger.info(
-        'PhotoTransferBloc: Received photo via Wi-Fi Direct from ${bleDeviceId.substring(0, 8)}',
+        'PhotoTransferBloc: Received photo via Wi-Fi Direct from ${canonicalPeerId.substring(0, 8)}',
         'PhotoTransfer',
       );
     } catch (e) {

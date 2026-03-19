@@ -43,16 +43,23 @@ class BleScanner {
   /// Whether currently scanning.
   bool get isScanning => _isScanning;
 
-  // ==================== Scan Timing ====================
+  /// Current dynamic RSSI floor. Peers below this are dropped.
+  int get rssiFloor => _rssiFloor;
 
-  static const _normalScanDuration = Duration(seconds: 5);
-  static const _normalScanPause = Duration(seconds: 15);
-  static const _batteryScanDuration = Duration(seconds: 2);
-  static const _batteryScanPause = Duration(seconds: 30);
+  // ==================== Scan Timing (Duty Cycling) ====================
 
-  Duration _scanDuration = _normalScanDuration;
-  Duration _scanPause = _normalScanPause;
+  /// Current duty cycle ratio (fraction of period spent scanning).
+  double _dutyCycleRatio = 0.33;
+
   bool _explicitBatterySaver = false;
+
+  /// Temporary override: scan at 100% duty for one cycle (e.g. after
+  /// triggerImmediateScan). Resets to normal after one period completes.
+  bool _forceFullDutyCycle = false;
+
+  /// Current RSSI floor — peers below this are ignored. Updated by
+  /// [_recalculateTiming] based on density and battery mode.
+  int _rssiFloor = -90;
 
   // ==================== Scan Dedup ====================
 
@@ -71,8 +78,7 @@ class BleScanner {
 
   // ==================== Service UUID ====================
 
-  static final _serviceUuid =
-      UUID.fromString('0000fff0-0000-1000-8000-00805f9b34fb');
+  static final _serviceUuid = BleUuids.service;
 
   // ==================== Callbacks ====================
 
@@ -138,7 +144,8 @@ class BleScanner {
     }
     _lastImmediateScanAt = now;
 
-    Logger.info('BleScanner: Triggering immediate scan cycle', 'BLE');
+    Logger.info('BleScanner: Triggering immediate scan (full duty cycle)', 'BLE');
+    _forceFullDutyCycle = true;
     _scanRestartTimer?.cancel();
     try {
       _central.stopDiscovery().catchError((_) {});
@@ -191,8 +198,23 @@ class BleScanner {
   void _runScanCycle() async {
     if (!_isScanning) return;
 
+    final period = _config.dutyCyclePeriod;
+    final ratio = _forceFullDutyCycle ? 1.0 : _dutyCycleRatio;
+    _forceFullDutyCycle = false; // reset one-shot override
+
+    final onTime = Duration(
+      milliseconds: (period.inMilliseconds * ratio).round(),
+    );
+    final offTime = Duration(
+      milliseconds: (period.inMilliseconds * (1.0 - ratio)).round(),
+    );
+
     try {
-      Logger.info('BleScanner: Scan cycle starting...', 'BLE');
+      Logger.info(
+        'BleScanner: Duty cycle ON=${onTime.inMilliseconds}ms '
+        'OFF=${offTime.inMilliseconds}ms (ratio=${ratio.toStringAsFixed(2)})',
+        'BLE',
+      );
 
       // Scan without a service UUID filter so we also discover Android
       // devices whose 128-bit UUID may be dropped or moved to the scan
@@ -201,17 +223,19 @@ class BleScanner {
       // "A:" local-name prefix, so non-Anchor devices are discarded cheaply.
       await _central.startDiscovery();
 
-      // Stop after scan duration and schedule next cycle
+      // Stop after ON time, pause for OFF time, then restart
       _scanRestartTimer?.cancel();
-      _scanRestartTimer = Timer(_scanDuration, () async {
+      _scanRestartTimer = Timer(onTime, () async {
         if (!_isScanning) return;
         try {
           await _central.stopDiscovery();
         } catch (_) {}
 
-        // Pause then restart
-        if (_isScanning) {
-          _scanRestartTimer = Timer(_scanPause, _runScanCycle);
+        if (_isScanning && offTime > Duration.zero) {
+          _scanRestartTimer = Timer(offTime, _runScanCycle);
+        } else if (_isScanning) {
+          // 0 OFF time = continuous scan (0-peer mode)
+          _runScanCycle();
         }
       });
     } catch (e) {
@@ -219,7 +243,7 @@ class BleScanner {
 
       if (_isScanning) {
         _scanRestartTimer?.cancel();
-        _scanRestartTimer = Timer(_scanPause, _runScanCycle);
+        _scanRestartTimer = Timer(offTime, _runScanCycle);
       }
     }
   }
@@ -233,6 +257,12 @@ class BleScanner {
 
     // Skip peers recently marked as gone
     if (_connectionManager.isDeadPeer(deviceId)) {
+      return;
+    }
+
+    // Dynamic RSSI floor — drop peers below the current threshold.
+    // The floor is tighter in high-density mode to focus on nearby peers.
+    if (rssi < _rssiFloor) {
       return;
     }
 
@@ -280,32 +310,21 @@ class BleScanner {
     onPeerNeedsProfile?.call(deviceId, peripheral);
   }
 
-  /// Decode local name — supports both formats:
+  /// Decode local name.
   ///
   /// **v2 (current)**: "A<profileVersion>" (e.g. "A3", "A17")
   ///   Minimal format that keeps the advertisement under 31 bytes so the
   ///   service UUID stays in the primary AD packet. Name/age come from fff1.
   ///
-  /// **v1 (legacy)**: "A:<name>:<age>[:<profileVersion>]"
-  ///   Old format that exceeded 31 bytes and caused discovery failures.
-  ///   Still accepted for backward compatibility with older app versions.
+  /// The legacy v1 format "A:<name>:<age>" is rejected — it leaks identity
+  /// in the advertisement and causes the service UUID to overflow into the
+  /// scan response, breaking cross-platform discovery.
   ({String name, int? age, int? profileVersion})? _decodeLocalName(
       String advName) {
     if (!advName.startsWith('A')) return null;
 
-    // v1 legacy format: "A:<name>:<age>[:<version>]"
-    if (advName.startsWith('A:')) {
-      final parts = advName.split(':');
-      if (parts.length < 2) return null;
-      final name = parts[1];
-      final age = parts.length >= 3 ? int.tryParse(parts[2]) : null;
-      final profileVersion = parts.length >= 4 ? int.tryParse(parts[3]) : null;
-      return (
-        name: name.isEmpty ? 'Anchor User' : name,
-        age: (age == null || age == 0) ? null : age,
-        profileVersion: profileVersion,
-      );
-    }
+    // Reject legacy v1 format "A:<name>:<age>[:<version>]" — leaks identity.
+    if (advName.startsWith('A:')) return null;
 
     // v2 compact format: "A<profileVersion>" (e.g. "A3", "A17")
     if (advName.length >= 2) {
@@ -324,19 +343,26 @@ class BleScanner {
   }
 
   void _recalculateTiming({int? visiblePeerCount}) {
+    final count = visiblePeerCount ?? 0;
+
     if (_explicitBatterySaver) {
-      _scanDuration = _batteryScanDuration;
-      _scanPause = _batteryScanPause;
+      _dutyCycleRatio = _config.dutyCycleBatterySaver;
+      _rssiFloor = _config.rssiFloorNormal;
       return;
     }
-    final isHighDensity =
-        (visiblePeerCount ?? 0) >= _config.highDensityPeerThreshold;
-    if (isHighDensity) {
-      _scanDuration = _batteryScanDuration;
-      _scanPause = _config.highDensityScanPause;
+
+    final isHighDensity = count >= _config.highDensityPeerThreshold;
+
+    if (count == 0) {
+      // No peers visible — scan continuously (100% duty) to find them fast.
+      _dutyCycleRatio = 1.0;
+      _rssiFloor = _config.rssiFloorNormal;
+    } else if (isHighDensity) {
+      _dutyCycleRatio = _config.dutyCycleHighDensity;
+      _rssiFloor = _config.rssiFloorHighDensity;
     } else {
-      _scanDuration = _normalScanDuration;
-      _scanPause = _config.normalScanPause;
+      _dutyCycleRatio = _config.dutyCycleNormal;
+      _rssiFloor = _config.rssiFloorNormal;
     }
   }
 }

@@ -5,6 +5,7 @@ import 'package:uuid/uuid.dart';
 
 import '../../../core/utils/logger.dart';
 import '../../mesh/bloom_filter.dart';
+import '../../mesh/mesh_packet.dart';
 import '../ble_config.dart';
 import '../ble_models.dart';
 import '../connection/connection_manager.dart';
@@ -271,6 +272,67 @@ class MeshRelayService {
     Logger.info(
       'MeshRelay: Flooded message to $relayCount peers '
           '(TTL remaining: ${ttl - 1})',
+      'BLE',
+    );
+  }
+
+  /// Relay a binary MeshPacket toward its destination.
+  ///
+  /// Pure binary path — no JSON conversion. Decrements TTL, applies dedup
+  /// and cycle detection, then forwards to connected peers.
+  void maybeRelayBinaryPacket(MeshPacket packet, String receivedFromPeerId) {
+    if (!_enabled) return;
+    if (packet.ttl <= 0) {
+      Logger.info('MeshRelay: Binary TTL exhausted, dropping', 'BLE');
+      return;
+    }
+
+    final messageId = packet.messageId;
+    if (messageId.isNotEmpty && isMessageSeen(messageId)) {
+      _trackRelayObservation(messageId);
+      Logger.debug('MeshRelay: Dedup dropped binary relay for $messageId', 'BLE');
+      return;
+    }
+    if (messageId.isNotEmpty) markMessageSeen(messageId);
+
+    // Cycle detection via sender ID
+    final ownUserId = getOwnUserId?.call() ?? '';
+    final ownTruncated = MeshPacket.truncateIdSync(ownUserId);
+    if (packet.senderId == ownTruncated) {
+      Logger.info('MeshRelay: Own packet returned, dropping', 'BLE');
+      return;
+    }
+
+    final relayPacket = packet.decrementTtl();
+    final data = relayPacket.serialize();
+
+    // Directed routing: if recipient is known, try best relay
+    if (!relayPacket.isBroadcast) {
+      final bestRelay = findBestRelayPeer(relayPacket.recipientId, receivedFromPeerId);
+      if (bestRelay != null) {
+        _writeRelayData(data, bestRelay);
+        Logger.info(
+          'MeshRelay: Directed binary relay (TTL ${relayPacket.ttl})',
+          'BLE',
+        );
+        return;
+      }
+    }
+
+    // Flood to all connected peers except sender
+    int relayCount = 0;
+    final isHighPriority = relayPacket.type == PacketType.handshake ||
+        relayPacket.type == PacketType.anchorDrop;
+    for (final targetPeerId in _connectionManager.connectedPeerIds) {
+      if (targetPeerId == receivedFromPeerId) continue;
+      if (!_connectionManager.canSendTo(targetPeerId)) continue;
+      if (!_shouldRelay(messageId: messageId, isHighPriority: isHighPriority)) continue;
+      _writeRelayData(data, targetPeerId);
+      relayCount++;
+    }
+
+    Logger.info(
+      'MeshRelay: Binary flood to $relayCount peers (TTL ${relayPacket.ttl})',
       'BLE',
     );
   }

@@ -289,6 +289,9 @@ class FakeBleService implements BleServiceInterface {
       String peerId, int step, Uint8List payload) async {}
 
   @override
+  Future<bool> sendRawBytes(String peerId, Uint8List data) async => true;
+
+  @override
   Stream<NoiseHandshakeReceived> get noiseHandshakeStream =>
       const Stream.empty();
 
@@ -300,4 +303,7 @@ class FakeBleService implements BleServiceInterface {
 
   @override
   void resumeMeshRelay() {}
+
+  @override
+  void updateBlockedPeerIds(Set<String> blockedIds) {}
 }

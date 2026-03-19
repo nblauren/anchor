@@ -113,7 +113,8 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   final ChatRepository _chatRepository;
   final PeerRepository _peerRepository;
   final TransportManager _transportManager;
-  final NotificationService _notificationService;
+  // ignore: unused_field
+  final NotificationService _notificationService; // kept for DI compat
   final String _ownUserId;
   final MessageSendService _messageSendService;
   final ChatEventBus _chatEventBus;
@@ -344,9 +345,25 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     try {
       // If this is for the current conversation, add to messages
       if (state.currentConversation?.id == event.message.conversationId) {
+        // Avoid duplicate: check if already in the in-memory list.
+        if (state.messages.any((m) => m.id == event.message.id)) return;
+
+        // Fetch quoted message if this is a reply.
+        final updatedQuoted =
+            Map<String, MessageEntry>.from(state.quotedMessages);
+        final replyId = event.message.replyToMessageId;
+        if (replyId != null && !updatedQuoted.containsKey(replyId)) {
+          final quoted = await _chatRepository.getMessageById(replyId);
+          if (quoted != null) updatedQuoted[replyId] = quoted;
+        }
+
         emit(state.copyWith(
           messages: [event.message, ...state.messages],
+          quotedMessages: updatedQuoted,
         ));
+
+        // Auto-mark as read since the chat is open.
+        add(const MarkMessagesRead());
       }
     } catch (e) {
       Logger.error('Failed to handle received message', e, null, 'ChatBloc');
@@ -354,18 +371,17 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   }
 
   /// Handle BLE message received from peer
+  /// Handle BLE message received from peer.
+  ///
+  /// DB persistence and notifications are handled by [IncomingMessageService].
+  /// This handler only processes non-persistable message types (read receipts)
+  /// and triggers mark-as-read when the chat is open.
   Future<void> _onBleMessageReceived(
     BleMessageReceived event,
     Emitter<ChatState> emit,
   ) async {
     try {
       final bleMsg = event.message;
-
-      // Discard messages from blocked peers
-      if (await _peerRepository.isPeerBlocked(bleMsg.fromPeerId)) return;
-
-      // wifiTransferReady signals are handled by PhotoTransferBloc.
-      if (bleMsg.type == ble.MessageType.wifiTransferReady) return;
 
       // Handle read receipt — peer opened our conversation and read our messages.
       if (bleMsg.type == ble.MessageType.read) {
@@ -401,61 +417,16 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         return;
       }
 
-      // Get or create conversation with this peer
-      final conversation =
-          await _chatRepository.getOrCreateConversation(bleMsg.fromPeerId);
-
-      final senderPeer =
-          await _peerRepository.getPeerById(bleMsg.fromPeerId);
-      await _notificationService.showMessageNotification(
-        fromPeerId: bleMsg.fromPeerId,
-        fromName: senderPeer?.name ?? state.currentConversation?.peerName ?? 'Someone nearby',
-        messagePreview: bleMsg.type == ble.MessageType.text
-            ? bleMsg.content
-            : 'Photo received',
-      );
-
-      // Save received message to database, preserving the sender's messageId
-      // so both sides share the same stable ID for reaction targeting.
-      // Returns null if duplicate (already in DB) — skip UI update.
-      final message = await _chatRepository.receiveMessage(
-        id: bleMsg.messageId,
-        conversationId: conversation.id,
-        senderId: bleMsg.fromPeerId,
-        contentType: bleMsg.type == ble.MessageType.text
-            ? MessageContentType.text
-            : MessageContentType.photo,
-        textContent:
-            bleMsg.type == ble.MessageType.text ? bleMsg.content : null,
-        replyToMessageId: bleMsg.replyToId,
-      );
-
-      // Duplicate message — already persisted and shown in UI.
-      if (message == null) return;
-
-      // If viewing this conversation, add to UI and immediately mark as read
+      // For text/photo messages: IncomingMessageService persists to DB and
+      // emits via ChatEventBus.messageAdded → _onMessageReceived handles
+      // the in-memory UI update. We just need to mark as read if this
+      // conversation is currently open.
       if (state.currentConversation?.peerId == bleMsg.fromPeerId) {
-        // Fetch quoted message if needed
-        final updatedQuoted = Map<String, MessageEntry>.from(state.quotedMessages);
-        final replyId = bleMsg.replyToId;
-        if (replyId != null && !updatedQuoted.containsKey(replyId)) {
-          final quoted = await _chatRepository.getMessageById(replyId);
-          if (quoted != null) updatedQuoted[replyId] = quoted;
-        }
-        emit(state.copyWith(
-          messages: [message, ...state.messages],
-          quotedMessages: updatedQuoted,
-        ));
-        add(const MarkMessagesRead());
+        // Small delay to let IncomingMessageService persist first.
+        Future.delayed(const Duration(milliseconds: 100), () {
+          if (!isClosed) add(const MarkMessagesRead());
+        });
       }
-
-      // Notify ConversationListBloc to refresh unread badges.
-      _chatEventBus.notifyConversationsChanged();
-
-      Logger.info(
-        'ChatBloc: Received BLE message from ${bleMsg.fromPeerId.substring(0, 8)}',
-        'Chat',
-      );
     } catch (e) {
       Logger.error('Failed to handle BLE message', e, null, 'ChatBloc');
     }

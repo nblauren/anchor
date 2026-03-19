@@ -482,21 +482,13 @@ class ConnectionManager {
   }
 
   // ==================== UUIDs ====================
-  // Duplicated here to avoid circular dependency with the main BLE service.
-  // These are protocol constants that never change.
-
-  static final _serviceUuid =
-      UUID.fromString('0000fff0-0000-1000-8000-00805f9b34fb');
-  static final _profileCharUuid =
-      UUID.fromString('0000fff1-0000-1000-8000-00805f9b34fb');
-  static final _thumbnailCharUuid =
-      UUID.fromString('0000fff2-0000-1000-8000-00805f9b34fb');
-  static final _messagingCharUuid =
-      UUID.fromString('0000fff3-0000-1000-8000-00805f9b34fb');
-  static final _fullPhotosCharUuid =
-      UUID.fromString('0000fff4-0000-1000-8000-00805f9b34fb');
-  static final _reversePathCharUuid =
-      UUID.fromString('0000fff5-0000-1000-8000-00805f9b34fb');
+  // UUIDs — centralized in BleUuids (ble_config.dart)
+  static final _serviceUuid = BleUuids.service;
+  static final _profileCharUuid = BleUuids.profileChar;
+  static final _thumbnailCharUuid = BleUuids.thumbnailChar;
+  static final _messagingCharUuid = BleUuids.messagingChar;
+  static final _fullPhotosCharUuid = BleUuids.fullPhotosChar;
+  static final _reversePathCharUuid = BleUuids.reversePathChar;
 }
 
 /// Queued connection request when the concurrent limit is reached.

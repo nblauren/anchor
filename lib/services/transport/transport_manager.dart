@@ -7,6 +7,7 @@ import 'package:wifi_aware_p2p/wifi_aware_p2p.dart' as wa;
 
 import '../../core/constants/app_constants.dart';
 import '../../core/utils/logger.dart';
+import '../ble/binary_message_codec.dart';
 import '../ble/ble_models.dart' as ble;
 import '../ble/ble_service_interface.dart';
 import '../encryption/encryption.dart';
@@ -47,6 +48,7 @@ class TransportManager {
     EncryptionService? encryptionService,
     TransportHealthTracker? healthTracker,
     HighSpeedTransferService? highSpeedTransferService,
+    GossipSyncService? gossipSyncService,
   })  : _lanService = lanService,
         _wifiAwareService = wifiAwareService,
         _bleService = bleService,
@@ -54,13 +56,22 @@ class TransportManager {
         _messageRouter = messageRouter,
         _encryptionService = encryptionService,
         _healthTracker = healthTracker,
-        _highSpeedService = highSpeedTransferService {
+        _highSpeedService = highSpeedTransferService,
+        _gossipSync = gossipSyncService {
     // Immediately subscribe to BLE streams so peer discovery works
     // even before initialize() is called (BleConnectionBloc starts BLE
     // independently).
     _subscribeToBle();
     _subscribeToHandshakeRouting();
     _subscribeToPeerRegistryChanges();
+    _wireGossipSync();
+    _subscribeToMeshRelay();
+
+    // Wire high-density peer count so relay uses probabilistic forwarding
+    // when many peers are visible (prevents network flooding).
+    _messageRouter.getVisiblePeerCount =
+        () => _peerRegistry.allCanonicalIds.length;
+
     Logger.info('TransportManager: BLE stream forwarding active', 'Transport');
   }
 
@@ -72,6 +83,7 @@ class TransportManager {
   final EncryptionService? _encryptionService;
   final TransportHealthTracker? _healthTracker;
   final HighSpeedTransferService? _highSpeedService;
+  final GossipSyncService? _gossipSync;
 
   /// Stores ownUserId from initialize() for Wi-Fi Direct sender ID.
   String? _ownUserId;
@@ -126,6 +138,7 @@ class TransportManager {
   StreamSubscription<bool>? _availabilityLanSub;
   StreamSubscription<bool>? _availabilitySub;
   StreamSubscription<PeerIdChangedEvent>? _peerRegistrySub;
+  StreamSubscription<RelayRequest>? _relaySub;
 
   // ==================== Public Getters ====================
 
@@ -168,6 +181,9 @@ class TransportManager {
     _initialized = true;
     _ownUserId = ownUserId;
     _messageRouter.setOwnUserId(ownUserId);
+
+    // Start gossip sync — periodic GCS broadcast to connected peers
+    _gossipSync?.start();
 
     // BLE is already initialized and started by BleConnectionBloc — don't
     // re-initialize here.
@@ -338,6 +354,7 @@ class TransportManager {
   }
 
   Future<void> stop() async {
+    _gossipSync?.stop();
     await _lanService.stop();
     await _wifiAwareService.stop();
     await _bleService.stop();
@@ -357,10 +374,19 @@ class TransportManager {
     Logger.info('TransportManager: cleared PeerRegistry', 'Transport');
   }
 
+  /// Push the current set of blocked peer IDs to the BLE transport layer.
+  ///
+  /// Messages from blocked peers are rejected at the BLE level before
+  /// consuming queue space or processing time.
+  void updateBlockedPeerIds(Set<String> blockedIds) {
+    _bleService.updateBlockedPeerIds(blockedIds);
+  }
+
   Future<void> dispose() async {
     await _availabilityLanSub?.cancel();
     await _availabilitySub?.cancel();
     await _peerRegistrySub?.cancel();
+    await _relaySub?.cancel();
 
     for (final sub in _bleSubscriptions) {
       await sub.cancel();
@@ -487,19 +513,6 @@ class TransportManager {
   }
 
   /// Encrypts [bytes] using the shared [MessageEnvelope] photo utility.
-  Future<Uint8List> _encryptPhotoBytes(
-    String canonicalPeerId,
-    Uint8List bytes,
-  ) async {
-    final enc = _encryptionService;
-    if (enc == null) return bytes;
-    return encryptPhotoBytes(
-      peerId: _encPeerId(canonicalPeerId),
-      bytes: bytes,
-      encService: enc,
-    );
-  }
-
   /// Decrypts photo bytes using the shared [MessageEnvelope] photo utility.
   Future<Uint8List> _decryptPhotoBytes(
     String fromPeerId,
@@ -551,6 +564,20 @@ class TransportManager {
 
     // Mark message as seen in MessageRouter dedup to prevent echo
     _messageRouter.markSeen(payload.messageId);
+
+    // Cache serialized bytes for gossip fulfillment
+    final ownId = _ownUserId;
+    if (ownId != null && payload.messageId.isNotEmpty) {
+      final serialized = BinaryMessageCodec.encodeMessage(
+        senderId: ownId,
+        messageId: payload.messageId,
+        messageType: payload.type,
+        content: payload.content,
+        replyToId: payload.replyToId,
+        destinationUserId: peerId,
+      );
+      _gossipSync?.cacheMessage(payload.messageId, serialized);
+    }
 
     // Try LAN if peer is reachable via LAN.
     if (transports.contains(TransportType.lan) && _isTransportAllowed(TransportType.lan)) {
@@ -613,10 +640,9 @@ class TransportManager {
     // Try LAN if peer is reachable via LAN.
     if (transports.contains(TransportType.lan) && _isTransportAllowed(TransportType.lan)) {
       final sw = Stopwatch()..start();
-      final encBytes = await _encryptPhotoBytes(peerId, photoData);
       final success = await _lanService.sendPhoto(
         peerId,
-        encBytes,
+        photoData,
         messageId,
         photoId: photoId,
       );
@@ -633,10 +659,9 @@ class TransportManager {
     // Try Wi-Fi Aware if peer is reachable via Wi-Fi Aware.
     if (transports.contains(TransportType.wifiAware) && _isTransportAllowed(TransportType.wifiAware)) {
       final sw = Stopwatch()..start();
-      final encBytes = await _encryptPhotoBytes(peerId, photoData);
       final success = await _wifiAwareService.sendPhoto(
         peerId,
-        encBytes,
+        photoData,
         messageId,
         photoId: photoId,
       );
@@ -872,9 +897,6 @@ class TransportManager {
 
       Logger.info('TransportManager: Attempting Wi-Fi Direct photo transfer', 'Transport');
 
-      // Encrypt for E2EE before sending (shared utility).
-      final wifiBytes = await _encryptPhotoBytes(peerId, photoData);
-
       final transferId = photoId ?? messageId;
       final sw = Stopwatch()..start();
 
@@ -886,7 +908,7 @@ class TransportManager {
       final sendFuture = hsService.sendPayload(
         transferId: transferId,
         peerId: peerId,
-        data: wifiBytes,
+        data: photoData,
         timeout: const Duration(seconds: 30),
         onAdvertising: () {
           if (!advertisingReady.isCompleted) advertisingReady.complete();
@@ -1040,6 +1062,159 @@ class TransportManager {
     }
   }
 
+  // ==================== Gossip Sync Wiring ====================
+
+  /// Wire GossipSyncService callbacks so it can send gossip payloads
+  /// over the best available transport for each peer.
+  void _wireGossipSync() {
+    final gossip = _gossipSync;
+    if (gossip == null) return;
+
+    gossip.onSendGossip = (peerId, payload) {
+      final ownId = _ownUserId;
+      if (ownId == null) return;
+
+      // Convert the JSON-style gossip payload to binary
+      final gcsBase64 = payload['gcs'] as String?;
+      final n = payload['n'] as int?;
+      if (gcsBase64 == null || n == null) return;
+
+      final gcsBytes = base64Decode(gcsBase64);
+      final binaryData = BinaryMessageCodec.encodeGossipSync(
+        senderId: ownId,
+        gcsBytes: Uint8List.fromList(gcsBytes),
+        messageCount: n,
+      );
+
+      // Send via best transport for this peer
+      _sendRawBytes(peerId, binaryData);
+    };
+
+    gossip.onMissingMessages = (peerId, missingIds, originalN) {
+      final ownId = _ownUserId;
+      if (ownId == null) return;
+
+      // Convert string indices back to int for the binary codec
+      final indices = missingIds
+          .map((s) => int.tryParse(s))
+          .whereType<int>()
+          .toList();
+      if (indices.isEmpty) return;
+
+      final binaryData = BinaryMessageCodec.encodeGossipRequest(
+        senderId: ownId,
+        recipientId: peerId,
+        missingIndices: indices,
+        originalN: originalN,
+      );
+
+      _sendRawBytes(peerId, binaryData);
+    };
+
+    gossip.onResendMessage = (peerId, messageBytes) {
+      _sendRawBytes(peerId, messageBytes);
+    };
+  }
+
+  // ==================== Mesh Relay Wiring ====================
+
+  /// Subscribe to MessageRouter's relay stream and forward packets to all
+  /// connected peers except the original sender.
+  ///
+  /// High-density mode: when many peers are visible, relay is probabilistic
+  /// (65% chance) to prevent network flooding on cruise ships with 50+ people.
+  void _subscribeToMeshRelay() {
+    _relaySub = _messageRouter.relayStream.listen((relay) {
+      // High-density probabilistic relay check
+      if (!_messageRouter.shouldRelay()) {
+        Logger.debug(
+          'Mesh relay: probabilistic skip for ${relay.messageId}',
+          'Mesh',
+        );
+        return;
+      }
+
+      // Build the relay MeshPacket and serialize it
+      final packet = MeshPacket(
+        type: relay.type,
+        ttl: relay.ttl,
+        flags: relay.flags,
+        timestamp: relay.timestamp,
+        senderId: MeshPacket.truncateIdSync(relay.senderId),
+        recipientId: MeshPacket.truncateIdSync(relay.recipientId),
+        payload: relay.payload,
+        messageId: relay.messageId,
+      );
+      final bytes = packet.serialize();
+
+      // Resolve the exclude peer to canonical so we don't relay back to sender
+      final excludeCanonical =
+          _peerRegistry.resolveCanonical(relay.excludeTransportId) ??
+              relay.excludeTransportId;
+
+      int relayCount = 0;
+      for (final canonicalId in _peerRegistry.allCanonicalIds) {
+        if (canonicalId == excludeCanonical) continue;
+        if (canonicalId == _ownUserId) continue;
+        _sendRawBytes(canonicalId, bytes);
+        relayCount++;
+      }
+
+      if (relayCount > 0) {
+        Logger.debug(
+          'Mesh relay: forwarded ${relay.type.name} (ttl=${relay.ttl}) '
+          'to $relayCount peer(s), msgId=${relay.messageId.substring(0, 8)}',
+          'Mesh',
+        );
+      }
+    });
+  }
+
+  /// Sign [packetBytes] with Ed25519 if an [EncryptionService] is available.
+  ///
+  /// Returns the signed bytes (with 64-byte signature appended and
+  /// [PacketFlags.hasSignature] flag set), or the original bytes if
+  /// signing is unavailable or fails.
+  Future<Uint8List> _maybeSign(Uint8List packetBytes) async {
+    if (_encryptionService == null) return packetBytes;
+    final signed = await MeshPacket.signSerialized(
+      packetBytes,
+      (data) => _encryptionService.sign(data),
+    );
+    return signed ?? packetBytes;
+  }
+
+  /// Send raw binary bytes to a peer via the best available transport.
+  ///
+  /// Packet bytes are Ed25519-signed before transmission when an
+  /// [EncryptionService] is available.
+  void _sendRawBytes(String peerId, Uint8List data) {
+    _maybeSign(data).then((signedData) {
+      final transports = _peerRegistry.transportsFor(peerId);
+      final bleId = _peerRegistry.bleIdFor(peerId) ?? peerId;
+
+      // Try LAN first
+      if (transports.contains(TransportType.lan) &&
+          _isTransportAllowed(TransportType.lan)) {
+        _lanService.sendRawBytes(peerId, signedData).then((success) {
+          if (!success && _bleService.isPeerReachable(bleId)) {
+            _bleService.sendRawBytes(bleId, signedData);
+          }
+        }, onError: (_) {
+          if (_bleService.isPeerReachable(bleId)) {
+            _bleService.sendRawBytes(bleId, signedData);
+          }
+        });
+        return;
+      }
+
+      // BLE fallback
+      if (_bleService.isPeerReachable(bleId)) {
+        _bleService.sendRawBytes(bleId, signedData);
+      }
+    });
+  }
+
   // ==================== Transport Subscriptions ====================
 
   void _subscribeToBle() {
@@ -1071,23 +1246,32 @@ class TransportManager {
           );
         }
 
-        // Emit peer discovered with canonical ID.
+        // Emit peer discovered with canonical ID + original transport ID
+        // so DiscoveryBloc can persist the alias inside upsertPeer().
         _peerDiscoveredController.add(
-          peer.peerId == canonical
-              ? peer
-              : ble.DiscoveredPeer(
-                  peerId: canonical,
-                  name: peer.name,
-                  bio: peer.bio,
-                  age: peer.age,
-                  thumbnailBytes: peer.thumbnailBytes,
-                  userId: peer.userId,
-                  publicKeyHex: peer.publicKeyHex,
-                  signingPublicKeyHex: peer.signingPublicKeyHex,
-                  interests: peer.interests,
-                  timestamp: peer.timestamp,
-                ),
+          ble.DiscoveredPeer(
+            peerId: canonical,
+            name: peer.name,
+            bio: peer.bio,
+            age: peer.age,
+            thumbnailBytes: peer.thumbnailBytes,
+            userId: peer.userId,
+            publicKeyHex: peer.publicKeyHex,
+            signingPublicKeyHex: peer.signingPublicKeyHex,
+            interests: peer.interests,
+            timestamp: peer.timestamp,
+            isRelayed: peer.isRelayed,
+            hopCount: peer.hopCount,
+            fullPhotoCount: peer.fullPhotoCount,
+            rssi: peer.rssi,
+            photoThumbnails: peer.photoThumbnails,
+            transportId: peer.peerId != canonical ? peer.peerId : null,
+            transportType: TransportType.ble.name,
+          ),
         );
+
+        // Track peer in gossip sync service
+        _gossipSync?.addPeer(canonical);
       }),
       _bleService.peerLostStream.listen((peerId) {
         final canonical = _peerRegistry.resolveCanonical(peerId) ?? peerId;
@@ -1097,6 +1281,7 @@ class TransportManager {
         // is fully lost (no remaining transports).
         if (result != null && _peerRegistry.getByCanonical(result) == null) {
           _peerLostController.add(canonical);
+          _gossipSync?.removePeer(canonical);
         }
       }),
       _bleService.messageReceivedStream.listen((msg) {
@@ -1238,20 +1423,25 @@ class TransportManager {
 
         // Always emit discovered (even for updated — LAN may have fresh profile data).
         _peerDiscoveredController.add(
-          peer.peerId == canonical
-              ? peer
-              : ble.DiscoveredPeer(
-                  peerId: canonical,
-                  name: peer.name,
-                  bio: peer.bio,
-                  age: peer.age,
-                  thumbnailBytes: peer.thumbnailBytes,
-                  userId: peer.userId,
-                  publicKeyHex: peer.publicKeyHex,
-                  signingPublicKeyHex: peer.signingPublicKeyHex,
-                  interests: peer.interests,
-                  timestamp: peer.timestamp,
-                ),
+          ble.DiscoveredPeer(
+            peerId: canonical,
+            name: peer.name,
+            bio: peer.bio,
+            age: peer.age,
+            thumbnailBytes: peer.thumbnailBytes,
+            userId: peer.userId,
+            publicKeyHex: peer.publicKeyHex,
+            signingPublicKeyHex: peer.signingPublicKeyHex,
+            interests: peer.interests,
+            timestamp: peer.timestamp,
+            rssi: peer.rssi,
+            isRelayed: peer.isRelayed,
+            hopCount: peer.hopCount,
+            fullPhotoCount: peer.fullPhotoCount,
+            photoThumbnails: peer.photoThumbnails,
+            transportId: peer.peerId != canonical ? peer.peerId : null,
+            transportType: TransportType.lan.name,
+          ),
         );
       }),
       _lanService.peerLostStream.listen((peerId) {
@@ -1289,17 +1479,8 @@ class TransportManager {
       _lanService.photoProgressStream.listen(
         _photoProgressController.add,
       ),
-      _lanService.photoReceivedStream.listen((photo) async {
-        final dec = await _decryptPhotoBytes(photo.fromPeerId, photo.photoBytes);
-        _photoReceivedController.add(dec == photo.photoBytes
-            ? photo
-            : ble.ReceivedPhoto(
-                fromPeerId: photo.fromPeerId,
-                messageId: photo.messageId,
-                photoBytes: dec,
-                timestamp: photo.timestamp,
-                photoId: photo.photoId,
-              ));
+      _lanService.photoReceivedStream.listen((photo) {
+        _photoReceivedController.add(photo);
       }),
       _lanService.anchorDropReceivedStream.listen(
         _anchorDropReceivedController.add,
@@ -1488,20 +1669,27 @@ class TransportManager {
         );
 
         final canonical = result.canonicalId;
+
         _peerDiscoveredController.add(
-          peer.peerId == canonical
-              ? peer
-              : ble.DiscoveredPeer(
-                  peerId: canonical,
-                  name: peer.name,
-                  bio: peer.bio,
-                  age: peer.age,
-                  thumbnailBytes: peer.thumbnailBytes,
-                  userId: peer.userId,
-                  publicKeyHex: peer.publicKeyHex,
-                  interests: peer.interests,
-                  timestamp: peer.timestamp,
-                ),
+          ble.DiscoveredPeer(
+            peerId: canonical,
+            name: peer.name,
+            bio: peer.bio,
+            age: peer.age,
+            thumbnailBytes: peer.thumbnailBytes,
+            userId: peer.userId,
+            publicKeyHex: peer.publicKeyHex,
+            signingPublicKeyHex: peer.signingPublicKeyHex,
+            interests: peer.interests,
+            timestamp: peer.timestamp,
+            rssi: peer.rssi,
+            isRelayed: peer.isRelayed,
+            hopCount: peer.hopCount,
+            fullPhotoCount: peer.fullPhotoCount,
+            photoThumbnails: peer.photoThumbnails,
+            transportId: peer.peerId != canonical ? peer.peerId : null,
+            transportType: TransportType.wifiAware.name,
+          ),
         );
       }),
       _wifiAwareService.peerLostStream.listen((peerId) {
@@ -1527,17 +1715,8 @@ class TransportManager {
       _wifiAwareService.photoProgressStream.listen(
         _photoProgressController.add,
       ),
-      _wifiAwareService.photoReceivedStream.listen((photo) async {
-        final dec = await _decryptPhotoBytes(photo.fromPeerId, photo.photoBytes);
-        _photoReceivedController.add(dec == photo.photoBytes
-            ? photo
-            : ble.ReceivedPhoto(
-                fromPeerId: photo.fromPeerId,
-                messageId: photo.messageId,
-                photoBytes: dec,
-                timestamp: photo.timestamp,
-                photoId: photo.photoId,
-              ));
+      _wifiAwareService.photoReceivedStream.listen((photo) {
+        _photoReceivedController.add(photo);
       }),
       _wifiAwareService.anchorDropReceivedStream.listen(
         _anchorDropReceivedController.add,

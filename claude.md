@@ -53,15 +53,24 @@ lib/
 - `lib/services/ble/ble_status_bloc.dart` - BLE adapter state tracking
 - `lib/services/ble/ble_connection_bloc.dart` - BLE lifecycle management
 
+### Mesh & Gossip Sync
+- `lib/services/mesh/golomb_coded_set.dart` - GCS encode/decode for probabilistic set reconciliation
+- `lib/services/mesh/gossip_sync_service.dart` - Periodic GCS-based gossip sync between connected peers
+- `lib/services/mesh/bloom_filter.dart` - Bloom filter + rotating variant for message dedup
+- `lib/services/mesh/message_router.dart` - Unified router with cross-transport dedup and TTL relay
+- `lib/services/mesh/peer_registry.dart` - Canonical peer identity management
+
 ### Transport Manager & LAN
 - `lib/services/transport/transport_manager.dart` - Unified LAN + Wi-Fi Aware + BLE router; owns E2EE handshake routing; maintains canonical peer ID maps (`_peerIdAlias`, `_bleIdForCanonical`)
 - `lib/services/lan/lan_transport_service_impl.dart` - LAN (TCP/UDP) transport; UDP beacon includes `pk` field; handles `noise_hs` TCP frames
 - `lib/services/lan/lan_transport_service.dart` - Abstract LAN interface
 
 ### End-to-End Encryption
-- `lib/services/encryption/encryption_service.dart` - Key gen/storage, Noise_XK handshake lifecycle, `hasSession()`, encrypt/decrypt
+- `lib/services/encryption/encryption_service.dart` - Key gen/storage, Noise_XK handshake lifecycle, `hasSession()`, encrypt/decrypt (with traffic padding)
 - `lib/services/encryption/noise_handshake.dart` - Pure Noise_XK state machine (`NoiseHandshakeProcessor`)
 - `lib/services/encryption/encryption_models.dart` - `NoiseSession`, `EncryptedPayload`, `HandshakeResult`, `HandshakeMessageOut`
+- `lib/services/encryption/traffic_padding.dart` - Length-prefixed padding to fixed block sizes (64–4096 bytes) for traffic analysis resistance
+- `lib/services/encryption/rate_limiter.dart` - Handshake rate limiting (10/min/peer, 30/min global) to prevent DoS
 
 ### Wi-Fi Direct / Nearby Transfer
 - `lib/services/nearby/high_speed_transfer_service.dart` - Abstract interface
@@ -91,18 +100,20 @@ lib/
 
 ## BLE Implementation Details
 
-### Service UUIDs (Hardcoded - Don't Change)
+### Service UUIDs (Centralized in `BleUuids` — `lib/services/ble/ble_config.dart`)
 ```dart
-Service:             0000fff0-0000-1000-8000-00805f9b34fb
-Profile Metadata:    0000fff1-0000-1000-8000-00805f9b34fb (READ, NOTIFY)
-Thumbnail Data:      0000fff2-0000-1000-8000-00805f9b34fb (READ)
-Messaging:           0000fff3-0000-1000-8000-00805f9b34fb (WRITE, NOTIFY)
+Service:          b4b605d3-7718-42a5-88ec-6fbe8c6c3cb9
+Profile (fff1):   02c57431-2cc9-4b9c-9472-37a1efa02bc6  (READ, NOTIFY)
+Thumbnail (fff2): e353cf0a-85c2-4d2a-b4b1-8a0fa1bfb1f1  (READ)
+Messaging (fff3): 6c4c3e0a-8d29-48b6-83c3-2d19ee02d398  (WRITE, NOTIFY)
+Photos (fff4):    79118c43-92a1-48b7-98af-d28a0a9dbc72  (READ, NOTIFY)
+Reverse (fff5):   9386c87b-79fb-4b5c-ab38-d0e6a0fffd03  (WRITE, NOTIFY)
 ```
 
 ### How Discovery Works
-1. Device A scans for service UUID `0000fff0-...`
-2. Device B advertises that UUID (peripheral mode)
-3. Device A connects via GATT, reads Profile Metadata (`fff1`) — includes `pk` (X25519 public key hex) — then reads Thumbnail (`fff2`)
+1. Device A scans for Anchor service UUID (unfiltered scan; matched by service UUID or `A<version>` local name)
+2. Device B advertises that UUID (peripheral mode) with compact `A<profileVersion>` local name
+3. Device A connects via GATT, reads Profile Metadata (profile char) — includes `pk` (X25519), `spk` (Ed25519) — then reads Thumbnail (thumbnail char)
 4. Device A emits `DiscoveredPeer` (with `publicKeyHex`) to stream
 5. `TransportManager` stores peer's public key via `encryptionService.storePeerPublicKey(canonicalId, pk)`
 6. DiscoveryBloc receives peer, filters blocked users, updates UI
@@ -114,7 +125,7 @@ Messaging:           0000fff3-0000-1000-8000-00805f9b34fb (WRITE, NOTIFY)
 2. Background FIFO queue (`_sendQueue`) processes sends sequentially:
    - `_sendTextInBackground()` → `TransportManager.sendMessage(peerId, payload)` (routes to best transport)
    - `_sendPhotoInBackground()` → compress + send photo preview
-3. Transport layer writes to peer (BLE fff3 or LAN TCP frame)
+3. Transport layer writes to peer (BLE messaging char or LAN TCP frame)
 4. Recipient receives message → decrypts if `v=1` → ChatBloc saves to DB → updates UI
 5. User can send multiple messages without waiting — each shows a pending indicator until delivered
 
@@ -123,7 +134,7 @@ Messaging:           0000fff3-0000-1000-8000-00805f9b34fb (WRITE, NOTIFY)
 2. Receiver sees "Photo — Tap to download" → taps to send `photo_request` via BLE
 3. Sender receives `photo_request` → fire-and-forget `_sendFullPhoto()`:
    a. If Wi-Fi Direct available: advertise on Nearby → send `wifiTransferReady` BLE signal → stream base64 chunks
-   b. If Wi-Fi Direct fails/times out: fallback to BLE chunking via fff3
+   b. If Wi-Fi Direct fails/times out: fallback to BLE chunking via messaging char
 4. Receiver gets `wifiTransferReady` BLE signal → browse Nearby → connect → receive chunks → save photo
 5. Two ID systems: BLE device IDs ≠ Nearby userIds — `_transferToBleId` map in ChatBloc resolves the mapping
 
@@ -222,7 +233,7 @@ class AppDatabase extends _$AppDatabase {
 **⚠️ Critical**: BLE only works on physical devices. Testing requires 2+ real phones.
 
 1. **Modify interface**: Update `lib/services/ble/ble_service_interface.dart`
-2. **Implement in FlutterBluePlusBleService**: `lib/services/ble/flutter_blue_plus_ble_service.dart`
+2. **Implement in BleFacade**: `lib/services/ble/ble_facade.dart` (delegates to sub-modules in `connection/`, `discovery/`, `gatt/`, `mesh/`, `transfer/`)
 3. **Implement in MockBleService**: `lib/services/ble/mock_ble_service.dart` (for testing)
 4. **Update models**: Add to `lib/services/ble/ble_models.dart` if needed
 5. **Test with mock**: Write unit tests
@@ -236,8 +247,8 @@ abstract class BleServiceInterface {
   Stream<NewEvent> get newEvent; // Add this
 }
 
-// 2. Implement in FlutterBluePlusBleService
-class FlutterBluePlusBleService implements BleServiceInterface {
+// 2. Implement in BleFacade (or relevant sub-module)
+class BleFacade implements BleServiceInterface {
   final _newEventController = StreamController<NewEvent>.broadcast();
 
   @override
@@ -608,7 +619,9 @@ Photo transfer is fully implemented with Wi-Fi Direct (primary) and BLE chunking
 ### "Improve battery life"
 
 **Already implemented**:
-- Adaptive scanning (normal / battery saver / high-density modes)
+- Adaptive scanning (normal / battery saver / high-density / zero-peers modes)
+- Dynamic RSSI floor (-90 dBm normal, -78 dBm high-density) drops weak peers
+- Continuous scan (no pause) when 0 peers visible
 - Battery saver mode toggle in Settings
 - Connection pooling (max 5 concurrent, LRU eviction)
 - Wi-Fi Direct only activates during active photo transfers (not always-on)

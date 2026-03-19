@@ -128,6 +128,9 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
           isRelayed: peer.isRelayed,
           hopCount: peer.hopCount,
           fullPhotoCount: peer.fullPhotoCount,
+          publicKeyHex: peer.publicKeyHex,
+          transportId: peer.transportId,
+          transportType: peer.transportType,
         ));
       }
     });
@@ -139,6 +142,9 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
     Emitter<DiscoveryState> emit,
   ) async {
     try {
+      // Load initial block list into transport layer
+      await _pushBlockListToTransport();
+
       emit(state.copyWith(isScanning: true));
       await _transportManager.startScanning();
       Logger.info('Discovery scanning started', 'DiscoveryBloc');
@@ -224,7 +230,9 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
           fullPhotoCount: event.fullPhotoCount,
         );
       } else {
-        // Direct peer: persist to database using canonical (userId-based) ID
+        // Direct peer: persist to database using canonical (userId-based) ID.
+        // Also registers the transport alias (if provided) inside the same
+        // transaction, guaranteeing the peer row exists before the FK is checked.
         final entry = await _peerRepository.upsertPeer(
           peerId: canonicalId,
           name: event.name,
@@ -234,6 +242,9 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
           interests: event.interests,
           thumbnailData: event.thumbnailData,
           rssi: event.rssi,
+          publicKeyHex: event.publicKeyHex,
+          transportId: event.transportId,
+          transportType: event.transportType,
         );
 
         peer = DiscoveredPeer.fromEntry(entry);
@@ -354,6 +365,9 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
     try {
       await _peerRepository.blockPeer(event.peerId);
 
+      // Push updated block list to transport layer for early rejection
+      await _pushBlockListToTransport();
+
       // Update local state
       final updatedPeers = state.peers.map((p) {
         if (p.peerId == event.peerId) {
@@ -376,6 +390,9 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
   ) async {
     try {
       await _peerRepository.unblockPeer(event.peerId);
+
+      // Push updated block list to transport layer
+      await _pushBlockListToTransport();
 
       // Update local state
       final updatedPeers = state.peers.map((p) {
@@ -589,6 +606,19 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
       'DiscoveryBloc: peer ${event.peerId} transport → ${event.newTransport.name}',
       'Discovery',
     );
+  }
+
+  /// Fetch the full blocked-peer set from the DB and push it to the transport
+  /// layer so messages from blocked peers are rejected at BLE level.
+  Future<void> _pushBlockListToTransport() async {
+    try {
+      final blocked = await _peerRepository.getBlockedPeers();
+      final blockedIds = blocked.map((e) => e.peerId).toSet();
+      _transportManager.updateBlockedPeerIds(blockedIds);
+    } catch (e) {
+      Logger.warning(
+          'Failed to push block list to transport: $e', 'DiscoveryBloc');
+    }
   }
 
   @override

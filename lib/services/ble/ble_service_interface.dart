@@ -212,6 +212,12 @@ abstract class BleServiceInterface {
   /// the same device. Returns null if the mapping is unknown or not applicable.
   String? resolveToPeripheralId(String peerId);
 
+  // ==================== Raw Binary ====================
+
+  /// Send raw binary bytes to a peer (used by gossip sync and other
+  /// binary-only protocols that bypass the message codec).
+  Future<bool> sendRawBytes(String peerId, Uint8List data);
+
   // ==================== Mesh ====================
 
   /// Enable or disable mesh relay (message forwarding between devices)
@@ -233,4 +239,13 @@ abstract class BleServiceInterface {
 
   /// Resume outgoing mesh relay writes after [suppressMeshRelay].
   void resumeMeshRelay();
+
+  // ==================== Block List ====================
+
+  /// Update the set of blocked peer IDs for transport-layer filtering.
+  ///
+  /// Messages from blocked peers are rejected at the BLE transport layer
+  /// before consuming queue space or processing time.  Call this whenever
+  /// the block list changes (block/unblock events).
+  void updateBlockedPeerIds(Set<String> blockedIds);
 }

@@ -41,7 +41,13 @@ enum PacketType {
   wifiTransferReady(0x0B),
 
   /// Read receipt.
-  readReceipt(0x0C);
+  readReceipt(0x0C),
+
+  /// GCS gossip sync — broadcast our known message ID set to peers.
+  gossipSync(0x0D),
+
+  /// Gossip request — ask a peer for specific missing messages.
+  gossipRequest(0x0E);
 
   const PacketType(this.value);
   final int value;
@@ -61,6 +67,15 @@ class PacketFlags {
   static const int requiresAck = 0x04;
   static const int isRelay = 0x08;
   static const int hasSignature = 0x10;
+
+  /// Packet includes a source route (list of intermediate peer IDs).
+  /// When set, relay nodes follow the route instead of flooding.
+  static const int hasSourceRoute = 0x20;
+
+  /// The PacketType byte is XOR-masked to prevent traffic analysis.
+  /// Observers cannot distinguish message types without knowing the
+  /// sender ID and timestamp (both in the same header).
+  static const int typeHidden = 0x40;
 }
 
 /// Binary mesh packet — the unified wire format for all transports.
@@ -107,6 +122,8 @@ class MeshPacket {
     required this.recipientId,
     required this.payload,
     required this.messageId,
+    this.sourceRoute,
+    this.signature,
   });
 
   static const int headerSize = 30;
@@ -140,6 +157,15 @@ class MeshPacket {
   /// Full message ID (UUID string) for deduplication.
   final String messageId;
 
+  /// Optional source route: ordered list of truncated intermediate peer IDs
+  /// the packet should traverse. When present, relay nodes follow the route
+  /// instead of flooding. Each hop pops the first entry and forwards to it.
+  final List<String>? sourceRoute;
+
+  /// Optional Ed25519 signature (64 bytes) over the unsigned packet bytes.
+  /// Present when the sender signed the packet before transmission.
+  final Uint8List? signature;
+
   /// Whether this packet is a broadcast (all-peers).
   bool get isBroadcast => recipientId == broadcastRecipientId;
 
@@ -153,36 +179,59 @@ class MeshPacket {
   static const String broadcastRecipientId = 'ffffffffffffffff';
 
   /// Create a decremented-TTL copy for relay.
-  MeshPacket decrementTtl() => MeshPacket(
-        version: version,
-        type: type,
-        ttl: ttl - 1,
-        flags: flags | PacketFlags.isRelay,
-        timestamp: timestamp,
-        senderId: senderId,
-        recipientId: recipientId,
-        payload: payload,
-        messageId: messageId,
-      );
+  /// If a source route is present, the first hop is consumed.
+  MeshPacket decrementTtl() {
+    final remainingRoute = (sourceRoute != null && sourceRoute!.length > 1)
+        ? sourceRoute!.sublist(1)
+        : null;
+    return MeshPacket(
+      version: version,
+      type: type,
+      ttl: ttl - 1,
+      flags: flags | PacketFlags.isRelay,
+      timestamp: timestamp,
+      senderId: senderId,
+      recipientId: recipientId,
+      payload: payload,
+      messageId: messageId,
+      sourceRoute: remainingRoute,
+      signature: signature,
+    );
+  }
+
+  /// The next hop peer ID from the source route, or null if no route / exhausted.
+  String? get nextHop =>
+      (sourceRoute != null && sourceRoute!.isNotEmpty) ? sourceRoute!.first : null;
 
   /// Serialize to binary.
+  ///
+  /// Type hiding: the PacketType byte is XOR-masked using sender ID and
+  /// timestamp bytes already present in the header. This prevents passive
+  /// observers from distinguishing message types without parsing the header.
   Uint8List serialize() {
     final totalSize = headerSize + payload.length + messageIdSize;
     final data = ByteData(totalSize);
 
+    // Sender ID and timestamp — needed early for type mask
+    final senderBytes = _truncatedIdBytes(senderId);
+    final ms = timestamp.millisecondsSinceEpoch;
+
+    // Compute type mask: XOR of first sender byte and low timestamp byte.
+    // Both are in the header, so the receiver can reconstruct the mask.
+    final typeMask = senderBytes[0] ^ (ms & 0xFF);
+    final maskedType = type.value ^ typeMask;
+    final effectiveFlags = flags | PacketFlags.typeHidden;
+
     // Header
     data.setUint8(0, version);
-    data.setUint8(1, type.value);
+    data.setUint8(1, maskedType);
     data.setUint8(2, ttl);
-    data.setUint8(3, flags);
+    data.setUint8(3, effectiveFlags);
 
     // Timestamp (ms since epoch, big-endian)
-    final ms = timestamp.millisecondsSinceEpoch;
     data.setUint32(4, (ms >> 32) & 0xFFFFFFFF, Endian.big);
     data.setUint32(8, ms & 0xFFFFFFFF, Endian.big);
 
-    // Sender ID (8 bytes, hex-encoded in the string → decode to bytes)
-    final senderBytes = _truncatedIdBytes(senderId);
     final result = Uint8List(totalSize);
     final headerBytes = data.buffer.asUint8List();
     result.setRange(0, headerSize, headerBytes);
@@ -207,15 +256,30 @@ class MeshPacket {
   }
 
   /// Deserialize from binary.
+  ///
+  /// Automatically unmaskes the PacketType byte if [PacketFlags.typeHidden]
+  /// is set, using the same sender ID + timestamp XOR mask from [serialize].
+  ///
+  /// If the [PacketFlags.hasSignature] flag is set, the last 64 bytes of the
+  /// data are treated as an Ed25519 signature and stored in [signature].
   static MeshPacket? deserialize(Uint8List data) {
     if (data.length < headerSize + messageIdSize) return null;
 
     final bd = ByteData.sublistView(data);
 
     final version = bd.getUint8(0);
-    final type = PacketType.fromValue(bd.getUint8(1));
+    final rawTypeByte = bd.getUint8(1);
     final ttl = bd.getUint8(2);
     final flags = bd.getUint8(3);
+
+    // Check for signature: if hasSignature flag is set, last 64 bytes are sig
+    Uint8List? signature;
+    Uint8List effectiveData = data;
+    if ((flags & PacketFlags.hasSignature) != 0) {
+      if (data.length < headerSize + messageIdSize + 64) return null;
+      signature = Uint8List.fromList(data.sublist(data.length - 64));
+      effectiveData = Uint8List.fromList(data.sublist(0, data.length - 64));
+    }
 
     // Timestamp
     final msHigh = bd.getUint32(4, Endian.big);
@@ -224,35 +288,49 @@ class MeshPacket {
     final timestamp = DateTime.fromMillisecondsSinceEpoch(ms);
 
     // Sender ID (8 bytes → hex string)
-    final senderBytes = data.sublist(12, 20);
+    final senderBytes = effectiveData.sublist(12, 20);
     final senderId = _bytesToHex(senderBytes);
 
+    // Unmask the type byte if typeHidden flag is set
+    final int typeByte;
+    if ((flags & PacketFlags.typeHidden) != 0) {
+      final typeMask = senderBytes[0] ^ (ms & 0xFF);
+      typeByte = rawTypeByte ^ typeMask;
+    } else {
+      typeByte = rawTypeByte;
+    }
+    final type = PacketType.fromValue(typeByte);
+
     // Recipient ID
-    final recipientBytes = data.sublist(20, 28);
+    final recipientBytes = effectiveData.sublist(20, 28);
     final recipientId = _bytesToHex(recipientBytes);
 
     // Payload length
-    final payloadLen = (data[28] << 8) | data[29];
-    if (data.length < headerSize + payloadLen + messageIdSize) return null;
+    final payloadLen = (effectiveData[28] << 8) | effectiveData[29];
+    if (effectiveData.length < headerSize + payloadLen + messageIdSize) return null;
 
     // Payload
-    final payload = data.sublist(headerSize, headerSize + payloadLen);
+    final payload = effectiveData.sublist(headerSize, headerSize + payloadLen);
 
     // Message ID (16 bytes → UUID string)
     final msgIdBytes =
-        data.sublist(headerSize + payloadLen, headerSize + payloadLen + messageIdSize);
+        effectiveData.sublist(headerSize + payloadLen, headerSize + payloadLen + messageIdSize);
     final messageId = _bytesToUuid(msgIdBytes);
+
+    // Strip typeHidden and hasSignature from flags — they're wire-only concerns
+    final cleanFlags = flags & ~PacketFlags.typeHidden & ~PacketFlags.hasSignature;
 
     return MeshPacket(
       version: version,
       type: type,
       ttl: ttl,
-      flags: flags,
+      flags: cleanFlags,
       timestamp: timestamp,
       senderId: senderId,
       recipientId: recipientId,
       payload: Uint8List.fromList(payload),
       messageId: messageId,
+      signature: signature,
     );
   }
 
@@ -277,6 +355,43 @@ class MeshPacket {
     final bd = ByteData.sublistView(bytes);
     bd.setUint64(0, hash, Endian.big);
     return _bytesToHex(bytes);
+  }
+
+  // ==================== Signature Utilities ====================
+
+  /// Sign serialized packet bytes. Returns new bytes with signature appended
+  /// and [PacketFlags.hasSignature] flag set.
+  ///
+  /// The input [serialized] bytes must NOT already have hasSignature set.
+  /// Returns null if the sign function fails or returns wrong length.
+  static Future<Uint8List?> signSerialized(
+    Uint8List serialized,
+    Future<Uint8List?> Function(Uint8List) signFn,
+  ) async {
+    final sig = await signFn(serialized);
+    if (sig == null || sig.length != 64) return null;
+    // Create new buffer: serialized + signature
+    final signed = Uint8List(serialized.length + 64);
+    signed.setRange(0, serialized.length, serialized);
+    signed.setRange(serialized.length, signed.length, sig);
+    // Set hasSignature flag in byte 3
+    signed[3] = signed[3] | PacketFlags.hasSignature;
+    return signed;
+  }
+
+  /// Extract unsigned bytes and signature from signed packet data.
+  /// Returns null if [PacketFlags.hasSignature] is not set or data is too short.
+  static ({Uint8List unsigned, Uint8List signature})? extractSignature(
+      Uint8List data) {
+    if (data.length < headerSize + messageIdSize + 64) return null;
+    final flags = data[3];
+    if ((flags & PacketFlags.hasSignature) == 0) return null;
+
+    final sig = Uint8List.fromList(data.sublist(data.length - 64));
+    final unsigned = Uint8List.fromList(data.sublist(0, data.length - 64));
+    // Clear hasSignature flag from the unsigned copy
+    unsigned[3] = unsigned[3] & ~PacketFlags.hasSignature;
+    return (unsigned: unsigned, signature: sig);
   }
 
   // ==================== Helpers ====================

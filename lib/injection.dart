@@ -19,9 +19,11 @@ import 'services/image_service.dart';
 import 'services/audio_service.dart';
 import 'services/lan/lan.dart';
 import 'services/mesh/mesh.dart';
+import 'services/incoming_message_service.dart';
 import 'services/message_send_service.dart';
 import 'services/nearby/nearby.dart';
 import 'services/notification_service.dart';
+import 'services/panic_service.dart';
 import 'services/nsfw_detection_service.dart';
 import 'services/store_and_forward_service.dart';
 import 'services/transport/transport.dart';
@@ -60,17 +62,28 @@ Future<void> initializeDependencies({
   // Must be initialized before BLE so it can supply the local public key
   // for embedding in BroadcastPayload (fff1 characteristic).
   getIt.registerLazySingleton<EncryptionService>(
-    () => EncryptionService(database: getIt<DatabaseService>().database),
+    () => EncryptionService(
+      database: getIt<DatabaseService>().database,
+    ),
   );
   await getIt<EncryptionService>().initialize();
 
   // PeerRegistry — single source of truth for all peer identity resolution
   getIt.registerLazySingleton<PeerRegistry>(() => PeerRegistry());
 
+  // Hydrate PeerRegistry from persisted aliases so transport ID resolution
+  // works immediately on startup (before any BLE/LAN discovery events).
+  final aliases = await getIt<DatabaseService>().peerRepository.getAllAliases();
+  getIt<PeerRegistry>().hydrateFromAliases(aliases);
+
+  // GossipSyncService — GCS-based gossip sync for mesh message reconciliation
+  getIt.registerLazySingleton<GossipSyncService>(() => GossipSyncService());
+
   // MessageRouter — unified cross-transport dedup and gossip relay
   getIt.registerLazySingleton<MessageRouter>(() => MessageRouter(
     peerRegistry: getIt<PeerRegistry>(),
     encryptionService: getIt<EncryptionService>(),
+    gossipSyncService: getIt<GossipSyncService>(),
   ));
 
   // BLE service - select based on config
@@ -83,6 +96,7 @@ Future<void> initializeDependencies({
       return BleFacade(
         config: config,
         encryptionService: getIt<EncryptionService>(),
+        gossipSyncService: getIt<GossipSyncService>(),
       );
     }
   });
@@ -152,6 +166,14 @@ Future<void> initializeDependencies({
     encryptionService: getIt<EncryptionService>(),
     healthTracker: getIt<TransportHealthTracker>(),
     highSpeedTransferService: getIt<HighSpeedTransferService>(),
+    gossipSyncService: getIt<GossipSyncService>(),
+  ));
+
+  // Panic service — emergency identity wipe
+  getIt.registerLazySingleton<PanicService>(() => PanicService(
+    transportManager: getIt<TransportManager>(),
+    encryptionService: getIt<EncryptionService>(),
+    databaseService: getIt<DatabaseService>(),
   ));
 
   // In-session transport retry queue
@@ -182,6 +204,16 @@ Future<void> initializeDependencies({
     chatRepository: getIt<DatabaseService>().chatRepository,
     retryQueue: getIt<TransportRetryQueue>(),
   ));
+
+  // Incoming message service (singleton — persists messages even when chat is closed)
+  getIt.registerLazySingleton<IncomingMessageService>(
+      () => IncomingMessageService(
+            transportManager: getIt<TransportManager>(),
+            chatRepository: getIt<DatabaseService>().chatRepository,
+            peerRepository: getIt<DatabaseService>().peerRepository,
+            notificationService: getIt<NotificationService>(),
+            chatEventBus: getIt<ChatEventBus>(),
+          )..start());
 
   // Profile broadcast service (extracted from ProfileBloc)
   getIt.registerLazySingleton<ProfileBroadcastService>(
@@ -246,7 +278,6 @@ Future<void> initializeDependencies({
       messageSendService: getIt<MessageSendService>(),
       ownUserId: ownUserId,
       highSpeedTransferService: getIt<HighSpeedTransferService>(),
-      encryptionService: getIt<EncryptionService>(),
     ),
   );
 
@@ -289,6 +320,10 @@ Future<void> initializeDependencies({
     ),
   );
 
+  // Eagerly start the incoming message service so messages are persisted
+  // even when no chat screen is open.
+  getIt<IncomingMessageService>();
+
   // BleStatusBloc for tracking BLE status and permissions
   getIt.registerFactory<BleStatusBloc>(
     () => BleStatusBloc(
@@ -307,6 +342,7 @@ Future<void> initializeDependencies({
 
 /// Dispose all dependencies
 Future<void> disposeDependencies() async {
+  getIt<IncomingMessageService>().dispose();
   getIt<MessageSendService>().dispose();
   getIt<ChatEventBus>().dispose();
   await getIt<EncryptionService>().dispose();

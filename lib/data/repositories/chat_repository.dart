@@ -72,12 +72,17 @@ class ChatRepository {
         .getSingleOrNull();
 
     if (peerExists == null) {
+      // Use insertOrIgnore to handle the race where BLE discovery inserts
+      // the same peerId between our SELECT and this INSERT. We must NOT use
+      // insertOnConflictUpdate — it would overwrite the peer's real
+      // name/profile with 'Unknown'.
       await _db.into(_db.discoveredPeers).insert(
             DiscoveredPeersCompanion.insert(
               peerId: peerId,
               name: 'Unknown',
               lastSeenAt: DateTime.now(),
             ),
+            mode: InsertMode.insertOrIgnore,
           );
     }
 
@@ -535,10 +540,19 @@ class ChatRepository {
   /// Find a sent photo message by its stored [photoId] (set via [updateMessagePhotoId]).
   /// Used to recover [PendingOutgoingPhoto] data after session restarts.
   Future<MessageEntry?> findMessageByPhotoId(String photoId) async {
-    return (_db.select(_db.messages)
+    // Try exact content type first (photo messages on the sender side).
+    var result = await (_db.select(_db.messages)
           ..where((t) =>
               t.contentType.equalsValue(MessageContentType.photo) &
               t.textContent.like('%$photoId%'))
+          ..limit(1))
+        .getSingleOrNull();
+    if (result != null) return result;
+
+    // Fallback: search across all content types. The photoId may be stored
+    // in a photoPreview message if the content type wasn't updated.
+    return (_db.select(_db.messages)
+          ..where((t) => t.textContent.like('%$photoId%'))
           ..limit(1))
         .getSingleOrNull();
   }
@@ -562,7 +576,9 @@ class ChatRepository {
               (t.status.equalsValue(MessageStatus.pending) |
                   t.status.equalsValue(MessageStatus.queued) |
                   t.status.equalsValue(MessageStatus.failed)) &
-              t.contentType.equalsValue(MessageContentType.text) &
+              (t.contentType.equalsValue(MessageContentType.text) |
+                  t.contentType.equalsValue(MessageContentType.photo) |
+                  t.contentType.equalsValue(MessageContentType.photoPreview)) &
               t.createdAt.isBiggerThanValue(cutoff) &
               t.retryCount.isSmallerThanValue(
                   AppConstants.messageMaxCrossSessionRetries))

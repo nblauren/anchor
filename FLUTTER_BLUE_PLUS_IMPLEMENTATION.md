@@ -10,11 +10,11 @@
 
 ## Overview (Historical)
 
-Anchor originally used **flutter_blue_plus** for direct peer-to-peer Bluetooth Low Energy communication.
+Anchor originally used **flutter_blue_plus** for direct peer-to-peer Bluetooth Low Energy communication. The production BLE service is now `BleFacade` (`lib/services/ble/ble_facade.dart`), decomposed into focused sub-modules.
 
-## What's Implemented ✅
+## What Was Implemented
 
-### Core BLE Service (`FlutterBluePlusBleService`)
+### Core BLE Service (now `BleFacade`, formerly `FlutterBluePlusBleService`)
 
 - **Adapter State Monitoring**: Real-time tracking of Bluetooth on/off/unavailable states
 - **Runtime Permissions**: Handles Android 12+ and iOS BLE permissions with permission_handler
@@ -32,14 +32,16 @@ Anchor originally used **flutter_blue_plus** for direct peer-to-peer Bluetooth L
 - **Messaging**: Real-time text message exchange over GATT messaging characteristic
 - **Peer Tracking**: Automatic peer timeout and "lost peer" detection
 
-### Service UUIDs
+### Service UUIDs (OUTDATED — see `BleUuids` in `lib/services/ble/ble_config.dart` for current values)
 
 ```
-Main Service: 0000fff0-0000-1000-8000-00805f9b34fb
-Characteristics:
-  - Profile Metadata: 0000fff1-0000-1000-8000-00805f9b34fb (READ, NOTIFY)
-  - Thumbnail Data:   0000fff2-0000-1000-8000-00805f9b34fb (READ)
-  - Messaging:        0000fff3-0000-1000-8000-00805f9b34fb (WRITE, NOTIFY)
+OLD (no longer used):
+  Main Service: 0000fff0-0000-1000-8000-00805f9b34fb
+  Profile:      0000fff1-0000-1000-8000-00805f9b34fb
+  Thumbnail:    0000fff2-0000-1000-8000-00805f9b34fb
+  Messaging:    0000fff3-0000-1000-8000-00805f9b34fb
+
+CURRENT: Proper 128-bit random UUIDs — see BleUuids class.
 ```
 
 ### Dependencies (Current)
@@ -176,19 +178,19 @@ void _onPeerDiscovered(DiscoveredPeer peer) {
 ```
 
 ### Priority 2: End-to-End Encryption
-- RSA/ECDH key pair per device
-- Key exchange during BLE discovery
-- Encrypt message content before BLE/Wi-Fi Direct transmission
+**Status**: ✅ **Implemented** — Noise_XK/XX handshake + XChaCha20-Poly1305 session encryption. See `lib/services/encryption/`.
 
 ### Priority 3: Concurrent Wi-Fi Direct Transfers
 - Track multiple simultaneous transfers in NearbyService
 - Multiplex or manage multiple Nearby connections
 
-## Code Locations
+## Code Locations (CURRENT)
 
-- **Main Service**: `lib/services/ble/flutter_blue_plus_ble_service.dart`
+- **BLE Facade (entry point)**: `lib/services/ble/ble_facade.dart`
 - **Interface**: `lib/services/ble/ble_service_interface.dart`
-- **Dependency Injection**: `lib/injection.dart` (line 36-44)
+- **Sub-modules**: `lib/services/ble/connection/`, `discovery/`, `gatt/`, `mesh/`, `transfer/`
+- **UUID constants**: `BleUuids` in `lib/services/ble/ble_config.dart`
+- **Dependency Injection**: `lib/injection.dart`
 - **Models**: `lib/services/ble/ble_models.dart`
 - **Photo Chunker**: `lib/services/ble/photo_chunker.dart`
 
@@ -197,8 +199,8 @@ void _onPeerDiscovered(DiscoveredPeer peer) {
 Enable verbose logging in debug builds:
 
 ```dart
-// In flutter_blue_plus_ble_service.dart
-Logger.info('FlutterBluePlusBleService: Discovered device ${device.platformName} (RSSI: ${result.rssi})', 'BLE');
+// In ble_facade.dart (or relevant sub-module)
+Logger.info('BleFacade: Discovered device ... (RSSI: ...)', 'BLE');
 ```
 
 Watch these logs:

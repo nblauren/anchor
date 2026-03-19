@@ -168,6 +168,30 @@ class BlockedUsers extends Table {
 // PeerPublicKeys table removed — public keys are now stored directly on
 // DiscoveredPeers (publicKeyHex + ed25519PublicKeyHex columns).
 
+/// Maps transport-level IDs (BLE UUID, LAN session ID, etc.) to the
+/// canonical peerId (DiscoveredPeers.peerId). This prevents duplicate
+/// peer rows when iOS rotates BLE Peripheral UUIDs.
+@DataClassName('PeerAliasEntry')
+class PeerAliases extends Table {
+  /// Transport-specific ID (BLE UUID, LAN ID, Wi-Fi Aware ID, etc.)
+  TextColumn get transportId => text()();
+
+  /// Canonical peer identity — FK to DiscoveredPeers.peerId.
+  /// Safe because registerAlias is called inside upsertPeer() after the
+  /// peer row is guaranteed to exist.
+  TextColumn get canonicalPeerId =>
+      text().references(DiscoveredPeers, #peerId)();
+
+  /// Transport type: "ble", "lan", "wifiAware"
+  TextColumn get transportType => text()();
+
+  /// When this alias was first recorded
+  DateTimeColumn get createdAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {transportId};
+}
+
 /// Emoji reactions on messages
 @DataClassName('ReactionEntry')
 class MessageReactions extends Table {
@@ -181,6 +205,29 @@ class MessageReactions extends Table {
   Set<Column> get primaryKey => {id};
 }
 
+/// Persisted E2EE sessions so the Noise handshake isn't required on every
+/// app restart. Sessions expire after 24 hours (enforced by EncryptionService).
+@DataClassName('PersistedNoiseSession')
+class NoiseSessions extends Table {
+  /// Canonical peer ID (same key used in EncryptionService._sessions).
+  TextColumn get peerId => text()();
+
+  /// 32-byte send key (hex-encoded).
+  TextColumn get sendKeyHex => text()();
+
+  /// 32-byte receive key (hex-encoded).
+  TextColumn get receiveKeyHex => text()();
+
+  /// When the session was established.
+  DateTimeColumn get establishedAt => dateTime()();
+
+  /// Number of messages sent with this session (for rekey tracking).
+  IntColumn get messageCount => integer().withDefault(const Constant(0))();
+
+  @override
+  Set<Column> get primaryKey => {peerId};
+}
+
 // ==================== Database ====================
 
 @DriftDatabase(tables: [
@@ -192,6 +239,8 @@ class MessageReactions extends Table {
   AnchorDrops,
   BlockedUsers,
   MessageReactions,
+  NoiseSessions,
+  PeerAliases,
 ])
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
@@ -200,13 +249,24 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration {
     return MigrationStrategy(
       onCreate: (Migrator m) async {
         await m.createAll();
+      },
+      onUpgrade: (Migrator m, int from, int to) async {
+        if (from < 2) {
+          await m.createTable(noiseSessions);
+        }
+        if (from < 4) {
+          // v3 had peer_aliases without FK; v4 adds FK to discovered_peers.
+          // Pre-production — safe to drop and recreate.
+          await m.deleteTable('peer_aliases');
+          await m.createTable(peerAliases);
+        }
       },
       beforeOpen: (details) async {
         // Enable foreign keys

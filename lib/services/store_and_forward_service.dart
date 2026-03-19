@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
+import 'dart:typed_data';
 
 import '../core/constants/app_constants.dart';
 import '../core/utils/logger.dart';
@@ -247,13 +249,28 @@ class StoreAndForwardService {
         lastAttemptAt: DateTime.now(),
       );
 
-      final payload = ble.MessagePayload(
-        messageId: message.id,
-        type: ble.MessageType.text,
-        content: message.textContent ?? '',
-      );
+      bool success;
 
-      final success = await _transportManager.sendMessage(peerId, payload);
+      if (message.contentType == MessageContentType.text) {
+        final payload = ble.MessagePayload(
+          messageId: message.id,
+          type: ble.MessageType.text,
+          content: message.textContent ?? '',
+        );
+        success = await _transportManager.sendMessage(peerId, payload);
+      } else {
+        // Photo / photoPreview: re-send a lightweight photo preview notification
+        // so the recipient can tap to download. The full photo is sent on-demand
+        // when the recipient requests it.
+        final photoId = _extractPhotoId(message);
+        success = await _transportManager.sendPhotoPreview(
+          peerId: peerId,
+          messageId: message.id,
+          photoId: photoId ?? message.id,
+          thumbnailBytes: Uint8List(0),
+          originalSize: 0,
+        );
+      }
 
       final newStatus = success ? MessageStatus.sent : MessageStatus.failed;
       if (success) {
@@ -286,6 +303,18 @@ class StoreAndForwardService {
         null,
         'StoreForward',
       );
+    }
+  }
+  /// Extract the photoId from a photo message's textContent JSON.
+  /// Returns null if not found.
+  String? _extractPhotoId(MessageEntry message) {
+    final text = message.textContent;
+    if (text == null || text.isEmpty) return null;
+    try {
+      final json = jsonDecode(text) as Map<String, dynamic>;
+      return json['photo_id'] as String?;
+    } catch (_) {
+      return null;
     }
   }
 }

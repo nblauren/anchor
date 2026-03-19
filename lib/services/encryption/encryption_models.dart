@@ -48,6 +48,17 @@ class NoiseSession {
 
   final DateTime establishedAt;
 
+  /// Number of messages encrypted with this session's send key.
+  /// Used to trigger automatic rekeying after [rekeyThreshold] messages.
+  int messageCount = 0;
+
+  /// Maximum messages before a rekey is recommended.
+  /// 1000 messages provides good forward secrecy without excessive handshakes.
+  static const int rekeyThreshold = 1000;
+
+  /// Whether this session has exceeded the rekey threshold.
+  bool get needsRekey => messageCount >= rekeyThreshold;
+
   // SECURITY: nonces must never repeat.  We use random 24-byte nonces
   // (XChaCha20 extended nonce space) transmitted alongside the ciphertext,
   // so we don't need a stateful counter here — the randomness makes

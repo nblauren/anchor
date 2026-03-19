@@ -6,6 +6,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../injection.dart';
 import '../../../services/ble/ble_connection_bloc.dart';
 import '../../../services/database_service.dart';
+import '../../../services/panic_service.dart';
 import '../../profile/bloc/profile_bloc.dart';
 import '../../profile/bloc/profile_event.dart';
 import '../../profile/screens/profile_setup_screen.dart';
@@ -44,6 +45,14 @@ class SettingsScreen extends StatelessWidget {
             title: 'Blocked Users',
             subtitle: 'Manage blocked people',
             onTap: () => _openBlockedUsers(context),
+          ),
+          _buildTile(
+            context,
+            icon: Icons.warning_amber_rounded,
+            title: 'Panic Mode',
+            subtitle: 'Emergency wipe — erases all data instantly',
+            onTap: () => _confirmPanicMode(context),
+            textColor: Colors.red,
           ),
 
           const Divider(height: 32),
@@ -385,6 +394,46 @@ class SettingsScreen extends StatelessWidget {
             },
             style: TextButton.styleFrom(foregroundColor: AppTheme.error),
             child: const Text('Delete Everything'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _confirmPanicMode(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppTheme.darkCard,
+        title: const Text(
+          'Emergency Wipe',
+          style: TextStyle(color: Colors.red),
+        ),
+        content: const Text(
+          'This will PERMANENTLY destroy:\n\n'
+          '  - All encryption keys\n'
+          '  - Your profile and photos\n'
+          '  - All messages and conversations\n'
+          '  - All app data and preferences\n\n'
+          'This cannot be undone. The app will restart as if freshly installed.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              final panicService = getIt<PanicService>();
+              await panicService.executeEmergencyWipe();
+              if (context.mounted) {
+                context.read<ProfileBloc>().add(const LoadProfile());
+                Navigator.of(context).popUntil((route) => route.isFirst);
+              }
+            },
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('WIPE EVERYTHING'),
           ),
         ],
       ),
