@@ -1645,12 +1645,27 @@ class BleFacade implements BleServiceInterface {
         'BLE',
       );
 
-      if (type == 'noise_hs') {
+      // Route photo-transfer messages to the photo handler — same dispatch
+      // as _onMessageWriteReceived. Without these, photo_request/preview/etc.
+      // sent via the bidirectional path would be silently dropped.
+      if (type == 'photo_start') {
+        _photoTransfer.handlePhotoStart(json, peerId);
+      } else if (type == 'photo_chunk') {
+        _photoTransfer.handleReceivedPhotoChunk(json, peerId);
+      } else if (type == 'photo_preview') {
+        _photoTransfer.handlePhotoPreviewStart(json, peerId);
+      } else if (type == 'photo_request') {
+        _photoTransfer.handlePhotoRequest(json, peerId);
+      } else if (type == 'noise_hs') {
         _handleNoiseHandshake(json, peerId);
       } else if (type == 'drop_anchor') {
         _handleDropAnchor(peerId);
       } else if (type == 'reaction') {
         _handleReaction(json, peerId);
+      } else if (type == 'peer_announce') {
+        _meshRelay.handlePeerAnnounce(json, peerId);
+      } else if (type == 'neighbor_list') {
+        _meshRelay.handleNeighborList(json);
       } else {
         _handleReceivedMessage(json, peerId);
       }
@@ -1693,8 +1708,21 @@ class BleFacade implements BleServiceInterface {
         'BLE',
       );
 
-      if (type == 'noise_hs') {
+      // Route photo-transfer messages to the photo handler — same as fff3 path.
+      if (type == 'photo_start') {
+        _photoTransfer.handlePhotoStart(json, peerId);
+      } else if (type == 'photo_chunk') {
+        _photoTransfer.handleReceivedPhotoChunk(json, peerId);
+      } else if (type == 'photo_preview') {
+        _photoTransfer.handlePhotoPreviewStart(json, peerId);
+      } else if (type == 'photo_request') {
+        _photoTransfer.handlePhotoRequest(json, peerId);
+      } else if (type == 'noise_hs') {
         _handleNoiseHandshake(json, peerId);
+      } else if (type == 'drop_anchor') {
+        _handleDropAnchor(peerId);
+      } else if (type == 'reaction') {
+        _handleReaction(json, peerId);
       } else {
         _handleReceivedMessage(json, peerId);
       }

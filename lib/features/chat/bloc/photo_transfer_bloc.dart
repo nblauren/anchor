@@ -232,6 +232,7 @@ class PhotoTransferBloc
         _chatEventBus = chatEventBus,
         _messageSendService = messageSendService,
         _highSpeedService = highSpeedTransferService,
+        _ownUserId = ownUserId,
         super(const PhotoTransferState()) {
     on<PhotoProgressUpdated>(_onPhotoTransferProgress);
     on<PhotoPreviewArrived>(_onPhotoPreviewReceived);
@@ -329,6 +330,7 @@ class PhotoTransferBloc
   final ChatRepository _chatRepository;
   final PeerRepository _peerRepository;
   final ImageService _imageService;
+  final String? _ownUserId;
   final TransportManager _transportManager;
   final NotificationService _notificationService;
   final ChatEventBus _chatEventBus;
@@ -533,8 +535,26 @@ class PhotoTransferBloc
           'trying DB fallback…',
           'PhotoTransfer',
         );
-        final storedMessage =
+
+        // Fallback 1: find message by photoId in textContent.
+        var storedMessage =
             await _chatRepository.findMessageByPhotoId(request.photoId);
+
+        // Fallback 2: find most recent outgoing photo for this peer.
+        // Covers the case where photoId was never written to textContent.
+        if ((storedMessage == null || storedMessage.photoPath == null) &&
+            _ownUserId != null) {
+          Logger.info(
+            'PhotoTransferBloc: photoId ${request.photoId} not in textContent, '
+            'trying findRecentOutgoingPhoto for peer ${request.fromPeerId}',
+            'PhotoTransfer',
+          );
+          storedMessage = await _chatRepository.findRecentOutgoingPhoto(
+            ownUserId: _ownUserId,
+            peerId: request.fromPeerId,
+          );
+        }
+
         if (storedMessage == null || storedMessage.photoPath == null) {
           Logger.warning(
             'PhotoTransferBloc: photo_request for unknown photoId ${request.photoId} — '

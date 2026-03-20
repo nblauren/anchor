@@ -557,6 +557,32 @@ class ChatRepository {
         .getSingleOrNull();
   }
 
+  /// Find the most recent outgoing photo message for a given peer that has a
+  /// valid [photoPath]. Used as a last-resort fallback when [findMessageByPhotoId]
+  /// fails (e.g. textContent doesn't contain the photoId).
+  Future<MessageEntry?> findRecentOutgoingPhoto({
+    required String ownUserId,
+    required String peerId,
+  }) async {
+    // Find conversation for this peer.
+    final conversation = await (_db.select(_db.conversations)
+          ..where((t) => t.peerId.equals(peerId))
+          ..limit(1))
+        .getSingleOrNull();
+    if (conversation == null) return null;
+
+    // Most recent outgoing photo with a valid photoPath.
+    return (_db.select(_db.messages)
+          ..where((t) =>
+              t.conversationId.equals(conversation.id) &
+              t.senderId.equals(ownUserId) &
+              t.contentType.equalsValue(MessageContentType.photo) &
+              t.photoPath.isNotNull())
+          ..orderBy([(t) => OrderingTerm.desc(t.createdAt)])
+          ..limit(1))
+        .getSingleOrNull();
+  }
+
   // ==================== Store-and-Forward ====================
 
   /// Returns pending or failed outgoing text messages for a conversation that

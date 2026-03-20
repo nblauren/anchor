@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -235,8 +236,27 @@ class MessageSendService {
       final bleBytes = isHighBandwidthForPeer(peerId)
           ? await File(absolutePath).readAsBytes()
           : await _imageService.compressForBleTransfer(absolutePath);
-      const uuidGen = Uuid();
-      final photoId = uuidGen.v4();
+
+      // Reuse the existing photoId from the DB if available, so the receiver's
+      // photo_request matches what we have in pendingOutgoingPhotos and the DB.
+      // Generating a new photoId on retry caused mismatches when the receiver
+      // sent back the old photoId from their stored preview.
+      String photoId;
+      try {
+        final stored = message.textContent;
+        if (stored != null && stored.contains('photo_id')) {
+          final meta = jsonDecode(stored) as Map<String, dynamic>;
+          photoId = meta['photo_id'] as String? ?? const Uuid().v4();
+        } else {
+          photoId = const Uuid().v4();
+        }
+      } catch (_) {
+        photoId = const Uuid().v4();
+      }
+
+      // Persist the photoId if it was newly generated (first retry after
+      // a send that failed before updateMessagePhotoId).
+      await _chatRepository.updateMessagePhotoId(message.id, photoId);
 
       _pendingPhotoController.add(PendingPhoto(
         photoId: photoId,
