@@ -341,8 +341,8 @@ class _ChatScreenState extends State<ChatScreen> {
                 currentReactions: currentReactions,
                 onEmojiTap: (emoji) {
                   _dismissSelection();
-                  final ownReacted = currentReactions.any(
-                      (r) => r.senderId == ownUserId && r.emoji == emoji);
+                  final ownReacted = currentReactions
+                      .any((r) => r.senderId == ownUserId && r.emoji == emoji);
                   if (ownReacted) {
                     _reactionBloc.add(RemoveReaction(
                       messageId: message.id,
@@ -417,316 +417,303 @@ class _ChatScreenState extends State<ChatScreen> {
     ChatState state,
     ChatE2eeState e2eeState,
   ) {
-        final conversation = state.currentConversation;
-        final ownUserId = context.read<ChatBloc>().ownUserId;
-        final reactionState = context.watch<ReactionBloc>().state;
-        final transferState = context.watch<PhotoTransferBloc>().state;
-        // Bridge E2EE state from dedicated bloc
-        final isE2eeActive = e2eeState.isActive;
-        final isE2eeHandshaking = e2eeState.isHandshaking;
+    final conversation = state.currentConversation;
+    final ownUserId = context.read<ChatBloc>().ownUserId;
+    final reactionState = context.watch<ReactionBloc>().state;
+    final transferState = context.watch<PhotoTransferBloc>().state;
+    // Bridge E2EE state from dedicated bloc
+    final isE2eeActive = e2eeState.isActive;
+    final isE2eeHandshaking = e2eeState.isHandshaking;
 
-        return Scaffold(
-          appBar: AppBar(
-            title: GestureDetector(
-              onTap: widget.onViewProfile,
-              child: Row(
-                children: [
-                  _buildAvatar(
-                      conversation?.peerName ?? '?', widget.peerThumbnail),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          conversation?.peerName ?? widget.peerName,
-                          style: const TextStyle(fontSize: 16),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        if (widget.isRelayedPeer)
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(Icons.hub_outlined,
-                                  size: 11, color: AppTheme.textSecondary),
-                              const SizedBox(width: 3),
-                              Text(
-                                widget.hopCount > 0
-                                    ? 'Via relay · ${widget.hopCount} ${widget.hopCount == 1 ? 'hop' : 'hops'}'
-                                    : 'Via relay',
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  color: AppTheme.textSecondary,
-                                ),
-                              ),
-                            ],
-                          )
-                        else if (isE2eeActive)
-                          // E2EE lock indicator + transport badge — visible when
-                          // Noise_XK session is established.
-                          GestureDetector(
-                            onTap: () {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Row(
-                                    children: [
-                                      Icon(Icons.lock, color: Colors.white, size: 16),
-                                      SizedBox(width: 8),
-                                      Text('End-to-end encrypted'),
-                                    ],
-                                  ),
-                                  duration: Duration(seconds: 2),
-                                ),
-                              );
-                            },
-                            child: BlocBuilder<TransportBloc, TransportState>(
-                              builder: (context, transportState) {
-                                final peerTransport =
-                                    transportState.transportForPeer(widget.peerId);
-                                return Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    const Icon(Icons.lock, size: 11, color: Colors.greenAccent),
-                                    const SizedBox(width: 3),
-                                    const Text(
-                                      'Encrypted',
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: Colors.greenAccent,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    TransportBadge(transport: peerTransport),
-                                  ],
-                                );
-                              },
+    return Scaffold(
+      appBar: AppBar(
+        title: GestureDetector(
+          onTap: widget.onViewProfile,
+          child: Row(
+            children: [
+              _buildAvatar(conversation?.peerName ?? '?', widget.peerThumbnail),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      conversation?.peerName ?? widget.peerName,
+                      style: const TextStyle(fontSize: 16),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    if (widget.isRelayedPeer)
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.hub_outlined,
+                              size: 11, color: AppTheme.textSecondary),
+                          const SizedBox(width: 3),
+                          Text(
+                            widget.hopCount > 0
+                                ? 'Via relay · ${widget.hopCount} ${widget.hopCount == 1 ? 'hop' : 'hops'}'
+                                : 'Via relay',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: AppTheme.textSecondary,
                             ),
-                          )
-                        else if (isE2eeHandshaking)
-                          const Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              SizedBox(
-                                width: 10,
-                                height: 10,
-                                child: CircularProgressIndicator(strokeWidth: 1.5),
+                          ),
+                        ],
+                      )
+                    else if (isE2eeActive)
+                      // E2EE lock indicator + transport badge — visible when
+                      // Noise_XK session is established.
+                      GestureDetector(
+                        onTap: () {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Row(
+                                children: [
+                                  Icon(Icons.lock,
+                                      color: Colors.white, size: 16),
+                                  SizedBox(width: 8),
+                                  Text('End-to-end encrypted'),
+                                ],
                               ),
-                              SizedBox(width: 3),
-                              Text(
-                                'Securing…',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: AppTheme.textSecondary,
-                                ),
-                              ),
-                            ],
-                          )
-                        else if (widget.onViewProfile != null)
-                          const Text(
-                            'Tap for info',
+                              duration: Duration(seconds: 2),
+                            ),
+                          );
+                        },
+                        child: BlocBuilder<TransportBloc, TransportState>(
+                          builder: (context, transportState) {
+                            final peerTransport =
+                                transportState.transportForPeer(widget.peerId);
+                            return TransportBadge(transport: peerTransport);
+                          },
+                        ),
+                      )
+                    else if (isE2eeHandshaking)
+                      const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          SizedBox(
+                            width: 10,
+                            height: 10,
+                            child: CircularProgressIndicator(strokeWidth: 1.5),
+                          ),
+                          SizedBox(width: 3),
+                          Text(
+                            'Securing…',
                             style: TextStyle(
                               fontSize: 12,
                               color: AppTheme.textSecondary,
                             ),
                           ),
-                      ],
-                    ),
-                  ),
-                ],
+                        ],
+                      )
+                    else if (widget.onViewProfile != null)
+                      const Text(
+                        'Tap for info',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: AppTheme.textSecondary,
+                        ),
+                      ),
+                  ],
+                ),
               ),
+            ],
+          ),
+        ),
+        actions: [
+          // Drop Anchor button
+          if (!state.isBlocked)
+            IconButton(
+              key: const Key('chat_anchor_btn'),
+              onPressed: _anchorDropped ? null : _dropAnchor,
+              icon: Icon(
+                Icons.anchor,
+                color: _anchorDropped
+                    ? const Color(0xFFEC4899)
+                    : AppTheme.textSecondary,
+              ),
+              tooltip: _anchorDropped ? 'Anchor dropped!' : 'Drop anchor',
             ),
-            actions: [
-              // Drop Anchor button
-              if (!state.isBlocked)
-                IconButton(
-                  key: const Key('chat_anchor_btn'),
-                  onPressed: _anchorDropped ? null : _dropAnchor,
-                  icon: Icon(
-                    Icons.anchor,
-                    color: _anchorDropped
-                        ? const Color(0xFFEC4899)
-                        : AppTheme.textSecondary,
-                  ),
-                  tooltip: _anchorDropped ? 'Anchor dropped!' : 'Drop anchor',
-                ),
-              PopupMenuButton<String>(
-                key: const Key('chat_more_menu_btn'),
-                icon: const Icon(Icons.more_vert),
-                onSelected: (value) {
-                  if (value == 'block') {
-                    _confirmBlock(context, state);
-                  } else if (value == 'unblock') {
-                    context.read<ChatBloc>().add(const UnblockChatPeer());
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          '${state.currentConversation?.peerName ?? 'User'} unblocked',
-                        ),
-                      ),
-                    );
-                  }
-                },
-                itemBuilder: (_) => [
-                  if (state.isBlocked)
-                    const PopupMenuItem(
-                      value: 'unblock',
-                      child: Row(
-                        children: [
-                          Icon(Icons.lock_open, size: 20),
-                          SizedBox(width: 12),
-                          Text('Unblock'),
-                        ],
-                      ),
-                    )
-                  else
-                    const PopupMenuItem(
-                      value: 'block',
-                      child: Row(
-                        children: [
-                          Icon(Icons.block, size: 20, color: AppTheme.error),
-                          SizedBox(width: 12),
-                          Text('Block',
-                              style: TextStyle(color: AppTheme.error)),
-                        ],
-                      ),
+          PopupMenuButton<String>(
+            key: const Key('chat_more_menu_btn'),
+            icon: const Icon(Icons.more_vert),
+            onSelected: (value) {
+              if (value == 'block') {
+                _confirmBlock(context, state);
+              } else if (value == 'unblock') {
+                context.read<ChatBloc>().add(const UnblockChatPeer());
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      '${state.currentConversation?.peerName ?? 'User'} unblocked',
                     ),
-                ],
-              ),
-            ],
-          ),
-          body: Column(
-            children: [
-              // Messages list — tap to dismiss keyboard
-              Expanded(
-                child: GestureDetector(
-                  onTap: () {
-                    _dismissSelection();
-                    _focusNode.unfocus();
-                  },
-                  child: state.messages.isEmpty
-                      ? _buildEmptyState()
-                      : ListView.builder(
-                          controller: _scrollController,
-                          reverse: true,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 8,
-                          ),
-                          itemCount: state.messages.length,
-                          itemBuilder: (context, index) {
-                            final message = state.messages[index];
-                            final isSentByMe = message.senderId == ownUserId;
-                            final showDate =
-                                index == state.messages.length - 1 ||
-                                    !_isSameDay(
-                                      message.createdAt,
-                                      state.messages[index + 1].createdAt,
-                                    );
-                            final itemKey = _messageKeys.putIfAbsent(
-                                message.id, () => GlobalKey());
-
-                            return Column(key: itemKey,
-                              children: [
-                                if (showDate)
-                                  Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                        vertical: 16),
-                                    child: Text(
-                                      _formatDate(message.createdAt),
-                                      style: const TextStyle(
-                                        color: AppTheme.textSecondary,
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                                  ),
-                                MessageBubbleWidget(
-                                  message: message,
-                                  isSentByMe: isSentByMe,
-                                  ownUserId: ownUserId,
-                                  onRetry: () => _retryMessage(message.id),
-                                  isRelayedPeer: widget.isRelayedPeer,
-                                  transferInfo:
-                                      transferState.getTransferProgress(message.id),
-                                  onRequestFullPhoto: isSentByMe
-                                      ? null
-                                      : (photoId) => _requestFullPhoto(
-                                            message.id,
-                                            photoId,
-                                            state.currentConversation!.peerId,
-                                          ),
-                                  onCancelTransfer:
-                                      transferState.getTransferProgress(message.id) !=
-                                              null
-                                          ? () => context.read<PhotoTransferBloc>().add(
-                                                CancelPhotoTransfer(message.id),
-                                              )
-                                          : null,
-                                  reactions: reactionState.reactions[message.id] ?? [],
-                                  onReact: state.isBlocked
-                                      ? null
-                                      : (emoji) {
-                                          final peerId = state
-                                              .currentConversation!.peerId;
-                                          final ownReacted =
-                                              (reactionState.reactions[message.id] ??
-                                                      [])
-                                                  .any((r) =>
-                                                      r.senderId == ownUserId &&
-                                                      r.emoji == emoji);
-                                          if (ownReacted) {
-                                            context.read<ReactionBloc>().add(
-                                                  RemoveReaction(
-                                                    messageId: message.id,
-                                                    peerId: peerId,
-                                                    emoji: emoji,
-                                                  ),
-                                                );
-                                          } else {
-                                            context.read<ReactionBloc>().add(
-                                                  SendReaction(
-                                                    messageId: message.id,
-                                                    peerId: peerId,
-                                                    emoji: emoji,
-                                                  ),
-                                                );
-                                          }
-                                        },
-                                  isSelected: false,
-                                  onReactTap: (!isSentByMe && !state.isBlocked)
-                                      ? () => _showFloatingEmojiPicker(
-                                            context,
-                                            message,
-                                            state.currentConversation!.peerId,
-                                            itemKey,
-                                          )
-                                      : null,
-                                  onReplyTap: (!isSentByMe && !state.isBlocked)
-                                      ? () => _startReply(message)
-                                      : null,
-                                  quotedMessage: message.replyToMessageId != null
-                                      ? state.quotedMessages[message.replyToMessageId]
-                                      : null,
-                                  onQuotedTap: message.replyToMessageId != null
-                                      ? () => _scrollToMessage(message.replyToMessageId!)
-                                      : null,
-                                ),
-                              ],
-                            );
-                          },
-                        ),
-                ),
-              ),
-
-              // Message input — only shown once E2EE session is established.
+                  ),
+                );
+              }
+            },
+            itemBuilder: (_) => [
               if (state.isBlocked)
-                _buildBlockedBanner()
-              else if (!isE2eeActive)
-                _buildSecureConnectionBanner(isE2eeHandshaking)
+                const PopupMenuItem(
+                  value: 'unblock',
+                  child: Row(
+                    children: [
+                      Icon(Icons.lock_open, size: 20),
+                      SizedBox(width: 12),
+                      Text('Unblock'),
+                    ],
+                  ),
+                )
               else
-                _buildMessageInput(state),
+                const PopupMenuItem(
+                  value: 'block',
+                  child: Row(
+                    children: [
+                      Icon(Icons.block, size: 20, color: AppTheme.error),
+                      SizedBox(width: 12),
+                      Text('Block', style: TextStyle(color: AppTheme.error)),
+                    ],
+                  ),
+                ),
             ],
           ),
-        );
+        ],
+      ),
+      body: Column(
+        children: [
+          // Messages list — tap to dismiss keyboard
+          Expanded(
+            child: GestureDetector(
+              onTap: () {
+                _dismissSelection();
+                _focusNode.unfocus();
+              },
+              child: state.messages.isEmpty
+                  ? _buildEmptyState()
+                  : ListView.builder(
+                      controller: _scrollController,
+                      reverse: true,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
+                      itemCount: state.messages.length,
+                      itemBuilder: (context, index) {
+                        final message = state.messages[index];
+                        final isSentByMe = message.senderId == ownUserId;
+                        final showDate = index == state.messages.length - 1 ||
+                            !_isSameDay(
+                              message.createdAt,
+                              state.messages[index + 1].createdAt,
+                            );
+                        final itemKey = _messageKeys.putIfAbsent(
+                            message.id, () => GlobalKey());
+
+                        return Column(
+                          key: itemKey,
+                          children: [
+                            if (showDate)
+                              Padding(
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 16),
+                                child: Text(
+                                  _formatDate(message.createdAt),
+                                  style: const TextStyle(
+                                    color: AppTheme.textSecondary,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ),
+                            MessageBubbleWidget(
+                              message: message,
+                              isSentByMe: isSentByMe,
+                              ownUserId: ownUserId,
+                              onRetry: () => _retryMessage(message.id),
+                              isRelayedPeer: widget.isRelayedPeer,
+                              transferInfo:
+                                  transferState.getTransferProgress(message.id),
+                              onRequestFullPhoto: isSentByMe
+                                  ? null
+                                  : (photoId) => _requestFullPhoto(
+                                        message.id,
+                                        photoId,
+                                        state.currentConversation!.peerId,
+                                      ),
+                              onCancelTransfer: transferState
+                                          .getTransferProgress(message.id) !=
+                                      null
+                                  ? () => context.read<PhotoTransferBloc>().add(
+                                        CancelPhotoTransfer(message.id),
+                                      )
+                                  : null,
+                              reactions:
+                                  reactionState.reactions[message.id] ?? [],
+                              onReact: state.isBlocked
+                                  ? null
+                                  : (emoji) {
+                                      final peerId =
+                                          state.currentConversation!.peerId;
+                                      final ownReacted = (reactionState
+                                                  .reactions[message.id] ??
+                                              [])
+                                          .any((r) =>
+                                              r.senderId == ownUserId &&
+                                              r.emoji == emoji);
+                                      if (ownReacted) {
+                                        context.read<ReactionBloc>().add(
+                                              RemoveReaction(
+                                                messageId: message.id,
+                                                peerId: peerId,
+                                                emoji: emoji,
+                                              ),
+                                            );
+                                      } else {
+                                        context.read<ReactionBloc>().add(
+                                              SendReaction(
+                                                messageId: message.id,
+                                                peerId: peerId,
+                                                emoji: emoji,
+                                              ),
+                                            );
+                                      }
+                                    },
+                              isSelected: false,
+                              onReactTap: (!isSentByMe && !state.isBlocked)
+                                  ? () => _showFloatingEmojiPicker(
+                                        context,
+                                        message,
+                                        state.currentConversation!.peerId,
+                                        itemKey,
+                                      )
+                                  : null,
+                              onReplyTap: (!isSentByMe && !state.isBlocked)
+                                  ? () => _startReply(message)
+                                  : null,
+                              quotedMessage: message.replyToMessageId != null
+                                  ? state
+                                      .quotedMessages[message.replyToMessageId]
+                                  : null,
+                              onQuotedTap: message.replyToMessageId != null
+                                  ? () => _scrollToMessage(
+                                      message.replyToMessageId!)
+                                  : null,
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+            ),
+          ),
+
+          // Message input — only shown once E2EE session is established.
+          if (state.isBlocked)
+            _buildBlockedBanner()
+          else if (!isE2eeActive)
+            _buildSecureConnectionBanner(isE2eeHandshaking)
+          else
+            _buildMessageInput(state),
+        ],
+      ),
+    );
   }
 
   Widget _buildAvatar(String name, Uint8List? thumbnail) {
@@ -912,7 +899,8 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  Widget _buildReplyBar(MessageEntry replyingTo, String ownUserId, String peerName) {
+  Widget _buildReplyBar(
+      MessageEntry replyingTo, String ownUserId, String peerName) {
     final isOwnMessage = replyingTo.senderId == ownUserId;
     final senderLabel = isOwnMessage ? 'Yourself' : peerName;
     final isPhoto = replyingTo.contentType == MessageContentType.photo ||
@@ -963,9 +951,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     ],
                     Flexible(
                       child: Text(
-                        isPhoto
-                            ? 'Photo'
-                            : (replyingTo.textContent ?? ''),
+                        isPhoto ? 'Photo' : (replyingTo.textContent ?? ''),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(

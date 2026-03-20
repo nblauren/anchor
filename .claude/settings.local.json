@@ -26,7 +26,12 @@
       "Bash(git status:*)",
       "Bash(find /Users/nblaurenciana/Documents/GitHub/anchor -path \"*/test/*.dart\" -type f | grep -E \"_\\(bloc|test\\)\\\\.dart$\" 2>/dev/null || find /Users/nblaurenciana/Documents/GitHub/anchor/test -name \"*.dart\" -type f 2>/dev/null)",
       "Bash(grep -n \"import 'package:uuid\" /Users/nblaurenciana/Documents/GitHub/anchor/lib/services/wifi_aware/wifi_aware_transport_service_impl.dart 2>/dev/null; grep -rn \"import 'package:uuid\" /Users/nblaurenciana/Documents/GitHub/anchor/lib/ | head -5)",
-      "Bash(pod install:*)"
+      "Bash(pod install:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:api.github.com)",
+      "Bash(gh api:*)",
+      "Bash(ls -la /Users/nblaurenciana/Documents/GitHub/anchor/test/**/*_test.dart | wc -l)"
     ]
   }
 }

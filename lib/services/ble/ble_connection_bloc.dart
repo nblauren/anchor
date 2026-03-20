@@ -507,10 +507,56 @@ class BleConnectionBloc extends Bloc<BleConnectionEvent, BleConnectionState> {
     _BleStatusChanged event,
     Emitter<BleConnectionState> emit,
   ) {
-    emit(state.copyWith(
-      isScanning: _bleService.isScanning,
-      isBroadcasting: _bleService.isBroadcasting,
-    ));
+    // Map BleStatus → BleConnectionStatus so the UI reacts to runtime changes
+    // (e.g. user toggles Bluetooth off in system settings).
+    switch (event.status) {
+      case BleStatus.disabled:
+        emit(state.copyWith(
+          status: BleConnectionStatus.disabled,
+          isBluetoothEnabled: false,
+          isScanning: false,
+          isBroadcasting: false,
+        ));
+      case BleStatus.noPermission:
+        emit(state.copyWith(
+          status: BleConnectionStatus.noPermission,
+          hasPermissions: false,
+          isScanning: false,
+          isBroadcasting: false,
+        ));
+      case BleStatus.error:
+        emit(state.copyWith(
+          status: BleConnectionStatus.error,
+          isScanning: false,
+          isBroadcasting: false,
+          errorMessage: 'Bluetooth error',
+        ));
+      case BleStatus.ready:
+        // Bluetooth was re-enabled — transition to ready.
+        // Only auto-start if we were previously disabled (not if already active).
+        final wasDisabled = state.status == BleConnectionStatus.disabled ||
+            state.status == BleConnectionStatus.noPermission;
+        emit(state.copyWith(
+          status: BleConnectionStatus.ready,
+          isBluetoothEnabled: true,
+          hasPermissions: true,
+          isScanning: false,
+          isBroadcasting: false,
+        ));
+        if (wasDisabled && state.isInForeground && state.isVisible) {
+          add(const StartBleService());
+        }
+      case BleStatus.scanning:
+      case BleStatus.advertising:
+      case BleStatus.active:
+        emit(state.copyWith(
+          status: BleConnectionStatus.active,
+          isBluetoothEnabled: true,
+          hasPermissions: true,
+          isScanning: _bleService.isScanning,
+          isBroadcasting: _bleService.isBroadcasting,
+        ));
+    }
   }
 
   void _onBatteryLevelChanged(

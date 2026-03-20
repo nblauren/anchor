@@ -3,7 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../features/home/home.dart';
-import '../../features/onboarding/onboarding.dart';
+import '../../features/onboarding/screens/onboarding_screen.dart';
 import '../../features/profile/bloc/profile_bloc.dart';
 import '../../features/profile/bloc/profile_event.dart';
 import '../../features/profile/bloc/profile_state.dart';
@@ -11,8 +11,12 @@ import '../../features/profile/screens/profile_setup_screen.dart';
 import '../../services/ble/ble.dart';
 import '../app_lifecycle_observer.dart';
 import '../screens/splash_screen.dart';
+import '../theme/app_theme.dart';
 
-/// App shell that handles routing based on app state (onboarding, profile, permissions)
+/// App shell that handles routing based on app state:
+///   1. Onboarding (intro + BLE permissions) — shown once
+///   2. Profile setup — shown when no profile exists
+///   3. Main app — HomeScreen with BLE status monitoring
 class AppShell extends StatefulWidget {
   const AppShell({super.key});
 
@@ -23,7 +27,6 @@ class AppShell extends StatefulWidget {
 class _AppShellState extends State<AppShell> {
   bool? _hasSeenOnboarding;
   bool _isCheckingOnboarding = true;
-  bool _hasCompletedPermissions = false;
 
   @override
   void initState() {
@@ -60,10 +63,12 @@ class _AppShellState extends State<AppShell> {
       return const SplashScreen();
     }
 
+    // Onboarding not seen → show merged onboarding + BLE permissions flow.
     if (_hasSeenOnboarding == false) {
       return OnboardingScreen(onComplete: _completeOnboarding);
     }
 
+    // Onboarding done → check profile state.
     return BlocBuilder<ProfileBloc, ProfileState>(
       builder: (context, state) {
         if (_isLoadingProfile(state)) {
@@ -71,7 +76,11 @@ class _AppShellState extends State<AppShell> {
         }
 
         if (state.status == ProfileStatus.noProfile) {
-          return _buildSetupFlow(context);
+          return ProfileSetupScreen(
+            onComplete: () {
+              context.read<ProfileBloc>().add(const LoadProfile());
+            },
+          );
         }
 
         return const _MainAppWrapper();
@@ -83,45 +92,10 @@ class _AppShellState extends State<AppShell> {
     return state.status == ProfileStatus.initial ||
         state.status == ProfileStatus.loading;
   }
-
-  Widget _buildSetupFlow(BuildContext context) {
-    if (_hasCompletedPermissions) {
-      return ProfileSetupScreen(
-        onComplete: () {
-          context.read<ProfileBloc>().add(const LoadProfile());
-        },
-      );
-    }
-
-    return BlocBuilder<BleConnectionBloc, BleConnectionState>(
-      builder: (context, bleState) {
-        final needsPermissions = _needsBlePermissions(bleState.status);
-
-        if (needsPermissions) {
-          return PermissionsScreen(
-            onComplete: () => setState(() {
-              _hasCompletedPermissions = true;
-            }),
-          );
-        }
-
-        return ProfileSetupScreen(
-          onComplete: () {
-            context.read<ProfileBloc>().add(const LoadProfile());
-          },
-        );
-      },
-    );
-  }
-
-  bool _needsBlePermissions(BleConnectionStatus status) {
-    return status == BleConnectionStatus.initial ||
-        status == BleConnectionStatus.noPermission ||
-        status == BleConnectionStatus.disabled;
-  }
 }
 
-/// Wrapper that sets up lifecycle observer for BLE
+/// Wrapper that sets up lifecycle observer for BLE and monitors BLE status
+/// post-onboarding, showing a persistent banner when Bluetooth is off.
 class _MainAppWrapper extends StatefulWidget {
   const _MainAppWrapper();
 
@@ -149,6 +123,80 @@ class _MainAppWrapperState extends State<_MainAppWrapper> {
 
   @override
   Widget build(BuildContext context) {
-    return const HomeScreen();
+    return BlocBuilder<BleConnectionBloc, BleConnectionState>(
+      buildWhen: (prev, curr) => prev.status != curr.status,
+      builder: (context, bleState) {
+        final showBanner = bleState.status == BleConnectionStatus.disabled ||
+            bleState.status == BleConnectionStatus.noPermission;
+
+        return Column(
+          children: [
+            if (showBanner) _BluetoothOffBanner(status: bleState.status),
+            const Expanded(child: HomeScreen()),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// Persistent banner shown at the top of the main app when Bluetooth is
+/// disabled or permissions are revoked.
+class _BluetoothOffBanner extends StatelessWidget {
+  const _BluetoothOffBanner({required this.status});
+
+  final BleConnectionStatus status;
+
+  @override
+  Widget build(BuildContext context) {
+    final isPermission = status == BleConnectionStatus.noPermission;
+    final message = isPermission
+        ? 'Bluetooth permission needed to see people nearby.'
+        : 'Bluetooth is off. Turn it on to see people nearby.';
+
+    return Material(
+      color: AppTheme.warning.withValues(alpha: 0.15),
+      child: SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: Row(
+            children: [
+              const Icon(Icons.bluetooth_disabled, size: 20, color: AppTheme.warning),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  message,
+                  style: const TextStyle(
+                    color: AppTheme.warning,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+              TextButton(
+                onPressed: () {
+                  context
+                      .read<BleConnectionBloc>()
+                      .add(const RequestBlePermissions());
+                },
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  minimumSize: Size.zero,
+                ),
+                child: Text(
+                  isPermission ? 'Grant' : 'Fix',
+                  style: const TextStyle(
+                    color: AppTheme.warning,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
