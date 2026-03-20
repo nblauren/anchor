@@ -172,10 +172,38 @@ class ReactionBloc extends Bloc<ReactionEvent, ReactionState> {
     );
     final messageReactions =
         updatedReactions.putIfAbsent(event.messageId, () => []);
+
+    // If the user already reacted with this exact emoji, no-op
     final alreadyReacted = messageReactions.any(
       (r) => r.senderId == _ownUserId && r.emoji == event.emoji,
     );
     if (alreadyReacted) return;
+
+    // Remove any existing reaction from this user (only one reaction allowed)
+    final previousReaction = messageReactions.cast<ReactionEntry?>().firstWhere(
+      (r) => r?.senderId == _ownUserId,
+      orElse: () => null,
+    );
+    if (previousReaction != null) {
+      messageReactions.removeWhere((r) => r.senderId == _ownUserId);
+      // Remove old reaction from DB and notify peer
+      _chatRepository.removeReaction(
+        messageId: event.messageId,
+        senderId: _ownUserId,
+        emoji: previousReaction.emoji,
+      ).catchError((Object e) {
+        Logger.error('ReactionBloc: Failed to remove old reaction', e, null,
+            'ReactionBloc');
+      });
+      _transportManager
+          .sendReaction(
+            peerId: event.peerId,
+            messageId: event.messageId,
+            emoji: previousReaction.emoji,
+            action: 'remove',
+          )
+          .catchError((Object e) => false);
+    }
 
     final fakeEntry = ReactionEntry(
       id: 'local-${event.messageId}-${event.emoji}',
@@ -305,6 +333,9 @@ class ReactionBloc extends Bloc<ReactionEvent, ReactionState> {
             r.senderId == reaction.fromPeerId && r.emoji == reaction.emoji,
       );
       if (!alreadyExists) {
+        // Remove any existing reaction from this sender (one per message)
+        msgReactions
+            .removeWhere((r) => r.senderId == reaction.fromPeerId);
         msgReactions.add(ReactionEntry(
           id: 'remote-$messageId-${reaction.fromPeerId}-${reaction.emoji}',
           messageId: messageId,

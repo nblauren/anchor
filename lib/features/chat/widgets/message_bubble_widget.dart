@@ -48,7 +48,10 @@ class MessageBubbleWidget extends StatelessWidget {
     this.onCancelTransfer,
     this.reactions = const [],
     this.onReact,
-    this.onLongPress,
+    this.isSelected = false,
+    this.onTap,
+    this.onReactTap,
+    this.onReplyTap,
     this.quotedMessage,
     this.onQuotedTap,
   });
@@ -77,8 +80,17 @@ class MessageBubbleWidget extends StatelessWidget {
   /// Called when a reaction chip is tapped. Receives the emoji.
   final void Function(String emoji)? onReact;
 
-  /// Called on long-press to open the emoji picker.
-  final VoidCallback? onLongPress;
+  /// Whether this message is currently selected (tapped) to show action icons.
+  final bool isSelected;
+
+  /// Called when the message bubble is tapped.
+  final VoidCallback? onTap;
+
+  /// Called when the react icon is tapped (shows floating emoji picker).
+  final VoidCallback? onReactTap;
+
+  /// Called when the reply icon is tapped.
+  final VoidCallback? onReplyTap;
 
   /// The message being replied to, if any. Shown as a floating card above the bubble.
   final MessageEntry? quotedMessage;
@@ -110,14 +122,19 @@ class MessageBubbleWidget extends StatelessWidget {
                 // Extra bottom room so the reaction pill doesn't clip
                 bottom: grouped.isEmpty ? 4 : 16,
                 left: isSentByMe ? 48 : 0,
-                right: isSentByMe ? 0 : 48,
+                right: isSentByMe ? 0 : (isSelected ? 4 : 48),
               ),
-              child: Stack(
-                clipBehavior: Clip.none,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
+                  Flexible(
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
                   // Bubble
                   GestureDetector(
-                    onLongPress: onLongPress,
+                    onTap: onTap,
                     child: Container(
                       constraints: BoxConstraints(maxWidth: maxWidth),
                       decoration: BoxDecoration(
@@ -233,8 +250,44 @@ class MessageBubbleWidget extends StatelessWidget {
                       left: isSentByMe ? 6 : null,
                       child: _buildReactionPill(grouped),
                     ),
-                ],
-              ),
+                      ], // Stack children
+                    ), // Stack
+                  ), // Flexible
+                  // Inline action icons for received messages
+                  if (!isSentByMe)
+                    AnimatedOpacity(
+                      opacity: isSelected ? 1.0 : 0.0,
+                      duration: const Duration(milliseconds: 200),
+                      curve: Curves.easeOut,
+                      child: AnimatedScale(
+                        scale: isSelected ? 1.0 : 0.0,
+                        duration: const Duration(milliseconds: 200),
+                        curve: Curves.easeOutBack,
+                        alignment: Alignment.centerLeft,
+                        child: IgnorePointer(
+                          ignoring: !isSelected,
+                          child: Padding(
+                            padding: const EdgeInsets.only(left: 4),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                _InlineActionButton(
+                                  icon: Icons.emoji_emotions_outlined,
+                                  onTap: onReactTap,
+                                ),
+                                const SizedBox(width: 4),
+                                _InlineActionButton(
+                                  icon: Icons.reply,
+                                  onTap: onReplyTap,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                ], // Row children
+              ), // Row
             ),
           ), // Transform.translate
         ],
@@ -882,6 +935,41 @@ class _PhotoContentState extends State<_PhotoContent> {
       color: AppTheme.darkCard,
       child: const Center(
         child: Icon(Icons.image, color: AppTheme.textHint, size: 48),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Inline action button (react / reply) shown beside received message bubbles
+// ---------------------------------------------------------------------------
+
+class _InlineActionButton extends StatelessWidget {
+  const _InlineActionButton({
+    required this.icon,
+    this.onTap,
+  });
+
+  final IconData icon;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 32,
+        height: 32,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: AppTheme.darkSurface,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Icon(
+          icon,
+          size: 18,
+          color: AppTheme.textHint,
+        ),
       ),
     );
   }

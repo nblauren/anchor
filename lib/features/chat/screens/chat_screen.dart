@@ -16,6 +16,7 @@ import '../bloc/chat_event.dart';
 import '../bloc/chat_state.dart';
 import '../bloc/photo_transfer_bloc.dart';
 import '../bloc/reaction_bloc.dart';
+import '../widgets/floating_emoji_picker.dart';
 import '../widgets/message_bubble_widget.dart';
 
 const _kReactionEmojis = ['❤️', '👍', '😂', '😮', '😢', '🔥'];
@@ -57,6 +58,8 @@ class _ChatScreenState extends State<ChatScreen> {
   late final ReactionBloc _reactionBloc;
   bool _anchorDropped = false;
   final _messageKeys = <String, GlobalKey>{};
+  String? _selectedMessageId;
+  OverlayEntry? _overlayEntry;
 
   @override
   void initState() {
@@ -86,6 +89,10 @@ class _ChatScreenState extends State<ChatScreen> {
     }
 
     _scrollController.addListener(() {
+      // Dismiss selection + overlay on scroll
+      if (_selectedMessageId != null) {
+        _dismissSelection();
+      }
       if (_scrollController.position.pixels >=
           _scrollController.position.maxScrollExtent - 200) {
         final state = context.read<ChatBloc>().state;
@@ -98,6 +105,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   void dispose() {
+    _removeOverlay();
     _chatBloc.add(const CloseConversation());
     _e2eeBloc.add(const ResetE2ee());
     _reactionBloc.add(const ClearReactions());
@@ -286,100 +294,91 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  /// Shows a bottom sheet with Reply and (for received messages) React options.
-  void _showMessageOptions(
+  void _dismissSelection() {
+    _removeOverlay();
+    if (_selectedMessageId != null) {
+      setState(() => _selectedMessageId = null);
+    }
+  }
+
+  void _removeOverlay() {
+    _overlayEntry?.remove();
+    _overlayEntry = null;
+  }
+
+  void _toggleSelection(String messageId) {
+    _removeOverlay();
+    setState(() {
+      _selectedMessageId =
+          _selectedMessageId == messageId ? null : messageId;
+    });
+  }
+
+  void _showFloatingEmojiPicker(
     BuildContext context,
     MessageEntry message,
     String peerId,
-    bool isSentByMe,
+    GlobalKey messageKey,
   ) {
-    final ownUserId = context.read<ChatBloc>().ownUserId;
-    final currentReactions =
-        context.read<ReactionBloc>().state.reactions[message.id] ?? [];
+    _removeOverlay();
 
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: AppTheme.darkCard,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+    final renderBox =
+        messageKey.currentContext?.findRenderObject() as RenderBox?;
+    if (renderBox == null) return;
+
+    final overlay = Overlay.of(context);
+    final position = renderBox.localToGlobal(Offset.zero);
+
+    _overlayEntry = OverlayEntry(
+      builder: (ctx) {
+        final ownUserId = _chatBloc.ownUserId;
+        final currentReactions =
+            _reactionBloc.state.reactions[message.id] ?? [];
+
+        return Stack(
           children: [
-            const SizedBox(height: 8),
-            Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: AppTheme.textHint,
-                borderRadius: BorderRadius.circular(2),
+            // Dismiss on tap outside
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: _dismissSelection,
+                child: const SizedBox.expand(),
               ),
             ),
-            // Emoji row — only for messages from the other person
-            if (!isSentByMe) ...[
-              const SizedBox(height: 12),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: _kReactionEmojis.map((emoji) {
-                    final alreadyReacted = currentReactions.any(
-                        (r) => r.senderId == ownUserId && r.emoji == emoji);
-                    return GestureDetector(
-                      onTap: () {
-                        Navigator.pop(ctx);
-                        if (alreadyReacted) {
-                          context.read<ReactionBloc>().add(RemoveReaction(
-                                messageId: message.id,
-                                peerId: peerId,
-                                emoji: emoji,
-                              ));
-                        } else {
-                          context.read<ReactionBloc>().add(SendReaction(
-                                messageId: message.id,
-                                peerId: peerId,
-                                emoji: emoji,
-                              ));
-                        }
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: alreadyReacted
-                            ? BoxDecoration(
-                                color: AppTheme.primaryColor
-                                    .withValues(alpha: 0.25),
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(
-                                  color: AppTheme.primaryColor
-                                      .withValues(alpha: 0.5),
-                                ),
-                              )
-                            : null,
-                        child:
-                            Text(emoji, style: const TextStyle(fontSize: 28)),
-                      ),
-                    );
-                  }).toList(),
-                ),
+            // Floating emoji picker positioned above the message
+            Positioned(
+              left: position.dx,
+              top: position.dy - 52,
+              child: FloatingEmojiPicker(
+                emojis: _kReactionEmojis,
+                ownUserId: ownUserId,
+                currentReactions: currentReactions,
+                onEmojiTap: (emoji) {
+                  _dismissSelection();
+                  final ownReacted = currentReactions.any(
+                      (r) => r.senderId == ownUserId && r.emoji == emoji);
+                  if (ownReacted) {
+                    _reactionBloc.add(RemoveReaction(
+                      messageId: message.id,
+                      peerId: peerId,
+                      emoji: emoji,
+                    ));
+                  } else {
+                    _reactionBloc.add(SendReaction(
+                      messageId: message.id,
+                      peerId: peerId,
+                      emoji: emoji,
+                    ));
+                  }
+                },
               ),
-              const Divider(height: 16, color: AppTheme.darkSurface),
-            ] else
-              const SizedBox(height: 12),
-            // Reply option
-            ListTile(
-              leading: const Icon(Icons.reply, color: AppTheme.textSecondary),
-              title: const Text('Reply'),
-              onTap: () {
-                Navigator.pop(ctx);
-                _startReply(message);
-              },
             ),
-            const SizedBox(height: 8),
           ],
-        ),
-      ),
+        );
+      },
     );
+
+    overlay.insert(_overlayEntry!);
   }
 
   void _requestFullPhoto(String messageId, String photoId, String peerId) {
@@ -614,7 +613,10 @@ class _ChatScreenState extends State<ChatScreen> {
               // Messages list — tap to dismiss keyboard
               Expanded(
                 child: GestureDetector(
-                  onTap: () => _focusNode.unfocus(),
+                  onTap: () {
+                    _dismissSelection();
+                    _focusNode.unfocus();
+                  },
                   child: state.messages.isEmpty
                       ? _buildEmptyState()
                       : ListView.builder(
@@ -703,14 +705,24 @@ class _ChatScreenState extends State<ChatScreen> {
                                                 );
                                           }
                                         },
-                                  onLongPress: state.isBlocked || isSentByMe
-                                      ? null
-                                      : () => _showMessageOptions(
+                                  isSelected: _selectedMessageId == message.id,
+                                  onTap: (!isSentByMe && !state.isBlocked)
+                                      ? () => _toggleSelection(message.id)
+                                      : null,
+                                  onReactTap: (!isSentByMe && !state.isBlocked)
+                                      ? () => _showFloatingEmojiPicker(
                                             context,
                                             message,
                                             state.currentConversation!.peerId,
-                                            isSentByMe,
-                                          ),
+                                            itemKey,
+                                          )
+                                      : null,
+                                  onReplyTap: (!isSentByMe && !state.isBlocked)
+                                      ? () {
+                                          _dismissSelection();
+                                          _startReply(message);
+                                        }
+                                      : null,
                                   quotedMessage: message.replyToMessageId != null
                                       ? state.quotedMessages[message.replyToMessageId]
                                       : null,

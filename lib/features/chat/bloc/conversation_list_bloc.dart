@@ -102,8 +102,17 @@ class ConversationListBloc
     on<LoadConversations>(_onLoadConversations);
     on<DeleteConversation>(_onDeleteConversation);
 
+    // Load conversations immediately so the badge is correct on all tabs.
+    add(const LoadConversations());
+
     // Auto-refresh when other blocs signal conversation changes.
     _busSub = chatEventBus.conversationsChanged.listen((_) {
+      if (!isClosed) add(const LoadConversations());
+    });
+
+    // Also refresh when a new message is added (ensures badge updates even if
+    // conversationsChanged fires before the DB write commits).
+    _messageAddedSub = chatEventBus.messageAdded.listen((_) {
       if (!isClosed) add(const LoadConversations());
     });
 
@@ -132,6 +141,7 @@ class ConversationListBloc
   final NotificationService _notificationService;
 
   StreamSubscription<void>? _busSub;
+  StreamSubscription? _messageAddedSub;
   StreamSubscription? _sendConvSub;
   StreamSubscription? _storeForwardSub;
   StreamSubscription? _retryQueueSub;
@@ -184,6 +194,7 @@ class ConversationListBloc
   @override
   Future<void> close() {
     _busSub?.cancel();
+    _messageAddedSub?.cancel();
     _sendConvSub?.cancel();
     _storeForwardSub?.cancel();
     _retryQueueSub?.cancel();

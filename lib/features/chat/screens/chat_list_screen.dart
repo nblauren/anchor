@@ -70,6 +70,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                             BlocProvider.value(value: photoTransferBloc),
                             BlocProvider.value(value: reactionBloc),
                             BlocProvider.value(value: anchorDropBloc),
+                            BlocProvider.value(value: context.read<ConversationListBloc>()),
                           ],
                           child: PeerDetailScreen(peer: peer),
                         ),

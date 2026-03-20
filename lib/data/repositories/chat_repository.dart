@@ -644,7 +644,8 @@ class ChatRepository {
 
   // ==================== Reactions ====================
 
-  /// Add (or ignore if duplicate) an emoji reaction on a message.
+  /// Add an emoji reaction on a message, replacing any existing reaction from
+  /// the same sender (only one reaction per user per message is allowed).
   Future<void> addReaction({
     required String messageId,
     required String senderId,
@@ -658,7 +659,13 @@ class ChatRepository {
               t.emoji.equals(emoji)))
         .getSingleOrNull();
 
-    if (existing != null) return; // already reacted — no-op
+    if (existing != null) return; // already reacted with same emoji — no-op
+
+    // Remove any previous reaction from this sender on this message
+    await (_db.delete(_db.messageReactions)
+          ..where((t) =>
+              t.messageId.equals(messageId) & t.senderId.equals(senderId)))
+        .go();
 
     final id = _uuid.v4();
     await _db.into(_db.messageReactions).insert(

@@ -6,6 +6,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../chat/bloc/chat_bloc.dart';
 import '../../chat/bloc/chat_e2ee_bloc.dart';
+import '../../chat/bloc/conversation_list_bloc.dart';
 import '../../chat/bloc/photo_transfer_bloc.dart';
 import '../../chat/bloc/reaction_bloc.dart';
 import '../../chat/screens/chat_screen.dart';
@@ -155,8 +156,7 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
       listenWhen: (_, state) =>
           state.peers.any((p) => p.peerId == _peer.peerId),
       listener: (context, state) {
-        final updated =
-            state.peers.firstWhere((p) => p.peerId == _peer.peerId);
+        final updated = state.peers.firstWhere((p) => p.peerId == _peer.peerId);
         if (updated != _peer) {
           setState(() {
             _peer = updated;
@@ -172,185 +172,187 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
       child: Scaffold(
         body: CustomScrollView(
           slivers: [
-          // Fullscreen photo carousel with app bar
-          SliverAppBar(
-            expandedHeight: MediaQuery.of(context).size.height,
-            pinned: true,
-            flexibleSpace: FlexibleSpaceBar(
-              background: _buildPhotoCarousel(),
-            ),
-            actions: [
-              // More options menu
-              PopupMenuButton<String>(
-                icon: Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.3),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(Icons.more_vert, color: Colors.white),
-                ),
-                onSelected: (value) {
-                  if (value == 'block') {
-                    _showBlockConfirmation();
-                  }
-                },
-                itemBuilder: (context) => [
-                  const PopupMenuItem(
-                    value: 'block',
-                    child: Row(
-                      children: [
-                        Icon(Icons.block, color: AppTheme.error),
-                        SizedBox(width: 12),
-                        Text('Block user'),
-                      ],
-                    ),
-                  ),
-                ],
+            // Fullscreen photo carousel with app bar
+            SliverAppBar(
+              expandedHeight: MediaQuery.of(context).size.height,
+              pinned: true,
+              flexibleSpace: FlexibleSpaceBar(
+                background: _buildPhotoCarousel(),
               ),
-            ],
-          ),
+              actions: [
+                // More options menu
+                PopupMenuButton<String>(
+                  icon: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.3),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.more_vert, color: Colors.white),
+                  ),
+                  onSelected: (value) {
+                    if (value == 'block') {
+                      _showBlockConfirmation();
+                    }
+                  },
+                  itemBuilder: (context) => [
+                    const PopupMenuItem(
+                      value: 'block',
+                      child: Row(
+                        children: [
+                          Icon(Icons.block, color: AppTheme.error),
+                          SizedBox(width: 12),
+                          Text('Block user'),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
 
-          // Scrollable content below the fold
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Signal strength
-                  if (_peer.signalStrengthText != null) ...[
-                    Row(
-                      children: [
-                        const Icon(
-                          Icons.signal_cellular_alt,
-                          size: 16,
-                          color: AppTheme.textSecondary,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          '${_peer.signalStrengthText} signal',
-                          style: const TextStyle(
+            // Scrollable content below the fold
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Signal strength
+                    if (_peer.signalStrengthText != null) ...[
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.signal_cellular_alt,
+                            size: 16,
                             color: AppTheme.textSecondary,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            '${_peer.signalStrengthText} signal',
+                            style: const TextStyle(
+                              color: AppTheme.textSecondary,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+
+                    // About section
+                    Text(
+                      'About',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      _peer.bio?.isNotEmpty == true ? _peer.bio! : 'No bio yet',
+                      style: TextStyle(
+                        color: _peer.bio?.isNotEmpty == true
+                            ? AppTheme.textPrimary
+                            : AppTheme.textHint,
+                        fontSize: 16,
+                        height: 1.5,
+                      ),
+                    ),
+
+                    // ── Position & Interests ────
+                    if (_peer.positionLabel != null ||
+                        _peer.interestLabels.isNotEmpty) ...[
+                      const SizedBox(height: 20),
+                      const Divider(),
+                      const SizedBox(height: 16),
+                    ],
+
+                    // Position
+                    if (_peer.positionLabel != null) ...[
+                      Row(
+                        children: [
+                          const Icon(Icons.swap_vert_rounded,
+                              size: 18, color: AppTheme.textSecondary),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Position',
+                            style: Theme.of(context)
+                                .textTheme
+                                .labelMedium
+                                ?.copyWith(color: AppTheme.textSecondary),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: AppTheme.primaryLight.withAlpha(26),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                              color: AppTheme.primaryLight.withAlpha(77)),
+                        ),
+                        child: Text(
+                          _peer.positionLabel!,
+                          style: const TextStyle(
+                            color: AppTheme.primaryLight,
+                            fontWeight: FontWeight.w600,
                             fontSize: 14,
                           ),
                         ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                  ],
-
-                  // About section
-                  Text(
-                    'About',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    _peer.bio?.isNotEmpty == true ? _peer.bio! : 'No bio yet',
-                    style: TextStyle(
-                      color: _peer.bio?.isNotEmpty == true
-                          ? AppTheme.textPrimary
-                          : AppTheme.textHint,
-                      fontSize: 16,
-                      height: 1.5,
-                    ),
-                  ),
-
-                  // ── Position & Interests ────
-                  if (_peer.positionLabel != null ||
-                      _peer.interestLabels.isNotEmpty) ...[
-                    const SizedBox(height: 20),
-                    const Divider(),
-                    const SizedBox(height: 16),
-                  ],
-
-                  // Position
-                  if (_peer.positionLabel != null) ...[
-                    Row(
-                      children: [
-                        const Icon(Icons.swap_vert_rounded,
-                            size: 18, color: AppTheme.textSecondary),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Position',
-                          style: Theme.of(context)
-                              .textTheme
-                              .labelMedium
-                              ?.copyWith(color: AppTheme.textSecondary),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: AppTheme.primaryLight.withAlpha(26),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: AppTheme.primaryLight.withAlpha(77)),
                       ),
-                      child: Text(
-                        _peer.positionLabel!,
-                        style: const TextStyle(
-                          color: AppTheme.primaryLight,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 14,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                  ],
+                      const SizedBox(height: 16),
+                    ],
 
-                  // Interests
-                  if (_peer.interestLabels.isNotEmpty) ...[
-                    Row(
-                      children: [
-                        const Icon(Icons.interests_outlined,
-                            size: 18, color: AppTheme.textSecondary),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Interests',
-                          style: Theme.of(context)
-                              .textTheme
-                              .labelMedium
-                              ?.copyWith(color: AppTheme.textSecondary),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 6,
-                      children: _peer.interestLabels.map((label) {
-                        return Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 10, vertical: 5),
-                          decoration: BoxDecoration(
-                            color: AppTheme.darkCard,
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: Colors.white24),
+                    // Interests
+                    if (_peer.interestLabels.isNotEmpty) ...[
+                      Row(
+                        children: [
+                          const Icon(Icons.interests_outlined,
+                              size: 18, color: AppTheme.textSecondary),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Interests',
+                            style: Theme.of(context)
+                                .textTheme
+                                .labelMedium
+                                ?.copyWith(color: AppTheme.textSecondary),
                           ),
-                          child: Text(
-                            label,
-                            style: const TextStyle(
-                              color: AppTheme.textSecondary,
-                              fontSize: 13,
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 6,
+                        children: _peer.interestLabels.map((label) {
+                          return Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 5),
+                            decoration: BoxDecoration(
+                              color: AppTheme.darkCard,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(color: Colors.white24),
                             ),
-                          ),
-                        );
-                      }).toList(),
-                    ),
-                    const SizedBox(height: 16),
-                  ],
+                            child: Text(
+                              label,
+                              style: const TextStyle(
+                                color: AppTheme.textSecondary,
+                                fontSize: 13,
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                      const SizedBox(height: 16),
+                    ],
 
-                  SizedBox(height: MediaQuery.of(context).padding.bottom + 32),
-                ],
+                    SizedBox(
+                        height: MediaQuery.of(context).padding.bottom + 32),
+                  ],
+                ),
               ),
             ),
-          ),
           ],
         ),
       ),
@@ -393,9 +395,7 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
           children: [
             // Name and age
             Text(
-              _peer.age != null
-                  ? '${_peer.name}, ${_peer.age}'
-                  : _peer.name,
+              _peer.age != null ? '${_peer.name}, ${_peer.age}' : _peer.name,
               style: const TextStyle(
                 color: Colors.white,
                 fontSize: 28,
@@ -460,10 +460,18 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _ActionIconButton(
-            icon: Icons.chat_bubble_outline,
-            label: 'Message',
-            onPressed: _openChat,
+          BlocBuilder<ConversationListBloc, ConversationListState>(
+            builder: (context, convState) {
+              final unread = convState.conversations
+                  .where((c) => c.conversation.peerId == _peer.peerId)
+                  .fold(0, (sum, c) => sum + c.unreadCount);
+              return _ActionIconButton(
+                icon: Icons.chat_bubble_outline,
+                label: 'Message',
+                onPressed: _openChat,
+                badgeCount: unread,
+              );
+            },
           ),
           const SizedBox(height: 16),
           _ActionIconButton(
@@ -489,14 +497,19 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
     // Full photo data is gated to direct range.
     if (_peer.isRelayed) {
       final thumb = _peer.thumbnailData;
-      if (thumb != null && thumb.isNotEmpty && thumb.lengthInBytes <= 20 * 1024) {
+      if (thumb != null &&
+          thumb.isNotEmpty &&
+          thumb.lengthInBytes <= 20 * 1024) {
         return Stack(
           fit: StackFit.expand,
           children: [
-            Image.memory(thumb, fit: BoxFit.cover,
+            Image.memory(thumb,
+                fit: BoxFit.cover,
                 errorBuilder: (_, __, ___) => _buildRelayedPhotoPlaceholder()),
             Positioned(
-              top: 0, left: 0, right: 0,
+              top: 0,
+              left: 0,
+              right: 0,
               child: Container(
                 height: 100,
                 decoration: BoxDecoration(
@@ -540,9 +553,10 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
     }
 
     // Determine how many slots to show: loaded + pending fetches
-    final totalSlots = (_isFetchingPhotos && _peer.fullPhotoCount > photos.length)
-        ? _peer.fullPhotoCount
-        : photos.length;
+    final totalSlots =
+        (_isFetchingPhotos && _peer.fullPhotoCount > photos.length)
+            ? _peer.fullPhotoCount
+            : photos.length;
 
     return Stack(
       fit: StackFit.expand,
@@ -556,7 +570,8 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
               return Image.memory(
                 photos[index],
                 fit: BoxFit.cover,
-                errorBuilder: (context, error, stackTrace) => _buildPlaceholder(),
+                errorBuilder: (context, error, stackTrace) =>
+                    _buildPlaceholder(),
               );
             }
             // Placeholder for photos still loading from fff4
@@ -625,7 +640,8 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
                 ),
                 const SizedBox(height: 16),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   decoration: BoxDecoration(
                     color: Colors.black.withValues(alpha: 0.4),
                     borderRadius: BorderRadius.circular(20),
@@ -646,7 +662,9 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
             ),
           ),
           Positioned(
-            top: 0, left: 0, right: 0,
+            top: 0,
+            left: 0,
+            right: 0,
             child: Container(
               height: 100,
               decoration: BoxDecoration(
@@ -746,9 +764,8 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
           margin: const EdgeInsets.symmetric(horizontal: 4),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(4),
-            color: isActive
-                ? Colors.white
-                : Colors.white.withValues(alpha: 0.4),
+            color:
+                isActive ? Colors.white : Colors.white.withValues(alpha: 0.4),
           ),
         );
       }),
@@ -774,12 +791,14 @@ class _ActionIconButton extends StatelessWidget {
     required this.label,
     required this.onPressed,
     this.color,
+    this.badgeCount = 0,
   });
 
   final IconData icon;
   final String label;
   final VoidCallback? onPressed;
   final Color? color;
+  final int badgeCount;
 
   @override
   Widget build(BuildContext context) {
@@ -793,21 +812,34 @@ class _ActionIconButton extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Container(
-            width: 52,
-            height: 52,
-            decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: dimmed ? 0.3 : 0.5),
-              shape: BoxShape.circle,
-              border: Border.all(
-                color: effectiveColor.withValues(alpha: dimmed ? 0.2 : 0.6),
-                width: 1.5,
+          Badge(
+            isLabelVisible: badgeCount > 0,
+            backgroundColor: AppTheme.primaryColor,
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            label: Text(
+              '$badgeCount',
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
               ),
             ),
-            child: Icon(
-              icon,
-              color: effectiveColor.withValues(alpha: dimmed ? 0.4 : 1.0),
-              size: 24,
+            child: Container(
+              width: 52,
+              height: 52,
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: dimmed ? 0.3 : 0.5),
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: effectiveColor.withValues(alpha: dimmed ? 0.2 : 0.6),
+                  width: 1.5,
+                ),
+              ),
+              child: Icon(
+                icon,
+                color: effectiveColor.withValues(alpha: dimmed ? 0.4 : 1.0),
+                size: 24,
+              ),
             ),
           ),
           const SizedBox(height: 4),
