@@ -42,6 +42,9 @@ enum MessageStatus {
 /// Direction of an anchor drop
 enum AnchorDropDirection { sent, received }
 
+/// Delivery status of a sent anchor drop
+enum AnchorDropStatus { pending, delivered }
+
 // ==================== Tables ====================
 
 /// Local user's own profile
@@ -150,6 +153,8 @@ class AnchorDrops extends Table {
   TextColumn get peerName => text()();
   TextColumn get direction => textEnum<AnchorDropDirection>()();
   DateTimeColumn get droppedAt => dateTime()();
+  TextColumn get status =>
+      textEnum<AnchorDropStatus>().withDefault(Constant(AnchorDropStatus.delivered.name))();
 
   @override
   Set<Column> get primaryKey => {id};
@@ -249,7 +254,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 5;
 
   @override
   MigrationStrategy get migration {
@@ -266,6 +271,11 @@ class AppDatabase extends _$AppDatabase {
           // Pre-production — safe to drop and recreate.
           await m.deleteTable('peer_aliases');
           await m.createTable(peerAliases);
+        }
+        if (from < 5) {
+          await customStatement(
+            "ALTER TABLE anchor_drops ADD COLUMN status TEXT NOT NULL DEFAULT 'delivered'",
+          );
         }
       },
       beforeOpen: (details) async {

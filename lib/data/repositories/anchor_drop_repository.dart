@@ -15,6 +15,7 @@ class AnchorDropRepository {
     required String peerId,
     required String peerName,
     required AnchorDropDirection direction,
+    AnchorDropStatus status = AnchorDropStatus.delivered,
   }) async {
     await _db.into(_db.anchorDrops).insert(
           AnchorDropsCompanion.insert(
@@ -23,8 +24,42 @@ class AnchorDropRepository {
             peerName: peerName,
             direction: direction,
             droppedAt: DateTime.now(),
+            status: Value(status),
           ),
         );
+  }
+
+  /// Mark a pending anchor drop as delivered.
+  Future<void> markDelivered(String dropId) async {
+    await (_db.update(_db.anchorDrops)..where((t) => t.id.equals(dropId)))
+        .write(const AnchorDropsCompanion(
+            status: Value(AnchorDropStatus.delivered)));
+  }
+
+  /// Get all pending (undelivered) sent anchor drops for a specific peer,
+  /// within the last [hours] (default 24h — stale drops are not useful).
+  Future<List<AnchorDropEntry>> getPendingDropsForPeer(
+    String peerId, {
+    int hours = 24,
+  }) async {
+    final cutoff = DateTime.now().subtract(Duration(hours: hours));
+    return (_db.select(_db.anchorDrops)
+          ..where((t) =>
+              t.peerId.equals(peerId) &
+              t.direction.equals(AnchorDropDirection.sent.name) &
+              t.status.equals(AnchorDropStatus.pending.name) &
+              t.droppedAt.isBiggerOrEqualValue(cutoff)))
+        .get();
+  }
+
+  /// Expire all pending anchor drops older than [hours].
+  Future<void> expireStalePendingDrops({int hours = 24}) async {
+    final cutoff = DateTime.now().subtract(Duration(hours: hours));
+    await (_db.delete(_db.anchorDrops)
+          ..where((t) =>
+              t.status.equals(AnchorDropStatus.pending.name) &
+              t.droppedAt.isSmallerThanValue(cutoff)))
+        .go();
   }
 
   /// Returns true if we've already dropped anchor on this peer today

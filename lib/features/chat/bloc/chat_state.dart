@@ -74,10 +74,13 @@ class PendingOutgoingPhoto extends Equatable {
 
   /// UUID shared between the preview and the full-transfer request.
   final String photoId;
+
   /// Absolute path to the BLE-compressed photo bytes on the sender's device.
   final String localPhotoPath;
+
   /// DB message ID for the sender's own chat bubble (type: photo).
   final String messageId;
+
   /// BLE peer ID of the recipient.
   final String peerId;
 
@@ -103,8 +106,10 @@ class ChatState extends Equatable {
   final String? errorMessage;
   final bool hasMoreMessages;
   final bool isBlocked;
+
   /// The message currently being replied to, shown in the reply bar. null = not replying.
   final MessageEntry? replyingToMessage;
+
   /// Quoted messages keyed by message ID. Used to render reply previews inside bubbles.
   /// Populated from [Messages.replyToMessageId] when loading messages.
   final Map<String, MessageEntry> quotedMessages;
@@ -126,13 +131,16 @@ class ChatState extends Equatable {
   }) {
     return ChatState(
       status: status ?? this.status,
-      currentConversation:
-          clearCurrentConversation ? null : (currentConversation ?? this.currentConversation),
+      currentConversation: clearCurrentConversation
+          ? null
+          : (currentConversation ?? this.currentConversation),
       messages: messages ?? this.messages,
       errorMessage: errorMessage,
       hasMoreMessages: hasMoreMessages ?? this.hasMoreMessages,
       isBlocked: isBlocked ?? this.isBlocked,
-      replyingToMessage: clearReplyingToMessage ? null : (replyingToMessage ?? this.replyingToMessage),
+      replyingToMessage: clearReplyingToMessage
+          ? null
+          : (replyingToMessage ?? this.replyingToMessage),
       quotedMessages: quotedMessages ?? this.quotedMessages,
     );
   }

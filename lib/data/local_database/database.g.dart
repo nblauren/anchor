@@ -2357,9 +2357,17 @@ class $AnchorDropsTable extends AnchorDrops
   late final GeneratedColumn<DateTime> droppedAt = GeneratedColumn<DateTime>(
       'dropped_at', aliasedName, false,
       type: DriftSqlType.dateTime, requiredDuringInsert: true);
+  static const VerificationMeta _statusMeta = const VerificationMeta('status');
+  @override
+  late final GeneratedColumnWithTypeConverter<AnchorDropStatus, String> status =
+      GeneratedColumn<String>('status', aliasedName, false,
+              type: DriftSqlType.string,
+              requiredDuringInsert: false,
+              defaultValue: Constant(AnchorDropStatus.delivered.name))
+          .withConverter<AnchorDropStatus>($AnchorDropsTable.$converterstatus);
   @override
   List<GeneratedColumn> get $columns =>
-      [id, peerId, peerName, direction, droppedAt];
+      [id, peerId, peerName, direction, droppedAt, status];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
@@ -2394,6 +2402,7 @@ class $AnchorDropsTable extends AnchorDrops
     } else if (isInserting) {
       context.missing(_droppedAtMeta);
     }
+    context.handle(_statusMeta, const VerificationResult.success());
     return context;
   }
 
@@ -2414,6 +2423,9 @@ class $AnchorDropsTable extends AnchorDrops
           .read(DriftSqlType.string, data['${effectivePrefix}direction'])!),
       droppedAt: attachedDatabase.typeMapping
           .read(DriftSqlType.dateTime, data['${effectivePrefix}dropped_at'])!,
+      status: $AnchorDropsTable.$converterstatus.fromSql(attachedDatabase
+          .typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}status'])!),
     );
   }
 
@@ -2425,6 +2437,8 @@ class $AnchorDropsTable extends AnchorDrops
   static JsonTypeConverter2<AnchorDropDirection, String, String>
       $converterdirection =
       const EnumNameConverter<AnchorDropDirection>(AnchorDropDirection.values);
+  static JsonTypeConverter2<AnchorDropStatus, String, String> $converterstatus =
+      const EnumNameConverter<AnchorDropStatus>(AnchorDropStatus.values);
 }
 
 class AnchorDropEntry extends DataClass implements Insertable<AnchorDropEntry> {
@@ -2433,12 +2447,14 @@ class AnchorDropEntry extends DataClass implements Insertable<AnchorDropEntry> {
   final String peerName;
   final AnchorDropDirection direction;
   final DateTime droppedAt;
+  final AnchorDropStatus status;
   const AnchorDropEntry(
       {required this.id,
       required this.peerId,
       required this.peerName,
       required this.direction,
-      required this.droppedAt});
+      required this.droppedAt,
+      required this.status});
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
@@ -2450,6 +2466,10 @@ class AnchorDropEntry extends DataClass implements Insertable<AnchorDropEntry> {
           $AnchorDropsTable.$converterdirection.toSql(direction));
     }
     map['dropped_at'] = Variable<DateTime>(droppedAt);
+    {
+      map['status'] =
+          Variable<String>($AnchorDropsTable.$converterstatus.toSql(status));
+    }
     return map;
   }
 
@@ -2460,6 +2480,7 @@ class AnchorDropEntry extends DataClass implements Insertable<AnchorDropEntry> {
       peerName: Value(peerName),
       direction: Value(direction),
       droppedAt: Value(droppedAt),
+      status: Value(status),
     );
   }
 
@@ -2473,6 +2494,8 @@ class AnchorDropEntry extends DataClass implements Insertable<AnchorDropEntry> {
       direction: $AnchorDropsTable.$converterdirection
           .fromJson(serializer.fromJson<String>(json['direction'])),
       droppedAt: serializer.fromJson<DateTime>(json['droppedAt']),
+      status: $AnchorDropsTable.$converterstatus
+          .fromJson(serializer.fromJson<String>(json['status'])),
     );
   }
   @override
@@ -2485,6 +2508,8 @@ class AnchorDropEntry extends DataClass implements Insertable<AnchorDropEntry> {
       'direction': serializer.toJson<String>(
           $AnchorDropsTable.$converterdirection.toJson(direction)),
       'droppedAt': serializer.toJson<DateTime>(droppedAt),
+      'status': serializer
+          .toJson<String>($AnchorDropsTable.$converterstatus.toJson(status)),
     };
   }
 
@@ -2493,13 +2518,15 @@ class AnchorDropEntry extends DataClass implements Insertable<AnchorDropEntry> {
           String? peerId,
           String? peerName,
           AnchorDropDirection? direction,
-          DateTime? droppedAt}) =>
+          DateTime? droppedAt,
+          AnchorDropStatus? status}) =>
       AnchorDropEntry(
         id: id ?? this.id,
         peerId: peerId ?? this.peerId,
         peerName: peerName ?? this.peerName,
         direction: direction ?? this.direction,
         droppedAt: droppedAt ?? this.droppedAt,
+        status: status ?? this.status,
       );
   AnchorDropEntry copyWithCompanion(AnchorDropsCompanion data) {
     return AnchorDropEntry(
@@ -2508,6 +2535,7 @@ class AnchorDropEntry extends DataClass implements Insertable<AnchorDropEntry> {
       peerName: data.peerName.present ? data.peerName.value : this.peerName,
       direction: data.direction.present ? data.direction.value : this.direction,
       droppedAt: data.droppedAt.present ? data.droppedAt.value : this.droppedAt,
+      status: data.status.present ? data.status.value : this.status,
     );
   }
 
@@ -2518,13 +2546,15 @@ class AnchorDropEntry extends DataClass implements Insertable<AnchorDropEntry> {
           ..write('peerId: $peerId, ')
           ..write('peerName: $peerName, ')
           ..write('direction: $direction, ')
-          ..write('droppedAt: $droppedAt')
+          ..write('droppedAt: $droppedAt, ')
+          ..write('status: $status')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(id, peerId, peerName, direction, droppedAt);
+  int get hashCode =>
+      Object.hash(id, peerId, peerName, direction, droppedAt, status);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -2533,7 +2563,8 @@ class AnchorDropEntry extends DataClass implements Insertable<AnchorDropEntry> {
           other.peerId == this.peerId &&
           other.peerName == this.peerName &&
           other.direction == this.direction &&
-          other.droppedAt == this.droppedAt);
+          other.droppedAt == this.droppedAt &&
+          other.status == this.status);
 }
 
 class AnchorDropsCompanion extends UpdateCompanion<AnchorDropEntry> {
@@ -2542,6 +2573,7 @@ class AnchorDropsCompanion extends UpdateCompanion<AnchorDropEntry> {
   final Value<String> peerName;
   final Value<AnchorDropDirection> direction;
   final Value<DateTime> droppedAt;
+  final Value<AnchorDropStatus> status;
   final Value<int> rowid;
   const AnchorDropsCompanion({
     this.id = const Value.absent(),
@@ -2549,6 +2581,7 @@ class AnchorDropsCompanion extends UpdateCompanion<AnchorDropEntry> {
     this.peerName = const Value.absent(),
     this.direction = const Value.absent(),
     this.droppedAt = const Value.absent(),
+    this.status = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   AnchorDropsCompanion.insert({
@@ -2557,6 +2590,7 @@ class AnchorDropsCompanion extends UpdateCompanion<AnchorDropEntry> {
     required String peerName,
     required AnchorDropDirection direction,
     required DateTime droppedAt,
+    this.status = const Value.absent(),
     this.rowid = const Value.absent(),
   })  : id = Value(id),
         peerId = Value(peerId),
@@ -2569,6 +2603,7 @@ class AnchorDropsCompanion extends UpdateCompanion<AnchorDropEntry> {
     Expression<String>? peerName,
     Expression<String>? direction,
     Expression<DateTime>? droppedAt,
+    Expression<String>? status,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -2577,6 +2612,7 @@ class AnchorDropsCompanion extends UpdateCompanion<AnchorDropEntry> {
       if (peerName != null) 'peer_name': peerName,
       if (direction != null) 'direction': direction,
       if (droppedAt != null) 'dropped_at': droppedAt,
+      if (status != null) 'status': status,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -2587,6 +2623,7 @@ class AnchorDropsCompanion extends UpdateCompanion<AnchorDropEntry> {
       Value<String>? peerName,
       Value<AnchorDropDirection>? direction,
       Value<DateTime>? droppedAt,
+      Value<AnchorDropStatus>? status,
       Value<int>? rowid}) {
     return AnchorDropsCompanion(
       id: id ?? this.id,
@@ -2594,6 +2631,7 @@ class AnchorDropsCompanion extends UpdateCompanion<AnchorDropEntry> {
       peerName: peerName ?? this.peerName,
       direction: direction ?? this.direction,
       droppedAt: droppedAt ?? this.droppedAt,
+      status: status ?? this.status,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -2617,6 +2655,10 @@ class AnchorDropsCompanion extends UpdateCompanion<AnchorDropEntry> {
     if (droppedAt.present) {
       map['dropped_at'] = Variable<DateTime>(droppedAt.value);
     }
+    if (status.present) {
+      map['status'] = Variable<String>(
+          $AnchorDropsTable.$converterstatus.toSql(status.value));
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -2631,6 +2673,7 @@ class AnchorDropsCompanion extends UpdateCompanion<AnchorDropEntry> {
           ..write('peerName: $peerName, ')
           ..write('direction: $direction, ')
           ..write('droppedAt: $droppedAt, ')
+          ..write('status: $status, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -5629,6 +5672,7 @@ typedef $$AnchorDropsTableCreateCompanionBuilder = AnchorDropsCompanion
   required String peerName,
   required AnchorDropDirection direction,
   required DateTime droppedAt,
+  Value<AnchorDropStatus> status,
   Value<int> rowid,
 });
 typedef $$AnchorDropsTableUpdateCompanionBuilder = AnchorDropsCompanion
@@ -5638,6 +5682,7 @@ typedef $$AnchorDropsTableUpdateCompanionBuilder = AnchorDropsCompanion
   Value<String> peerName,
   Value<AnchorDropDirection> direction,
   Value<DateTime> droppedAt,
+  Value<AnchorDropStatus> status,
   Value<int> rowid,
 });
 
@@ -5667,6 +5712,11 @@ class $$AnchorDropsTableFilterComposer
 
   ColumnFilters<DateTime> get droppedAt => $composableBuilder(
       column: $table.droppedAt, builder: (column) => ColumnFilters(column));
+
+  ColumnWithTypeConverterFilters<AnchorDropStatus, AnchorDropStatus, String>
+      get status => $composableBuilder(
+          column: $table.status,
+          builder: (column) => ColumnWithTypeConverterFilters(column));
 }
 
 class $$AnchorDropsTableOrderingComposer
@@ -5692,6 +5742,9 @@ class $$AnchorDropsTableOrderingComposer
 
   ColumnOrderings<DateTime> get droppedAt => $composableBuilder(
       column: $table.droppedAt, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get status => $composableBuilder(
+      column: $table.status, builder: (column) => ColumnOrderings(column));
 }
 
 class $$AnchorDropsTableAnnotationComposer
@@ -5717,6 +5770,9 @@ class $$AnchorDropsTableAnnotationComposer
 
   GeneratedColumn<DateTime> get droppedAt =>
       $composableBuilder(column: $table.droppedAt, builder: (column) => column);
+
+  GeneratedColumnWithTypeConverter<AnchorDropStatus, String> get status =>
+      $composableBuilder(column: $table.status, builder: (column) => column);
 }
 
 class $$AnchorDropsTableTableManager extends RootTableManager<
@@ -5750,6 +5806,7 @@ class $$AnchorDropsTableTableManager extends RootTableManager<
             Value<String> peerName = const Value.absent(),
             Value<AnchorDropDirection> direction = const Value.absent(),
             Value<DateTime> droppedAt = const Value.absent(),
+            Value<AnchorDropStatus> status = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
               AnchorDropsCompanion(
@@ -5758,6 +5815,7 @@ class $$AnchorDropsTableTableManager extends RootTableManager<
             peerName: peerName,
             direction: direction,
             droppedAt: droppedAt,
+            status: status,
             rowid: rowid,
           ),
           createCompanionCallback: ({
@@ -5766,6 +5824,7 @@ class $$AnchorDropsTableTableManager extends RootTableManager<
             required String peerName,
             required AnchorDropDirection direction,
             required DateTime droppedAt,
+            Value<AnchorDropStatus> status = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
               AnchorDropsCompanion.insert(
@@ -5774,6 +5833,7 @@ class $$AnchorDropsTableTableManager extends RootTableManager<
             peerName: peerName,
             direction: direction,
             droppedAt: droppedAt,
+            status: status,
             rowid: rowid,
           ),
           withReferenceMapper: (p0) => p0
