@@ -1,0 +1,94 @@
+========================================
+GOOGLE PLAY STORE LISTING
+========================================
+
+
+APP TITLE
+---------
+Anchor - Meet Nearby
+
+(20 characters)
+
+
+SHORT DESCRIPTION
+-----------------
+Meet people nearby via Bluetooth. No internet needed. 100% private.
+
+(69 characters)
+
+
+FULL DESCRIPTION
+----------------
+Anchor is a social discovery app built for places where the internet doesn't reach: cruise ships, music festivals, remote retreats, and anywhere off the grid.
+
+Using Bluetooth mesh networking, Anchor lets you find and chat with people around you without WiFi, cell service, or any internet connection at all. Everything happens device-to-device. No servers. No cloud. No data collection.
+
+Built by and for the LGBTQ+ community, Anchor was designed for gay cruises and queer festivals where meeting new people should be easy, even when the ship's WiFi costs $20/hour.
+
+HOW IT WORKS
+
+Open Anchor and nearby people appear automatically. Browse profiles, send a message, share photos, or drop an anchor to let someone know you're interested. It's that simple.
+
+REAL PRIVACY, NOT JUST A PROMISE
+
+Most apps say they care about privacy. Anchor proves it:
+
+- No accounts or sign-ups required
+- No data ever leaves your device
+- No servers, no cloud storage, no tracking
+- End-to-end encryption on every message
+- Panic Mode instantly wipes all your data if needed
+
+Your conversations exist only on your phone and the phone of the person you're talking to. When you delete them, they're gone for real.
+
+DESIGNED FOR CRUISES & FESTIVALS
+
+Anchor thrives where other apps fail:
+
+- Works on cruise ships with no internet
+- Handles crowded festivals with 50-100+ people nearby
+- Adaptive Bluetooth scanning saves battery on long days
+- Mesh networking extends your range through other Anchor users
+- Battery saver mode keeps you going all day
+
+SHARE PHOTOS AT FULL SPEED
+
+Send photos using Wi-Fi Direct for fast transfers. No internet required. If Wi-Fi Direct isn't available, photos transfer automatically over Bluetooth. You don't have to think about it.
+
+DROP AN ANCHOR
+
+See someone interesting? Tap the anchor icon to send them a quick ping. It's a low-pressure way to say "hey, I noticed you" without writing a full message.
+
+FEATURES
+
+- Discover nearby people automatically via Bluetooth
+- Send text messages and photos completely offline
+- End-to-end encrypted messaging (Noise protocol)
+- Wi-Fi Direct photo transfer with Bluetooth fallback
+- Drop Anchor: a fun, lightweight way to show interest
+- Mesh networking extends range through nearby devices
+- Radar view shows people around you spatially
+- Grid view for quick profile browsing
+- Battery saver mode for all-day events
+- Block and report users easily
+- Panic Mode for emergency data wipe
+- No internet, no accounts, no servers
+- Works on iOS and Android
+
+PERFECT FOR
+
+- LGBTQ+ cruises (Atlantis, VACAYA, and more)
+- Music festivals and outdoor events
+- Conferences and large gatherings
+- Camping trips and remote retreats
+- Anywhere with limited or no internet
+
+
+CALL TO ACTION
+--------------
+Download Anchor and start making real connections. No internet required.
+
+
+KEYWORD SUGGESTIONS
+-------------------
+offline dating, bluetooth chat, cruise app, gay cruise, LGBTQ app, offline messenger, no internet chat, bluetooth social, peer to peer chat, festival app, nearby people, mesh networking, private chat, encrypted messaging, offline social, cruise ship app, no wifi chat, local dating, queer cruise, bluetooth dating

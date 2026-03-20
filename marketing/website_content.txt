@@ -1,0 +1,129 @@
+========================================
+WEBSITE CONTENT
+========================================
+
+
+HERO HEADLINE
+-------------
+Meet People Around You. No Internet Required.
+
+
+SUBHEADLINE
+-----------
+Anchor connects you with nearby people using Bluetooth. On cruises, at festivals, and everywhere the internet doesn't reach. Private by design. No servers. No accounts. Just real connections.
+
+
+KEY BENEFITS
+------------
+
+1. WORKS WITHOUT INTERNET
+Anchor uses Bluetooth mesh networking to discover people and exchange messages. No WiFi, no cell service, no problem. Perfect for cruise ships, remote festivals, and off-grid adventures.
+
+2. TRULY PRIVATE
+Your data never leaves your device. There are no servers, no cloud, no accounts, and no tracking. Every message is end-to-end encrypted. This isn't a privacy policy. It's how the app is built.
+
+3. MADE FOR LGBTQ+ COMMUNITY
+Anchor was designed for gay cruises and queer festivals. Meet new people in spaces where you can be yourself, without worrying about who's watching or what data is being collected.
+
+
+FEATURES
+--------
+
+Discover Nearby People
+Open Anchor and profiles of people around you appear automatically. Browse in a grid layout or switch to radar view to see who's nearby spatially.
+
+Chat Offline
+Send text messages directly to anyone nearby. Messages travel over Bluetooth, are encrypted end-to-end, and never touch a server.
+
+Share Photos
+Send photos at high speed using Wi-Fi Direct. If Wi-Fi Direct isn't available, photos transfer seamlessly over Bluetooth. No internet involved.
+
+Drop an Anchor
+See someone interesting? Send them a quick anchor, a lightweight, playful way to show interest without writing a message.
+
+Mesh Networking
+Anchor's mesh network lets messages travel through other nearby users, extending your range beyond direct Bluetooth distance.
+
+Battery Smart
+Adaptive scanning and battery saver mode keep your phone going through long event days. Anchor adjusts its behavior based on how many people are around.
+
+Emergency Panic Mode
+One tap instantly wipes all data from the app: messages, photos, profile, everything. For when you need it.
+
+
+HOW IT WORKS
+------------
+
+Step 1: Create Your Profile
+Set up a quick profile with your name, a photo, and a short bio. No email, no phone number, no sign-up.
+
+Step 2: Discover People Nearby
+Anchor uses Bluetooth to scan for other users around you. Profiles appear automatically. No swiping needed.
+
+Step 3: Start Chatting
+Tap a profile and send a message. Everything is encrypted and goes directly to their device over Bluetooth.
+
+Step 4: Share and Connect
+Send photos, drop anchors, and make real connections, all without internet.
+
+
+CALL TO ACTION - PRIMARY
+------------------------
+Download Anchor. Free on iOS and Android
+
+Connect with people around you, even without internet. No accounts, no servers, no tracking.
+
+[Download on the App Store]  [Get it on Google Play]
+
+
+CALL TO ACTION - SECONDARY
+---------------------------
+Taking a Cruise Soon?
+
+Anchor was built for LGBTQ+ cruises where internet is expensive and unreliable. Download before you board and connect with fellow travelers from day one.
+
+[Get Anchor Free]
+
+
+FAQ
+---
+
+Q: Do I need internet to use Anchor?
+A: No. Anchor works entirely over Bluetooth. You don't need WiFi, cell service, or any internet connection.
+
+Q: How far does Bluetooth reach?
+A: Typically 10-30 meters (30-100 feet) in open spaces. On a cruise ship, walls and metal structures can reduce range, but Anchor's mesh networking helps extend it through other users nearby.
+
+Q: Is my data really private?
+A: Yes. There are no servers. Your data is stored only on your device. Messages are end-to-end encrypted and go directly between phones. We couldn't access your data even if we wanted to. The infrastructure to do so simply doesn't exist.
+
+Q: Do I need to create an account?
+A: No. There's no sign-up, no email, no phone number. Just create a profile and start discovering people nearby.
+
+Q: What happens to my messages when I delete them?
+A: They're gone. Since there are no servers or backups, deleted messages are permanently erased from your device.
+
+Q: Does it work on both iPhone and Android?
+A: Yes. Anchor works on both iOS and Android, and people on different platforms can discover and chat with each other.
+
+Q: How does photo sharing work without internet?
+A: Photos transfer using Wi-Fi Direct for high-speed delivery. If Wi-Fi Direct isn't available, Anchor automatically falls back to Bluetooth transfer. Either way, no internet is involved.
+
+Q: What is Panic Mode?
+A: Panic Mode is an emergency feature that instantly wipes all data from the app: your profile, messages, photos, and encryption keys. It's there for your safety and peace of mind.
+
+Q: How many people can I see at once?
+A: Anchor is designed to handle 50-100+ people in range, making it perfect for cruise ships and large events. It automatically adjusts its scanning to handle crowded environments.
+
+Q: Does Anchor drain my battery?
+A: Anchor includes adaptive scanning and a battery saver mode. On a typical event day, it's designed to run without significantly impacting your battery life.
+
+
+SEO META TITLE
+--------------
+Anchor - Offline Social Discovery App | Meet People Without Internet
+
+
+SEO META DESCRIPTION
+--------------------
+Anchor lets you discover and chat with people nearby using Bluetooth. No internet needed. End-to-end encrypted, no servers, no accounts. Built for LGBTQ+ cruises and festivals. Free on iOS and Android.

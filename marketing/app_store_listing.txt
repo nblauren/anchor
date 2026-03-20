@@ -1,0 +1,71 @@
+========================================
+APPLE APP STORE LISTING
+========================================
+
+
+APP NAME
+--------
+Anchor - Meet Nearby
+
+(20 characters)
+
+
+SUBTITLE
+--------
+Meet Nearby. No Internet.
+
+(25 characters)
+
+
+PROMOTIONAL TEXT
+----------------
+Meet people around you, even without internet. Anchor uses Bluetooth to connect you with nearby people on cruises, at festivals, and anywhere off the grid. 100% private, fully encrypted, no accounts required.
+
+
+FULL DESCRIPTION
+----------------
+Anchor is a social discovery app that works completely offline. Using Bluetooth mesh networking, you can find people nearby, chat, and share photos, all without WiFi or cell service.
+
+No servers. No cloud. No data collection. Just you and the people around you.
+
+DISCOVER PEOPLE NEARBY
+Open Anchor and people around you appear automatically. Browse profiles in a grid or use the radar view to see who's close by. No swiping, just real discovery.
+
+CHAT WITHOUT INTERNET
+Send messages and photos directly to nearby people using Bluetooth. Every message is end-to-end encrypted using the Noise protocol. Your conversations never touch a server.
+
+SHARE PHOTOS FAST
+Photos transfer at high speed via Wi-Fi Direct. If that's not available, Anchor seamlessly falls back to Bluetooth. Either way, no internet needed.
+
+DROP AN ANCHOR
+Send a quick, playful ping to someone who catches your eye. It's a simple tap that says "I'm interested" without the pressure of a full message.
+
+BUILT FOR CRUISES & FESTIVALS
+Anchor was made for the LGBTQ+ community, specifically for gay cruises and queer festivals where internet is expensive or nonexistent. It handles crowded environments with ease and saves battery for long event days.
+
+PRIVACY YOU CAN TRUST
+- No account required: no email, no phone number
+- All data stays on your device
+- End-to-end encryption on every message
+- No tracking, no analytics, no ads
+- Panic Mode: one-tap emergency data wipe
+
+KEY FEATURES
+- Bluetooth peer-to-peer discovery and messaging
+- End-to-end encrypted chat (Noise protocol)
+- Wi-Fi Direct photo transfer with Bluetooth fallback
+- Drop Anchor: lightweight interest signals
+- Mesh networking extends range through other users
+- Radar view and grid view for discovery
+- Battery saver mode
+- Block users and manage privacy
+- Works on crowded ships and festival grounds
+- No internet, no servers, no accounts
+
+IMPORTANT NOTE
+For the best experience, keep Anchor open while exploring. iOS limits Bluetooth discovery when apps are in the background. You'll receive a notification when new people appear nearby.
+
+
+KEYWORDS
+--------
+offline,dating,bluetooth,cruise,LGBTQ,chat,mesh,private,encrypted,festival,nearby,social,gay,queer,local
