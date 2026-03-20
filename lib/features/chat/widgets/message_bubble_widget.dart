@@ -122,7 +122,7 @@ class MessageBubbleWidget extends StatelessWidget {
                 // Extra bottom room so the reaction pill doesn't clip
                 bottom: grouped.isEmpty ? 4 : 16,
                 left: isSentByMe ? 48 : 0,
-                right: isSentByMe ? 0 : (isSelected ? 4 : 48),
+                right: isSentByMe ? 0 : 4,
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -253,37 +253,23 @@ class MessageBubbleWidget extends StatelessWidget {
                       ], // Stack children
                     ), // Stack
                   ), // Flexible
-                  // Inline action icons for received messages
+                  // Inline action icons for received messages — always visible
                   if (!isSentByMe)
-                    AnimatedOpacity(
-                      opacity: isSelected ? 1.0 : 0.0,
-                      duration: const Duration(milliseconds: 200),
-                      curve: Curves.easeOut,
-                      child: AnimatedScale(
-                        scale: isSelected ? 1.0 : 0.0,
-                        duration: const Duration(milliseconds: 200),
-                        curve: Curves.easeOutBack,
-                        alignment: Alignment.centerLeft,
-                        child: IgnorePointer(
-                          ignoring: !isSelected,
-                          child: Padding(
-                            padding: const EdgeInsets.only(left: 4),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                _InlineActionButton(
-                                  icon: Icons.emoji_emotions_outlined,
-                                  onTap: onReactTap,
-                                ),
-                                const SizedBox(width: 4),
-                                _InlineActionButton(
-                                  icon: Icons.reply,
-                                  onTap: onReplyTap,
-                                ),
-                              ],
-                            ),
+                    Padding(
+                      padding: const EdgeInsets.only(left: 4),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _InlineActionButton(
+                            icon: Icons.emoji_emotions_outlined,
+                            onTap: onReactTap,
                           ),
-                        ),
+                          const SizedBox(width: 4),
+                          _InlineActionButton(
+                            icon: Icons.reply,
+                            onTap: onReplyTap,
+                          ),
+                        ],
                       ),
                     ),
                 ], // Row children
@@ -957,18 +943,12 @@ class _InlineActionButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
-      child: Container(
-        width: 32,
-        height: 32,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: AppTheme.darkSurface,
-          borderRadius: BorderRadius.circular(8),
-        ),
+      child: Padding(
+        padding: const EdgeInsets.all(4),
         child: Icon(
           icon,
           size: 18,
-          color: AppTheme.textHint,
+          color: AppTheme.textHint.withValues(alpha: 0.5),
         ),
       ),
     );

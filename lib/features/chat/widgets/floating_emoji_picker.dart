@@ -66,54 +66,57 @@ class _FloatingEmojiPickerState extends State<FloatingEmojiPicker>
 
   @override
   Widget build(BuildContext context) {
-    return FadeTransition(
-      opacity: _containerOpacity,
-      child: ScaleTransition(
-        scale: _containerScale,
-        alignment: Alignment.bottomLeft,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-          decoration: BoxDecoration(
-            color: AppTheme.darkCard,
-            borderRadius: BorderRadius.circular(12),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.4),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: List.generate(widget.emojis.length, (i) {
-              final emoji = widget.emojis[i];
-              final alreadyReacted = widget.currentReactions
-                  .any((r) => r.senderId == widget.ownUserId && r.emoji == emoji);
-              return ScaleTransition(
-                scale: _emojiAnimation(i),
-                child: GestureDetector(
-                  onTap: () => widget.onEmojiTap(emoji),
-                  child: Container(
-                    width: 40,
-                    height: 40,
-                    alignment: Alignment.center,
-                    decoration: alreadyReacted
-                        ? BoxDecoration(
-                            color:
-                                AppTheme.primaryColor.withValues(alpha: 0.25),
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(
-                              color:
-                                  AppTheme.primaryColor.withValues(alpha: 0.5),
-                            ),
-                          )
-                        : null,
-                    child: Text(emoji, style: const TextStyle(fontSize: 24)),
-                  ),
+    return Material(
+      type: MaterialType.transparency,
+      child: FadeTransition(
+        opacity: _containerOpacity,
+        child: ScaleTransition(
+          scale: _containerScale,
+          alignment: Alignment.bottomLeft,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            decoration: BoxDecoration(
+              color: AppTheme.darkCard,
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.4),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
                 ),
-              );
-            }),
+              ],
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: List.generate(widget.emojis.length, (i) {
+                final emoji = widget.emojis[i];
+                final alreadyReacted = widget.currentReactions.any(
+                    (r) => r.senderId == widget.ownUserId && r.emoji == emoji);
+                return ScaleTransition(
+                  scale: _emojiAnimation(i),
+                  child: GestureDetector(
+                    onTap: () => widget.onEmojiTap(emoji),
+                    child: Container(
+                      width: 40,
+                      height: 40,
+                      alignment: Alignment.center,
+                      decoration: alreadyReacted
+                          ? BoxDecoration(
+                              color:
+                                  AppTheme.primaryColor.withValues(alpha: 0.25),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: AppTheme.primaryColor
+                                    .withValues(alpha: 0.5),
+                              ),
+                            )
+                          : null,
+                      child: Text(emoji, style: const TextStyle(fontSize: 24)),
+                    ),
+                  ),
+                );
+              }),
+            ),
           ),
         ),
       ),

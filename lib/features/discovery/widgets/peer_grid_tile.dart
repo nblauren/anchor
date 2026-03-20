@@ -32,8 +32,8 @@ class PeerGridTile extends StatelessWidget {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            // Thumbnail or placeholder (greyed out when offline)
-            if (!peer.isOnline)
+            // Thumbnail or placeholder (greyed out when not recently seen)
+            if (!peer.isNearby)
               ColorFiltered(
                 colorFilter: const ColorFilter.mode(
                   Colors.grey,
@@ -44,8 +44,8 @@ class PeerGridTile extends StatelessWidget {
             else
               _buildThumbnail(),
 
-            // Dark overlay for offline peers
-            if (!peer.isOnline)
+            // Dark overlay for peers not seen recently
+            if (!peer.isNearby)
               Positioned.fill(
                 child: Container(
                   color: Colors.black.withValues(alpha: 0.4),
@@ -125,8 +125,8 @@ class PeerGridTile extends StatelessWidget {
               ),
             ),
 
-            // Signal strength indicator (top right) — direct peers only
-            if (peer.rssi != null)
+            // Signal strength indicator (top right) — direct peers recently seen
+            if (peer.rssi != null && peer.isRecent)
               Positioned(
                 top: 8,
                 right: 8,
@@ -334,22 +334,27 @@ class PeerGridTile extends StatelessWidget {
     );
   }
 
-  /// Human-readable status label: online with signal info, or offline with
-  /// last-seen timestamp.
+  /// Human-readable status label using time-based proximity, matching
+  /// PeerDetailScreen's status display for consistency.
   String get _distanceBadge {
-    if (!peer.isOnline) return peer.lastSeenText;
     if (peer.isRelayed) return 'Via mesh';
-    final rssi = peer.rssi;
-    if (rssi == null) return 'Online';
-    if (rssi >= -55) return 'Close';
-    if (rssi >= -70) return 'Nearby';
-    return 'In range';
+    if (peer.isRecent) {
+      // Seen within 60s — show signal-based distance if available
+      final rssi = peer.rssi;
+      if (rssi == null) return 'Just now';
+      if (rssi >= -55) return 'Close';
+      if (rssi >= -70) return 'Nearby';
+      return 'In range';
+    }
+    // Not seen recently — show last-seen timestamp
+    return peer.lastSeenText;
   }
 
   Color get _badgeColor {
-    if (!peer.isOnline) return Colors.grey;
     if (peer.isRelayed) return const Color(0xFF818CF8); // indigo for relay
-    return Colors.greenAccent;
+    if (peer.isRecent) return Colors.greenAccent;
+    if (peer.isNearby) return Colors.yellowAccent;
+    return Colors.grey;
   }
 
   Widget _buildSignalIndicator() {

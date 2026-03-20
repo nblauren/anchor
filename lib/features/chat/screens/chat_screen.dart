@@ -58,7 +58,6 @@ class _ChatScreenState extends State<ChatScreen> {
   late final ReactionBloc _reactionBloc;
   bool _anchorDropped = false;
   final _messageKeys = <String, GlobalKey>{};
-  String? _selectedMessageId;
   OverlayEntry? _overlayEntry;
 
   @override
@@ -89,10 +88,8 @@ class _ChatScreenState extends State<ChatScreen> {
     }
 
     _scrollController.addListener(() {
-      // Dismiss selection + overlay on scroll
-      if (_selectedMessageId != null) {
-        _dismissSelection();
-      }
+      // Dismiss emoji picker overlay on scroll
+      _removeOverlay();
       if (_scrollController.position.pixels >=
           _scrollController.position.maxScrollExtent - 200) {
         final state = context.read<ChatBloc>().state;
@@ -296,22 +293,11 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _dismissSelection() {
     _removeOverlay();
-    if (_selectedMessageId != null) {
-      setState(() => _selectedMessageId = null);
-    }
   }
 
   void _removeOverlay() {
     _overlayEntry?.remove();
     _overlayEntry = null;
-  }
-
-  void _toggleSelection(String messageId) {
-    _removeOverlay();
-    setState(() {
-      _selectedMessageId =
-          _selectedMessageId == messageId ? null : messageId;
-    });
   }
 
   void _showFloatingEmojiPicker(
@@ -705,10 +691,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                                 );
                                           }
                                         },
-                                  isSelected: _selectedMessageId == message.id,
-                                  onTap: (!isSentByMe && !state.isBlocked)
-                                      ? () => _toggleSelection(message.id)
-                                      : null,
+                                  isSelected: false,
                                   onReactTap: (!isSentByMe && !state.isBlocked)
                                       ? () => _showFloatingEmojiPicker(
                                             context,
@@ -718,10 +701,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                           )
                                       : null,
                                   onReplyTap: (!isSentByMe && !state.isBlocked)
-                                      ? () {
-                                          _dismissSelection();
-                                          _startReply(message);
-                                        }
+                                      ? () => _startReply(message)
                                       : null,
                                   quotedMessage: message.replyToMessageId != null
                                       ? state.quotedMessages[message.replyToMessageId]

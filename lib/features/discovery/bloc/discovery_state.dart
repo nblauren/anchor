@@ -195,7 +195,8 @@ class DiscoveryState extends Equatable {
   /// Which transport layer is currently active.
   final TransportType activeTransport;
 
-  /// Visible peers (excluding blocked), online first then offline.
+  /// Visible peers (excluding blocked), sorted by recency: recent first,
+  /// then nearby (seen within 5 min), then stale.
   /// Deduplicates by peerId (= canonical userId) for safety.
   /// Insertion order is preserved within each group so RSSI fluctuations
   /// do not cause tiles to shuffle. New peers are prepended by the bloc,
@@ -206,9 +207,10 @@ class DiscoveryState extends Equatable {
         .where((p) => !p.isBlocked && seen.add(p.peerId))
         .toList();
 
-    final online = filtered.where((p) => p.isOnline).toList();
-    final offline = filtered.where((p) => !p.isOnline).toList();
-    return [...online, ...offline];
+    final recent = filtered.where((p) => p.isRecent).toList();
+    final nearby = filtered.where((p) => !p.isRecent && p.isNearby).toList();
+    final stale = filtered.where((p) => !p.isNearby).toList();
+    return [...recent, ...nearby, ...stale];
   }
 
   /// Peers seen recently (within last 60 seconds)
