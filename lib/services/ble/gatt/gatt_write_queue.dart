@@ -292,7 +292,7 @@ class GattWriteQueue {
   /// Timeout for a single GATT write operation. If the write doesn't complete
   /// within this duration (e.g. peer disconnected mid-write on iOS where the
   /// Future never resolves), the write is considered failed and the queue moves on.
-  static const _writeTimeout = Duration(seconds: 10);
+  static const _writeTimeout = Duration(seconds: 5);
 
   /// Write with timeout and automatic retry on iOS "prepare queue full" (CBATTError 9).
   ///
@@ -302,15 +302,14 @@ class GattWriteQueue {
   ///
   /// The retry handles a transient error that occurs when a GATT descriptor
   /// write (e.g. from setCharacteristicNotifyState) and a characteristic write
-  /// collide on the same iOS prepare queue. In high-density cruise environments
-  /// (50+ peers), collisions are frequent, so we retry up to 4 times with
-  /// exponential backoff (100ms → 800ms).
+  /// collide on the same iOS prepare queue. We retry once with 100ms backoff
+  /// to keep max blocking time at 10s (2 attempts × 5s timeout).
   Future<void> _writeWithTimeout(
     Peripheral peripheral,
     GATTCharacteristic characteristic,
     Uint8List data,
     GATTCharacteristicWriteType writeType, {
-    int maxRetries = 4,
+    int maxRetries = 1,
   }) async {
     for (var attempt = 0; attempt <= maxRetries; attempt++) {
       try {

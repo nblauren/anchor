@@ -423,7 +423,11 @@ class BleFacade implements BleServiceInterface {
         _scanner.triggerImmediateScan();
       }
 
-      if (type == 'photo_start') {
+      if (type == 'profile_request') {
+        _handleProfileRequest(centralId);
+      } else if (type == 'profile_data') {
+        _handleProfileData(json, centralId);
+      } else if (type == 'photo_start') {
         _photoTransfer.handlePhotoStart(json, fromPeerId, centralId: centralId);
       } else if (type == 'photo_chunk') {
         _photoTransfer.handleReceivedPhotoChunk(json, fromPeerId);
@@ -435,6 +439,10 @@ class BleFacade implements BleServiceInterface {
         _meshRelay.handlePeerAnnounce(json, fromPeerId);
       } else if (type == 'neighbor_list') {
         _meshRelay.handleNeighborList(json);
+        // Reverse profile exchange: neighbor_list is the "I'm an Anchor peer"
+        // signal sent after connection is stable. Safe to request profile here
+        // — the handshake hasn't started yet or is already complete.
+        _requestProfileFromCentralIfNeeded(centralId);
       } else if (type == 'noise_hs') {
         _handleNoiseHandshake(json, fromPeerId);
       } else if (type == 'drop_anchor') {
@@ -1666,6 +1674,10 @@ class BleFacade implements BleServiceInterface {
         _meshRelay.handlePeerAnnounce(json, peerId);
       } else if (type == 'neighbor_list') {
         _meshRelay.handleNeighborList(json);
+      } else if (type == 'profile_request') {
+        _handleProfileRequest(peerId);
+      } else if (type == 'profile_data') {
+        _handleProfileData(json, peerId);
       } else {
         _handleReceivedMessage(json, peerId);
       }
@@ -1779,6 +1791,94 @@ class BleFacade implements BleServiceInterface {
     _emitPeer(peer);
   }
 
+  // ==================== Reverse Profile Exchange ====================
+  //
+  // When a remote device connects to us as a GATT central (e.g. Android whose
+  // advertising never reached iOS), we can't discover them via scanning and
+  // therefore can't read their GATT profile. Instead, we exchange profiles
+  // over the existing fff3 bidirectional messaging channel.
+
+  /// Track centrals we've already requested profiles from to avoid spam.
+  final Set<String> _profileRequestedFromCentral = {};
+
+  /// If the given central has no profile data (no publicKeyHex), send a
+  /// profile_request via fff3 so they respond with their profile.
+  void _requestProfileFromCentralIfNeeded(String centralId) {
+    if (_profileRequestedFromCentral.contains(centralId)) return;
+
+    final existing = _visiblePeers[centralId];
+    // Already have full profile data (public key means GATT profile was read)
+    if (existing != null && existing.publicKeyHex != null) return;
+
+    _profileRequestedFromCentral.add(centralId);
+
+    final requestJson = jsonEncode({
+      'type': 'profile_request',
+      'sender_id': _gattServer.ownUserId,
+    });
+
+    Logger.info(
+      'BleService: Requesting profile from central '
+      '${centralId.substring(0, min(8, centralId.length))} via fff3',
+      'BLE',
+    );
+
+    _gattServer.sendToCentralViaFff3(
+      centralId,
+      Uint8List.fromList(utf8.encode(requestJson)),
+    );
+  }
+
+  /// Handle an incoming profile_request: respond with our profile data.
+  void _handleProfileRequest(String centralId) {
+    final payload = _gattServer.pendingPayload;
+    if (payload == null) return;
+
+    Logger.info(
+      'BleService: Responding to profile_request from '
+      '${centralId.substring(0, min(8, centralId.length))}',
+      'BLE',
+    );
+
+    final responseJson = jsonEncode({
+      'type': 'profile_data',
+      'sender_id': payload.userId,
+      'userId': payload.userId,
+      'name': payload.name,
+      'age': payload.age,
+      'bio': payload.bio,
+      'pos': payload.position,
+      'int': payload.interests,
+      'pk': payload.publicKeyHex,
+      'spk': payload.signingPublicKeyHex,
+      'pv': _gattServer.profileVersion,
+    });
+
+    _gattServer.sendToCentralViaFff3(
+      centralId,
+      Uint8List.fromList(utf8.encode(responseJson)),
+    );
+  }
+
+  /// Handle an incoming profile_data: process it like a GATT profile read.
+  void _handleProfileData(Map<String, dynamic> json, String centralId) {
+    final userId = json['userId'] as String?;
+    final name = json['name'] as String?;
+
+    Logger.info(
+      'BleService: Received profile_data from '
+      '${centralId.substring(0, min(8, centralId.length))} '
+      '— name="$name", userId=${userId != null ? userId.substring(0, min(8, userId.length)) : "null"}',
+      'BLE',
+    );
+
+    // Process through the same path as a GATT profile read
+    _onProfileReadResult(ProfileReadResult(
+      peerId: centralId,
+      profileJson: json,
+    ));
+  }
+
   void _emitPeer(DiscoveredPeer peer) {
     final isNew = !_visiblePeers.containsKey(peer.peerId);
     _visiblePeers[peer.peerId] = peer;
@@ -1834,6 +1934,7 @@ class BleFacade implements BleServiceInterface {
       _profileReader.clearPeer(peerId);
       _scanner.clearPeer(peerId);
       _meshRelay.clearPeer(peerId);
+      _profileRequestedFromCentral.remove(peerId);
 
       Logger.info('BleService: Lost peer ${peer?.name}', 'BLE');
       _scanner.updateDensity(_visiblePeers.length);
@@ -1956,9 +2057,15 @@ class BleFacade implements BleServiceInterface {
         Logger.warning(
           'BleService: [SEND FAIL] ${payload.type.name} '
           '${payload.messageId.substring(0, min(8, payload.messageId.length))} '
-          'to ${peerId.substring(0, min(8, peerId.length))} — write queue rejected',
+          'to ${peerId.substring(0, min(8, peerId.length))} — write queue rejected, '
+          'disconnecting stale connection',
           'BLE',
         );
+        // Force disconnect so the next send attempt establishes a fresh
+        // connection. Without this, a stale connection (where writes time
+        // out but iOS hasn't detected the disconnect) blocks all future
+        // sends to this peer indefinitely.
+        _connectionManager.disconnect(peerId);
       }
       return success;
     } catch (e) {

@@ -54,7 +54,7 @@ const _kEd25519PublicKeyStorageKey = 'anchor_e2ee_ed25519_public_key_hex';
 /// Timeout for a pending Noise handshake (peer must respond within 45 s).
 /// Cross-platform (Android↔iOS) handshakes need extra time because the
 /// responder may not have discovered the initiator's BLE Peripheral yet.
-const _kHandshakeTimeout = Duration(seconds: 45);
+const _kHandshakeTimeout = Duration(seconds: 15);
 
 /// Session timeout — sessions older than this require a new handshake.
 /// Prevents stale session reuse if a peer's app state is lost.
@@ -393,8 +393,21 @@ class EncryptionService {
   ///   • We don't have the peer's public key yet (call after profile read).
   ///   • A handshake is already in progress.
   Future<HandshakeResult> initiateHandshake(String peerId) async {
-    if (_pending.containsKey(peerId)) {
-      return const HandshakeResult(error: 'Handshake already in progress');
+    final existing = _pending[peerId];
+    if (existing != null) {
+      // If the pending handshake is older than the timeout, it's stale —
+      // the timer may not have fired yet due to event loop delays. Clear it
+      // and allow a fresh attempt instead of blocking indefinitely.
+      final age = DateTime.now().difference(existing.startedAt);
+      if (age >= _kHandshakeTimeout) {
+        Logger.warning(
+          'Clearing stale pending handshake for $peerId (age=${age.inSeconds}s)',
+          'E2EE',
+        );
+        _cancelPendingHandshake(peerId);
+      } else {
+        return const HandshakeResult(error: 'Handshake already in progress');
+      }
     }
 
     // Rate-limit outbound handshake initiations to prevent abuse.
@@ -564,6 +577,11 @@ class EncryptionService {
           'E2EE');
       _sessions.remove(peerId);
     }
+
+    // Clear any stale pending handshake (e.g. a previous attempt that never
+    // completed). Without this, _pending[peerId] would be overwritten but the
+    // old timer would keep running and could cancel the new handshake.
+    _cancelPendingHandshake(peerId);
 
     // We are the responder: our static key is already known to them.
     // Initialize Noise state with OUR public key as the pre-message "s".
@@ -752,6 +770,9 @@ class EncryptionService {
           'E2EE');
       _sessions.remove(peerId);
     }
+
+    // Clear any stale pending handshake before starting a new one.
+    _cancelPendingHandshake(peerId);
 
     try {
       // Initialize XX symmetric state (no pre-message).

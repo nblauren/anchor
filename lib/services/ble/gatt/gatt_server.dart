@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
@@ -487,46 +488,37 @@ class GattServer {
         _isBroadcasting = false;
       }
 
-      // Keep the advertisement UNDER 31 bytes so the service UUID stays in
-      // the primary AD packet (not the scan response). This is critical for
-      // cross-platform discovery — Android scanners filtering by UUID only
-      // check the primary packet, and iOS strips overflow data in background.
+      // On Android 13+ (API 33), BluetoothAdapter.setName() is deprecated
+      // and causes startAdvertising() to hang indefinitely when a name is
+      // passed. Skip the local name on Android entirely — the service UUID
+      // alone is sufficient for discovery (iOS uses filtered scan), and the
+      // profile version comes from the GATT fff1 read.
       //
-      // Budget breakdown:
-      //   Flags:                3 bytes
-      //   128-bit Service UUID: 18 bytes  (2 header + 16 UUID)
-      //   Short local name:     2 + N bytes (header + "A<version>")
-      //   Total:                23 + N → must keep N ≤ 8 to stay under 31
-      //
-      // We use a minimal name "A<profileVersion>" (e.g. "A3") instead of the
-      // old "A:Nicholas:28:3" which pushed the UUID to the scan response.
-      // Full profile data is available via GATT fff1 read after connection.
-      final compactName = _encodeLocalName(payload);
-
-      Logger.info(
-        'GattServer: Advertising with name="$compactName" '
-        '(${compactName.length} chars, est ${23 + 2 + compactName.length} bytes)',
-        'BLE',
-      );
-
-      try {
-        await _peripheral.startAdvertising(Advertisement(
-          name: compactName,
-          serviceUUIDs: [_serviceUuid],
-        ));
-      } catch (e) {
-        // On Android 13+ (API 33), BluetoothAdapter.setName() is deprecated
-        // and may fail — causing the entire startAdvertising call to throw.
-        // Fall back to advertising WITHOUT the local name.
-        Logger.warning(
-          'GattServer: Advertising with name failed ($e) — '
-              'retrying without name (service UUID only)',
+      // On iOS, include the compact local name "A<profileVersion>" so the
+      // scanner can skip redundant GATT profile reads when the version
+      // hasn't changed. Budget: Flags(3) + UUID(18) + Name(2+N) ≈ 26B.
+      final Advertisement ad;
+      if (Platform.isAndroid) {
+        Logger.info(
+          'GattServer: Advertising with service UUID only (Android — '
+          'name skipped to avoid setName hang)',
           'BLE',
         );
-        await _peripheral.startAdvertising(Advertisement(
+        ad = Advertisement(serviceUUIDs: [_serviceUuid]);
+      } else {
+        final compactName = _encodeLocalName(payload);
+        Logger.info(
+          'GattServer: Advertising with name="$compactName" '
+          '(${compactName.length} chars, est ${23 + 2 + compactName.length} bytes)',
+          'BLE',
+        );
+        ad = Advertisement(
+          name: compactName,
           serviceUUIDs: [_serviceUuid],
-        ));
+        );
       }
+
+      await _peripheral.startAdvertising(ad);
 
       _isBroadcasting = true;
       _scheduleReAnnounce(payload);

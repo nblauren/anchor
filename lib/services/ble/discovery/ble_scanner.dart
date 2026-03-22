@@ -216,12 +216,14 @@ class BleScanner {
         'BLE',
       );
 
-      // Scan without a service UUID filter so we also discover Android
-      // devices whose 128-bit UUID may be dropped or moved to the scan
-      // response by the Android BLE stack (31-byte advertising limit).
-      // Our _onDeviceDiscovered callback filters by service UUID *or*
-      // "A:" local-name prefix, so non-Anchor devices are discarded cheaply.
-      await _central.startDiscovery();
+      // Scan WITH the Anchor service UUID filter. This is required because
+      // iOS Core Bluetooth does NOT populate advertisement.serviceUUIDs for
+      // peripherals when scanning without a filter — causing iOS to silently
+      // drop all Anchor devices (both Android and other iOS). With the v2
+      // compact local name ("A<version>", 3-4 bytes), the total ad payload
+      // is Flags(3) + UUID(18) + Name(2+N) ≈ 26 bytes, well under Android's
+      // 31-byte primary AD limit, so the UUID stays in the primary packet.
+      await _central.startDiscovery(serviceUUIDs: [_serviceUuid]);
 
       // Stop after ON time, pause for OFF time, then restart
       _scanRestartTimer?.cancel();
@@ -266,18 +268,6 @@ class BleScanner {
       return;
     }
 
-    // Skip if same peer and RSSI change < 5 dBm within 3 seconds
-    if (_lastEmit.containsKey(deviceId)) {
-      final timeSince = now.difference(_lastEmit[deviceId]!);
-      final rssiDelta = (_lastRssi[deviceId]! - rssi).abs();
-      if (timeSince < const Duration(seconds: 3) && rssiDelta < 5) {
-        return;
-      }
-    }
-
-    _lastRssi[deviceId] = rssi;
-    _lastEmit[deviceId] = now;
-
     // Check service UUID
     final hasAnchorService = adv.serviceUUIDs.contains(_serviceUuid);
 
@@ -287,6 +277,24 @@ class BleScanner {
 
     // Not an Anchor device if neither marker is present
     if (!hasAnchorService && decoded == null) return;
+
+    // Dedup: suppress re-emits for the same peer within one scan cycle.
+    // Allow through if: (a) first time seeing this peer, (b) >10 seconds
+    // since last emit, or (c) RSSI changed by ≥12 dBm (significant
+    // proximity change, not normal jitter).
+    final isFirstSighting = !_lastEmit.containsKey(deviceId);
+    if (!isFirstSighting) {
+      final timeSince = now.difference(_lastEmit[deviceId]!);
+      final rssiDelta = (_lastRssi[deviceId]! - rssi).abs();
+      if (timeSince < const Duration(seconds: 10) && rssiDelta < 12) {
+        // Still update RSSI for smoother tracking, but don't re-emit.
+        _lastRssi[deviceId] = rssi;
+        return;
+      }
+    }
+
+    _lastRssi[deviceId] = rssi;
+    _lastEmit[deviceId] = now;
 
     final name = decoded?.name ?? 'Anchor User';
     final age = decoded?.age;

@@ -233,6 +233,9 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
         // Direct peer: persist to database using canonical (userId-based) ID.
         // Also registers the transport alias (if provided) inside the same
         // transaction, guaranteeing the peer row exists before the FK is checked.
+
+        Logger.error('Discovered peer ${event.name}');
+
         final entry = await _peerRepository.upsertPeer(
           peerId: canonicalId,
           name: event.name,
