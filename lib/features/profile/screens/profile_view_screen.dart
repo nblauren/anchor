@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/profile_validator.dart';
 import '../../../features/settings/settings.dart';
 import '../../../services/ble/ble.dart';
 import '../../discovery/bloc/discovery_bloc.dart';
@@ -396,10 +397,14 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
   void _save() {
     if (!_formKey.currentState!.validate()) return;
 
+    final bio = _bioController.text.trim().isNotEmpty
+        ? ProfileValidator.sanitizeBio(_bioController.text)
+        : null;
+
     widget.onSave(
       _nameController.text.trim(),
       _ageController.text.isNotEmpty ? int.tryParse(_ageController.text) : null,
-      _bioController.text.trim().isNotEmpty ? _bioController.text.trim() : null,
+      bio,
       _selectedPosition,
       _selectedInterestIds,
     );
@@ -454,15 +459,8 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
                     prefixIcon: Icon(Icons.person_outline),
                   ),
                   textCapitalization: TextCapitalization.words,
-                  validator: (value) {
-                    if (value == null || value.trim().isEmpty) {
-                      return 'Please enter your name';
-                    }
-                    if (value.trim().length < 2) {
-                      return 'Name must be at least 2 characters';
-                    }
-                    return null;
-                  },
+                  maxLength: ProfileValidator.nicknameMaxLength,
+                  validator: ProfileValidator.validateNickname,
                 ),
                 const SizedBox(height: 16),
 
@@ -470,7 +468,7 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
                 TextFormField(
                   controller: _ageController,
                   decoration: const InputDecoration(
-                    labelText: 'Age (optional)',
+                    labelText: 'Age *',
                     prefixIcon: Icon(Icons.cake_outlined),
                   ),
                   keyboardType: TextInputType.number,
@@ -478,15 +476,7 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
                     FilteringTextInputFormatter.digitsOnly,
                     LengthLimitingTextInputFormatter(3),
                   ],
-                  validator: (value) {
-                    if (value != null && value.isNotEmpty) {
-                      final age = int.tryParse(value);
-                      if (age == null || age < 18 || age > 120) {
-                        return 'Please enter a valid age (18-120)';
-                      }
-                    }
-                    return null;
-                  },
+                  validator: ProfileValidator.validateAge,
                 ),
                 const SizedBox(height: 16),
 
@@ -499,8 +489,9 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
                     alignLabelWithHint: true,
                   ),
                   maxLines: 3,
-                  maxLength: 200,
+                  maxLength: ProfileValidator.bioMaxLength,
                   textCapitalization: TextCapitalization.sentences,
+                  validator: ProfileValidator.validateBio,
                 ),
                 const SizedBox(height: 20),
 

@@ -7,6 +7,7 @@ import 'package:drift/drift.dart' show Value;
 
 import '../../../core/constants/profile_constants.dart';
 import '../../../core/utils/logger.dart';
+import '../../../core/utils/profile_validator.dart';
 import '../../../services/database_service.dart';
 import '../../../services/image_service.dart'
     show ImageService, resolvePhotoPath;
@@ -134,18 +135,48 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
     CreateProfile event,
     Emitter<ProfileState> emit,
   ) async {
-    if (event.name.trim().isEmpty) {
-      emit(state.copyWith(errorMessage: 'Name is required'));
+    // Defence-in-depth: validate all fields even though the UI already checks.
+    final nameErr = ProfileValidator.validateNickname(event.name);
+    if (nameErr != null) {
+      emit(state.copyWith(errorMessage: nameErr));
+      return;
+    }
+
+    final ageErr = ProfileValidator.validateAge(event.age?.toString() ?? '');
+    if (ageErr != null) {
+      emit(state.copyWith(errorMessage: ageErr));
+      return;
+    }
+
+    final bioErr = ProfileValidator.validateBio(event.bio);
+    if (bioErr != null) {
+      emit(state.copyWith(errorMessage: bioErr));
+      return;
+    }
+
+    final posErr = ProfileValidator.validatePosition(event.position);
+    if (posErr != null) {
+      emit(state.copyWith(errorMessage: posErr));
+      return;
+    }
+
+    final intErr = ProfileValidator.validateInterests(event.interests);
+    if (intErr != null) {
+      emit(state.copyWith(errorMessage: intErr));
       return;
     }
 
     emit(state.copyWith(status: ProfileStatus.saving));
 
     try {
+      final sanitizedBio = event.bio != null
+          ? ProfileValidator.sanitizeBio(event.bio!)
+          : null;
+
       final profile = await _databaseService.profileRepository.createProfile(
         name: event.name.trim(),
         age: event.age,
-        bio: event.bio?.trim(),
+        bio: sanitizedBio?.isNotEmpty == true ? sanitizedBio : null,
         position: event.position,
         interests: ProfileConstants.encodeInterests(event.interests),
       );
@@ -183,9 +214,52 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
       return;
     }
 
+    // Defence-in-depth: validate provided fields.
+    if (event.name != null) {
+      final nameErr = ProfileValidator.validateNickname(event.name);
+      if (nameErr != null) {
+        emit(state.copyWith(errorMessage: nameErr));
+        return;
+      }
+    }
+
+    if (event.age != null) {
+      final ageErr = ProfileValidator.validateAge(event.age.toString());
+      if (ageErr != null) {
+        emit(state.copyWith(errorMessage: ageErr));
+        return;
+      }
+    }
+
+    final bioErr = ProfileValidator.validateBio(event.bio);
+    if (bioErr != null) {
+      emit(state.copyWith(errorMessage: bioErr));
+      return;
+    }
+
+    if (event.position != null) {
+      final posErr = ProfileValidator.validatePosition(event.position);
+      if (posErr != null) {
+        emit(state.copyWith(errorMessage: posErr));
+        return;
+      }
+    }
+
+    if (event.interests != null) {
+      final intErr = ProfileValidator.validateInterests(event.interests);
+      if (intErr != null) {
+        emit(state.copyWith(errorMessage: intErr));
+        return;
+      }
+    }
+
     emit(state.copyWith(status: ProfileStatus.saving));
 
     try {
+      final sanitizedBio = event.bio != null
+          ? ProfileValidator.sanitizeBio(event.bio!)
+          : null;
+
       // Build position Value — explicit clear vs. no-op vs. new value.
       final Value<int?> positionValue = event.clearPosition
           ? const Value(null)
@@ -202,7 +276,7 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
         id: state.profileId!,
         name: event.name?.trim(),
         age: event.age,
-        bio: event.bio?.trim(),
+        bio: sanitizedBio?.isNotEmpty == true ? sanitizedBio : event.bio?.trim(),
         position: positionValue,
         interests: interestsValue,
       );
@@ -211,12 +285,15 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
       final newPosition =
           event.clearPosition ? null : (event.position ?? state.position);
       final newInterestIds = event.interests ?? state.interestIds;
+      final newBio = sanitizedBio?.isNotEmpty == true
+          ? sanitizedBio
+          : (event.bio?.trim() ?? state.bio);
 
       emit(state.copyWith(
         status: ProfileStatus.saved,
         name: event.name?.trim() ?? state.name,
         age: event.age ?? state.age,
-        bio: event.bio?.trim() ?? state.bio,
+        bio: newBio,
         position: newPosition,
         interestIds: newInterestIds,
       ));

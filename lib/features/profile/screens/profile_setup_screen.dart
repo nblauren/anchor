@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/profile_validator.dart';
 import '../bloc/profile_bloc.dart';
 import '../bloc/profile_event.dart';
 import '../bloc/profile_state.dart';
@@ -137,15 +138,16 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
 
   void _saveProfile() {
     final bloc = context.read<ProfileBloc>();
+    final bio = _bioController.text.trim().isNotEmpty
+        ? ProfileValidator.sanitizeBio(_bioController.text)
+        : null;
     if (!_profileCreated) {
       bloc.add(CreateProfile(
         name: _nameController.text.trim(),
         age: _ageController.text.isNotEmpty
             ? int.tryParse(_ageController.text)
             : null,
-        bio: _bioController.text.trim().isNotEmpty
-            ? _bioController.text.trim()
-            : null,
+        bio: bio,
         position: _selectedPosition,
         interests: _selectedInterestIds,
       ));
@@ -155,9 +157,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
         age: _ageController.text.isNotEmpty
             ? int.tryParse(_ageController.text)
             : null,
-        bio: _bioController.text.trim().isNotEmpty
-            ? _bioController.text.trim()
-            : null,
+        bio: bio,
         position: _selectedPosition,
         clearPosition: _selectedPosition == null,
         interests: _selectedInterestIds,
@@ -422,16 +422,9 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
             prefixIcon: Icon(Icons.person_outline),
           ),
           textCapitalization: TextCapitalization.words,
+          maxLength: ProfileValidator.nicknameMaxLength,
           autofocus: true,
-          validator: (value) {
-            if (value == null || value.trim().isEmpty) {
-              return 'Please enter your name';
-            }
-            if (value.trim().length < 2) {
-              return 'Name must be at least 2 characters';
-            }
-            return null;
-          },
+          validator: ProfileValidator.validateNickname,
         ),
       ),
     );
@@ -440,9 +433,8 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   Widget _buildAgeStep(ProfileState state) {
     return _buildStepLayout(
       title: 'How old are you?',
-      subtitle: 'Optional — only shown on your profile.',
+      subtitle: 'Required — you must be 18 or older.',
       onContinue: _nextPage,
-      showSkip: true,
       isSaving: state.status == ProfileStatus.saving,
       child: Form(
         key: _ageFormKey,
@@ -459,15 +451,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
             FilteringTextInputFormatter.digitsOnly,
             LengthLimitingTextInputFormatter(3),
           ],
-          validator: (value) {
-            if (value != null && value.isNotEmpty) {
-              final age = int.tryParse(value);
-              if (age == null || age < 18 || age > 120) {
-                return 'Please enter a valid age (18-120)';
-              }
-            }
-            return null;
-          },
+          validator: ProfileValidator.validateAge,
         ),
       ),
     );
@@ -489,9 +473,10 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
           alignLabelWithHint: true,
         ),
         maxLines: 5,
-        maxLength: 200,
+        maxLength: ProfileValidator.bioMaxLength,
         textCapitalization: TextCapitalization.sentences,
         autofocus: true,
+        validator: ProfileValidator.validateBio,
       ),
     );
   }
@@ -561,21 +546,14 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                 prefixIcon: Icon(Icons.person_outline),
               ),
               textCapitalization: TextCapitalization.words,
-              validator: (value) {
-                if (value == null || value.trim().isEmpty) {
-                  return 'Please enter your name';
-                }
-                if (value.trim().length < 2) {
-                  return 'Name must be at least 2 characters';
-                }
-                return null;
-              },
+              maxLength: ProfileValidator.nicknameMaxLength,
+              validator: ProfileValidator.validateNickname,
             ),
             const SizedBox(height: 20),
             TextFormField(
               controller: _ageController,
               decoration: const InputDecoration(
-                labelText: 'Age (optional)',
+                labelText: 'Age *',
                 hintText: 'How old are you?',
                 prefixIcon: Icon(Icons.cake_outlined),
               ),
@@ -584,15 +562,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                 FilteringTextInputFormatter.digitsOnly,
                 LengthLimitingTextInputFormatter(3),
               ],
-              validator: (value) {
-                if (value != null && value.isNotEmpty) {
-                  final age = int.tryParse(value);
-                  if (age == null || age < 18 || age > 120) {
-                    return 'Please enter a valid age (18-120)';
-                  }
-                }
-                return null;
-              },
+              validator: ProfileValidator.validateAge,
             ),
             const SizedBox(height: 20),
             TextFormField(
@@ -604,8 +574,9 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                 alignLabelWithHint: true,
               ),
               maxLines: 4,
-              maxLength: 200,
+              maxLength: ProfileValidator.bioMaxLength,
               textCapitalization: TextCapitalization.sentences,
+              validator: ProfileValidator.validateBio,
             ),
             const SizedBox(height: 20),
             Text(
