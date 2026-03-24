@@ -21,8 +21,8 @@ This document is specifically for AI assistants (like Claude, GPT, etc.) working
 
 ```
 lib/
-├── core/           # App-wide utilities (errors, theme, widgets, routing)
-├── data/           # Database (Drift) + Repositories
+├── core/           # App-wide utilities (errors, theme, widgets, routing, constants)
+├── data/           # Database (Drift) + Repositories + Repository Interfaces
 ├── services/       # External integrations (BLE, database, images, permissions)
 └── features/       # Feature modules (profile, discovery, chat, onboarding, settings, home)
     └── {feature}/
@@ -32,11 +32,11 @@ lib/
 ```
 
 **Core Patterns**:
-- **Clean Architecture**: Presentation → Domain → Data
+- **Clean Architecture**: Presentation → Domain → Data (blocs depend on repository interfaces, never concrete implementations)
 - **Feature-Based**: Self-contained modules
 - **Bloc Pattern**: State management with events and states
-- **Repository Pattern**: Abstract data access
-- **Dependency Injection**: GetIt service locator
+- **Repository Pattern**: Abstract interfaces (`*Interface`) with concrete Drift-backed implementations
+- **Dependency Injection**: GetIt service locator (registers interfaces, not concrete classes)
 
 ## Key Files You Should Know
 
@@ -80,10 +80,17 @@ lib/
 
 ### Database
 - `lib/data/local_database/database.dart` - Drift database schema v9 (tables: user_profile, discovered_peers, conversations, messages, blocked_users, profile_photos, anchor_drops, message_reactions, peer_public_keys)
-- `lib/data/repositories/profile_repository.dart` - Profile CRUD
-- `lib/data/repositories/peer_repository.dart` - Peer discovery, blocking
-- `lib/data/repositories/chat_repository.dart` - Conversations, messages
-- `lib/data/repositories/anchor_drop_repository.dart` - Anchor drop history
+- `lib/data/repositories/profile_repository.dart` - Profile CRUD (implements `ProfileRepositoryInterface`)
+- `lib/data/repositories/peer_repository.dart` - Peer discovery, blocking (implements `PeerRepositoryInterface`)
+- `lib/data/repositories/chat_repository.dart` - Conversations, messages (implements `ChatRepositoryInterface`)
+- `lib/data/repositories/anchor_drop_repository.dart` - Anchor drop history (implements `AnchorDropRepositoryInterface`)
+- `lib/data/repositories/encryption_repository.dart` - E2EE session/key persistence (implements `EncryptionRepositoryInterface`)
+- `lib/data/repositories/*_interface.dart` - Abstract interfaces for all repositories (blocs/services depend on these)
+
+### Constants
+- `lib/core/constants/message_keys.dart` - Centralized JSON field keys (`MessageKeys`) and type discriminators (`MessageTypes`) for BLE/LAN/mesh protocols
+- `lib/core/constants/app_constants.dart` - App-wide duration/size constants
+- `lib/core/constants/profile_constants.dart` - Profile field constants
 
 ### Feature Modules
 - `lib/features/profile/` - User profile creation and editing
@@ -94,9 +101,10 @@ lib/
 
 ### Configuration
 - `pubspec.yaml` - Dependencies (bluetooth_low_energy, drift, bloc, flutter_nearby_connections_plus, etc.)
+- `analysis_options.yaml` - Lint rules (extends `very_good_analysis`; disables `public_member_api_docs`, `lines_longer_than_80_chars`, `comment_references`)
 - `android/app/src/main/AndroidManifest.xml` - Android permissions
 - `ios/Runner/Info.plist` - iOS permissions
-- `lib/injection.dart` - Dependency injection setup
+- `lib/injection.dart` - Dependency injection setup (registers repository interfaces, not concrete classes)
 
 ## BLE Implementation Details
 
@@ -333,6 +341,69 @@ class CustomButton extends StatelessWidget {
 ```
 
 ## Important Patterns and Conventions
+
+### Repository Interfaces (Dependency Inversion)
+
+**All blocs and services must depend on repository interfaces, not concrete implementations.**
+
+```dart
+// ✅ Correct — depend on interface
+class ChatBloc extends Bloc<ChatEvent, ChatState> {
+  ChatBloc({required ChatRepositoryInterface chatRepository})
+      : _chatRepository = chatRepository;
+  final ChatRepositoryInterface _chatRepository;
+}
+
+// ❌ Wrong — depends on concrete class
+class ChatBloc extends Bloc<ChatEvent, ChatState> {
+  ChatBloc({required ChatRepository chatRepository});
+}
+```
+
+Repository interfaces live in `lib/data/repositories/*_interface.dart`. Concrete implementations (`*Repository`) implement these interfaces. DI registers interfaces:
+```dart
+getIt.registerLazySingleton<ChatRepositoryInterface>(
+  () => dbService.chatRepository,
+);
+```
+
+### JSON Protocol Keys
+
+**Use `MessageKeys` and `MessageTypes` constants instead of hardcoded strings.**
+
+```dart
+// ✅ Correct
+data[MessageKeys.type] = MessageTypes.profileRequest;
+final senderId = json[MessageKeys.senderId] as String;
+
+// ❌ Wrong
+data['type'] = 'profile_request';
+final senderId = json['sender_id'] as String;
+```
+
+Constants are in `lib/core/constants/message_keys.dart`.
+
+### Exception Handling
+
+**Always use typed catch clauses.** Never use bare `catch (e)`.
+
+```dart
+// ✅ Correct
+try {
+  await someOperation();
+} on SpecificException catch (e) {
+  // handle specific case
+} on Exception catch (e) {
+  // handle general exception
+}
+
+// ❌ Wrong — catches Error subclasses too
+try {
+  await someOperation();
+} catch (e) {
+  // catches StackOverflowError, OutOfMemoryError, etc.
+}
+```
 
 ### Error Handling
 
