@@ -1,11 +1,10 @@
 import 'dart:async';
 
+import 'package:anchor/core/utils/logger.dart';
+import 'package:anchor/services/ble/ble_config.dart';
+import 'package:anchor/services/ble/ble_models.dart';
+import 'package:anchor/services/ble/connection/connection_manager.dart';
 import 'package:bluetooth_low_energy/bluetooth_low_energy.dart';
-
-import '../../../core/utils/logger.dart';
-import '../ble_config.dart';
-import '../ble_models.dart';
-import '../connection/connection_manager.dart';
 
 /// Callback signature for when a scan result needs profile reading.
 typedef OnPeerNeedsProfile = void Function(String peerId, Peripheral peripheral);
@@ -38,7 +37,7 @@ class BleScanner {
   bool _isScanning = false;
   Timer? _scanRestartTimer;
   DateTime? _lastImmediateScanAt;
-  StreamSubscription? _discoveredSubscription;
+  StreamSubscription<DiscoveredEventArgs>? _discoveredSubscription;
 
   /// Whether currently scanning.
   bool get isScanning => _isScanning;
@@ -87,7 +86,7 @@ class BleScanner {
   ///
   /// Parameters: (peerId, name, age, rssi, peripheral)
   void Function(String peerId, String name, int? age, int rssi,
-      Peripheral peripheral)? onPeerDiscovered;
+      Peripheral peripheral,)? onPeerDiscovered;
 
   /// Called when a discovered peer needs its profile read via GATT.
   /// The BLE service delegates this to ConnectionManager + profile reading.
@@ -108,7 +107,7 @@ class BleScanner {
     _discoveredSubscription = _central.discovered.listen(_onDeviceDiscovered);
 
     // Start first scan cycle
-    _runScanCycle();
+    unawaited(_runScanCycle());
   }
 
   /// Stop scanning.
@@ -154,7 +153,7 @@ class BleScanner {
   }
 
   /// Enable or disable battery saver mode (reduces scan frequency).
-  void setBatterySaverMode(bool enabled) {
+  void setBatterySaverMode({required bool enabled}) {
     _explicitBatterySaver = enabled;
     _recalculateTiming();
   }
@@ -195,7 +194,7 @@ class BleScanner {
 
   // ==================== Internal ====================
 
-  void _runScanCycle() async {
+  Future<void> _runScanCycle() async {
     if (!_isScanning) return;
 
     final period = _config.dutyCyclePeriod;
@@ -237,7 +236,7 @@ class BleScanner {
           _scanRestartTimer = Timer(offTime, _runScanCycle);
         } else if (_isScanning) {
           // 0 OFF time = continuous scan (0-peer mode)
-          _runScanCycle();
+          unawaited(_runScanCycle());
         }
       });
     } catch (e) {
@@ -328,7 +327,7 @@ class BleScanner {
   /// in the advertisement and causes the service UUID to overflow into the
   /// scan response, breaking cross-platform discovery.
   ({String name, int? age, int? profileVersion})? _decodeLocalName(
-      String advName) {
+      String advName,) {
     if (!advName.startsWith('A')) return null;
 
     // Reject legacy v1 format "A:<name>:<age>[:<version>]" — leaks identity.

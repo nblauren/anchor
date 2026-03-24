@@ -2,11 +2,10 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:anchor/core/utils/logger.dart';
+import 'package:anchor/services/ble/connection/connection_manager.dart';
 import 'package:bluetooth_low_energy/bluetooth_low_energy.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
-import '../../../core/utils/logger.dart';
-import '../connection/connection_manager.dart';
 
 /// Result of a profile read — emitted to the BLE service for peer updates.
 class ProfileReadResult {
@@ -177,7 +176,7 @@ class ProfileReader {
         _handleProfileData(peerId, data);
       } catch (e) {
         Logger.warning(
-            'ProfileReader: Profile read failed for $peerId: $e', 'BLE');
+            'ProfileReader: Profile read failed for $peerId: $e', 'BLE',);
       }
     } else {
       Logger.warning(
@@ -300,7 +299,7 @@ class ProfileReader {
     if (conn == null) {
       Logger.info(
           'ProfileReader: fetchFullProfilePhotos — peer $peerId not connected',
-          'BLE');
+          'BLE',);
       return false;
     }
 
@@ -308,7 +307,7 @@ class ProfileReader {
     if (fullPhotosChar == null) {
       Logger.info(
           'ProfileReader: fetchFullProfilePhotos — no fff4 char for $peerId',
-          'BLE');
+          'BLE',);
       return false;
     }
 
@@ -316,7 +315,7 @@ class ProfileReader {
     if (photoSizes == null || photoSizes.isEmpty) {
       Logger.info(
           'ProfileReader: fetchFullProfilePhotos — no photo sizes for $peerId',
-          'BLE');
+          'BLE',);
       return false;
     }
 
@@ -328,12 +327,12 @@ class ProfileReader {
       try {
         await _central.setCharacteristicNotifyState(
             conn.peripheral, fullPhotosChar,
-            state: false);
+            state: false,);
       } catch (_) {}
 
       await _central.setCharacteristicNotifyState(
           conn.peripheral, fullPhotosChar,
-          state: true);
+          state: true,);
 
       Logger.info(
         'ProfileReader: Subscribed to fff4 for $peerId '
@@ -344,7 +343,7 @@ class ProfileReader {
     } catch (e) {
       Logger.error(
           'ProfileReader: fetchFullProfilePhotos failed for $peerId', e,
-          null, 'BLE');
+          null, 'BLE',);
       _fullPhotoBuffers.remove(peerId);
       _fullPhotoExpectedSizes.remove(peerId);
       return false;
@@ -364,7 +363,7 @@ class ProfileReader {
     if (expected == null && buffer.length > 32000) {
       Logger.warning(
           'ProfileReader: Thumbnail chunks without known size — possible race',
-          'BLE');
+          'BLE',);
     }
 
     if (expected != null && buffer.length >= expected) {
@@ -515,7 +514,7 @@ class ProfileReader {
         thumbnailExpectedSize: thumbnailExpectedSize,
         fullPhotoSizes: fullPhotoSizes,
         legacyPhotoSizes: legacyPhotoSizes,
-      ));
+      ),);
     } catch (e) {
       Logger.warning('ProfileReader: Profile decode failed for $peerId', 'BLE');
     }
@@ -585,8 +584,8 @@ class ProfileReader {
 
   /// FNV-1a 32-bit hash for fast thumbnail dedup.
   static int _thumbnailChecksum(Uint8List bytes) {
-    int hash = 0x811c9dc5;
-    for (int i = 0; i < bytes.length; i++) {
+    var hash = 0x811c9dc5;
+    for (var i = 0; i < bytes.length; i++) {
       hash ^= bytes[i];
       hash = (hash * 0x01000193) & 0xFFFFFFFF;
     }

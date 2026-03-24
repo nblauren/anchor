@@ -1,6 +1,6 @@
 import 'dart:typed_data';
 
-import 'ble_models.dart';
+import 'package:anchor/services/ble/ble_models.dart';
 
 /// Abstract BLE service interface for offline peer-to-peer communication.
 ///
@@ -153,7 +153,7 @@ abstract class BleServiceInterface {
   // ==================== Utilities ====================
 
   /// Enable or disable battery saver mode (reduces scan frequency)
-  Future<void> setBatterySaverMode(bool enabled);
+  Future<void> setBatterySaverMode({required bool enabled});
 
   /// Get signal strength to a specific peer (if available)
   int? getSignalStrength(String peerId);
@@ -221,7 +221,7 @@ abstract class BleServiceInterface {
   // ==================== Mesh ====================
 
   /// Enable or disable mesh relay (message forwarding between devices)
-  Future<void> setMeshRelayMode(bool enabled);
+  Future<void> setMeshRelayMode({required bool enabled});
 
   /// Whether mesh relay is currently enabled
   bool get isMeshRelayEnabled;

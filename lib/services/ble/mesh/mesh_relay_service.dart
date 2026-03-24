@@ -1,15 +1,14 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:anchor/core/utils/logger.dart';
+import 'package:anchor/services/ble/ble_config.dart';
+import 'package:anchor/services/ble/ble_models.dart';
+import 'package:anchor/services/ble/connection/connection_manager.dart';
+import 'package:anchor/services/ble/gatt/gatt_write_queue.dart';
+import 'package:anchor/services/mesh/bloom_filter.dart';
+import 'package:anchor/services/mesh/mesh_packet.dart';
 import 'package:uuid/uuid.dart';
-
-import '../../../core/utils/logger.dart';
-import '../../mesh/bloom_filter.dart';
-import '../../mesh/mesh_packet.dart';
-import '../ble_config.dart';
-import '../ble_models.dart';
-import '../connection/connection_manager.dart';
-import '../gatt/gatt_write_queue.dart';
 
 /// Result of handling an incoming peer_announce — returned to the BLE service
 /// so it can update _visiblePeers and _userIdToPeerId.
@@ -71,13 +70,11 @@ class MeshRelayService {
   /// Auto-rotates when near capacity to prevent false positive rate growth.
   final RotatingBloomFilter _announceDedup = RotatingBloomFilter(
     expectedInsertions: 5000,
-    falsePositiveRate: 0.01,
   );
 
   /// Bloom filter for message relay dedup.
   final RotatingBloomFilter _messageDedup = RotatingBloomFilter(
     expectedInsertions: 10000,
-    falsePositiveRate: 0.01,
   );
 
   /// Neighbor entry aging timeout.
@@ -117,7 +114,7 @@ class MeshRelayService {
   set enabled(bool value) {
     _enabled = value;
     Logger.info(
-        'MeshRelay: ${value ? "enabled" : "disabled"}', 'BLE');
+        'MeshRelay: ${value ? "enabled" : "disabled"}', 'BLE',);
   }
 
   int get routingTableSize => _neighborMap.length;
@@ -165,7 +162,7 @@ class MeshRelayService {
     final effectiveTtl = ttl ?? _config.meshTtl;
 
     // Inject TTL into the data if it's JSON (for backward compat)
-    Uint8List effectiveData = data;
+    var effectiveData = data;
     try {
       final json = jsonDecode(utf8.decode(data)) as Map<String, dynamic>;
       json['ttl'] = effectiveTtl;
@@ -190,7 +187,7 @@ class MeshRelayService {
     // Flood to all connected peers with deterministic suppression.
     // Originated messages are always high-priority (we want our own
     // messages delivered).
-    int relayCount = 0;
+    var relayCount = 0;
     for (final peerId in _connectionManager.connectedPeerIds) {
       if (!_connectionManager.canSendTo(peerId)) continue;
       _writeRelayData(effectiveData, peerId);
@@ -209,7 +206,7 @@ class MeshRelayService {
   /// Uses directed routing (neighbor table) when possible, falls back to
   /// TTL-bounded flooding with probabilistic drop in high-density scenarios.
   void maybeRelayMessage(
-      Map<String, dynamic> json, String receivedFromPeerId) {
+      Map<String, dynamic> json, String receivedFromPeerId,) {
     if (!_enabled) return;
 
     final ttl = json['ttl'] as int? ?? 0;
@@ -231,7 +228,7 @@ class MeshRelayService {
 
     final ownUserId = getOwnUserId?.call() ?? '';
     final relayPath =
-        List<String>.from((json['relay_path'] as List<dynamic>? ?? []));
+        List<String>.from(json['relay_path'] as List<dynamic>? ?? []);
 
     // Cycle detection: check both userId and path
     if (relayPath.contains(ownUserId)) {
@@ -252,13 +249,13 @@ class MeshRelayService {
       if (bestRelay != null) {
         _writeRelayData(data, bestRelay);
         Logger.info(
-            'MeshRelay: Directed relay to best peer (TTL ${ttl - 1})', 'BLE');
+            'MeshRelay: Directed relay to best peer (TTL ${ttl - 1})', 'BLE',);
         return;
       }
     }
 
     // Flood to all connected peers except sender, with deterministic suppression
-    int relayCount = 0;
+    var relayCount = 0;
     final type = json['type'] as String? ?? '';
     final isHighPriority = type == 'noise_hs' || type == 'drop_anchor';
     for (final targetPeerId in _connectionManager.connectedPeerIds) {
@@ -320,7 +317,7 @@ class MeshRelayService {
     }
 
     // Flood to all connected peers except sender
-    int relayCount = 0;
+    var relayCount = 0;
     final isHighPriority = relayPacket.type == PacketType.handshake ||
         relayPacket.type == PacketType.anchorDrop;
     for (final targetPeerId in _connectionManager.connectedPeerIds) {
@@ -395,7 +392,7 @@ class MeshRelayService {
         'MeshRelay: Announced "${json['name']}" to '
         '${_connectionManager.activeConnectionCount} mesh peers'
         '${json.containsKey('sig') ? ' (signed)' : ''}',
-        'BLE');
+        'BLE',);
   }
 
   /// Handle an incoming peer_announce — returns a [RelayedPeerResult] if the
@@ -418,7 +415,7 @@ class MeshRelayService {
     if (announcedUserId.isNotEmpty && announcedUserId == ownUserId) return;
 
     // Don't overwrite directly-seen peer
-    if (isDirectPeer?.call(announcedPeerId) == true) {
+    if (isDirectPeer?.call(announcedPeerId) ?? false) {
       _relayPeerAnnounce(json, fromPeerId);
       return;
     }
@@ -469,7 +466,6 @@ class MeshRelayService {
       age: json['age'] as int?,
       bio: json['bio'] as String?,
       thumbnailBytes: thumbnail,
-      rssi: null,
       timestamp: DateTime.now(),
       isRelayed: true,
       hopCount: hopCount,
@@ -480,7 +476,7 @@ class MeshRelayService {
     onRelayedPeerDiscovered?.call(RelayedPeerResult(
       peer: peer,
       userId: announcedUserId.isNotEmpty ? announcedUserId : null,
-    ));
+    ),);
 
     Logger.info(
       'MeshRelay: Mesh-discovered "${peer.name}" ($hopCount hops away)',
@@ -618,7 +614,6 @@ class MeshRelayService {
       peripheral: conn.peripheral,
       characteristic: conn.messagingChar!,
       data: data,
-      priority: WritePriority.meshRelay,
     );
   }
 

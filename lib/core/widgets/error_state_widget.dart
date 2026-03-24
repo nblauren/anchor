@@ -1,13 +1,11 @@
+import 'package:anchor/core/errors/app_error.dart';
+import 'package:anchor/core/theme/app_theme.dart';
 import 'package:flutter/material.dart';
-
-import '../errors/app_error.dart';
-import '../theme/app_theme.dart';
 
 /// Reusable error state widget with retry option
 class ErrorStateWidget extends StatelessWidget {
   const ErrorStateWidget({
-    super.key,
-    required this.message,
+    required this.message, super.key,
     this.onRetry,
     this.retryLabel = 'Retry',
     this.icon = Icons.error_outline,
@@ -77,8 +75,7 @@ class ErrorStateWidget extends StatelessWidget {
 /// Inline error banner for less intrusive errors
 class ErrorBanner extends StatelessWidget {
   const ErrorBanner({
-    super.key,
-    required this.message,
+    required this.message, super.key,
     this.onDismiss,
     this.onRetry,
   });

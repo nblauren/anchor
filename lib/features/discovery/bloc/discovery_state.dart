@@ -1,10 +1,9 @@
 import 'dart:typed_data';
 
+import 'package:anchor/core/constants/profile_constants.dart';
+import 'package:anchor/data/local_database/database.dart';
+import 'package:anchor/services/transport/transport_enums.dart';
 import 'package:equatable/equatable.dart';
-
-import '../../../core/constants/profile_constants.dart';
-import '../../../data/local_database/database.dart';
-import '../../../services/transport/transport_enums.dart';
 
 enum DiscoveryStatus {
   initial,
@@ -18,13 +17,12 @@ class DiscoveredPeer extends Equatable {
   const DiscoveredPeer({
     required this.peerId,
     required this.name,
-    this.age,
+    required this.lastSeenAt, this.age,
     this.bio,
     this.position,
     this.interests,
     this.thumbnailData,
     this.photoThumbnails,
-    required this.lastSeenAt,
     this.rssi,
     this.isBlocked = false,
     this.isRelayed = false,
@@ -207,10 +205,19 @@ class DiscoveryState extends Equatable {
         .where((p) => !p.isBlocked && seen.add(p.peerId))
         .toList();
 
-    final recent = filtered.where((p) => p.isRecent).toList();
-    final nearby = filtered.where((p) => !p.isRecent && p.isNearby).toList();
-    final stale = filtered.where((p) => !p.isNearby).toList();
-    return [...recent, ...nearby, ...stale];
+    // Partition into online and offline first
+    final online = filtered.where((p) => p.isOnline).toList();
+    final offline = filtered.where((p) => !p.isOnline).toList();
+
+    // Within each group, sort by recency tiers
+    List<DiscoveredPeer> sortByRecency(List<DiscoveredPeer> list) {
+      final recent = list.where((p) => p.isRecent).toList();
+      final nearby = list.where((p) => !p.isRecent && p.isNearby).toList();
+      final stale = list.where((p) => !p.isNearby).toList();
+      return [...recent, ...nearby, ...stale];
+    }
+
+    return [...sortByRecency(online), ...sortByRecency(offline)];
   }
 
   /// Peers seen recently (within last 60 seconds)

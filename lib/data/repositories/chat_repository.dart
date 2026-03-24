@@ -1,8 +1,7 @@
+import 'package:anchor/core/constants/app_constants.dart';
+import 'package:anchor/data/local_database/database.dart';
 import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
-
-import '../../core/constants/app_constants.dart';
-import '../local_database/database.dart';
 
 /// Repository for managing conversations and messages.
 ///
@@ -23,8 +22,8 @@ class ChatRepository {
         _db.discoveredPeers,
         _db.discoveredPeers.peerId.equalsExp(_db.conversations.peerId),
       ),
-    ]);
-    query.orderBy([OrderingTerm.desc(_db.conversations.updatedAt)]);
+    ])
+      ..orderBy([OrderingTerm.desc(_db.conversations.updatedAt)]);
 
     final results = await query.get();
 
@@ -43,14 +42,14 @@ class ChatRepository {
         conversation: conversation,
         peer: peer,
         lastMessage: results[0] as MessageEntry?,
-        unreadCount: results[1] as int,
+        unreadCount: results[1]! as int,
       );
-    }));
+    }),);
   }
 
   /// Get a conversation by ID
   Future<ConversationEntry?> getConversationById(String id) async {
-    return await (_db.select(_db.conversations)..where((t) => t.id.equals(id)))
+    return (_db.select(_db.conversations)..where((t) => t.id.equals(id)))
         .getSingleOrNull();
   }
 
@@ -140,7 +139,7 @@ class ChatRepository {
     int limit = 50,
     int offset = 0,
   }) async {
-    return await (_db.select(_db.messages)
+    return (_db.select(_db.messages)
           ..where((t) => t.conversationId.equals(conversationId))
           ..orderBy([(t) => OrderingTerm.desc(t.createdAt)])
           ..limit(limit, offset: offset))
@@ -149,14 +148,14 @@ class ChatRepository {
 
   /// Get a single message by its ID (used for reply quote lookup).
   Future<MessageEntry?> getMessageById(String messageId) async {
-    return await (_db.select(_db.messages)
+    return (_db.select(_db.messages)
           ..where((t) => t.id.equals(messageId)))
         .getSingleOrNull();
   }
 
   /// Get the last message in a conversation
   Future<MessageEntry?> getLastMessage(String conversationId) async {
-    return await (_db.select(_db.messages)
+    return (_db.select(_db.messages)
           ..where((t) => t.conversationId.equals(conversationId))
           ..orderBy([(t) => OrderingTerm.desc(t.createdAt)])
           ..limit(1))
@@ -195,11 +194,9 @@ class ChatRepository {
       senderId: senderId,
       contentType: MessageContentType.text,
       textContent: text,
-      photoPath: null,
       status: MessageStatus.pending,
       createdAt: now,
       retryCount: 0,
-      lastAttemptAt: null,
       replyToMessageId: replyToMessageId,
     );
   }
@@ -233,12 +230,10 @@ class ChatRepository {
       conversationId: conversationId,
       senderId: senderId,
       contentType: MessageContentType.photo,
-      textContent: null,
       photoPath: photoPath,
       status: MessageStatus.pending,
       createdAt: now,
       retryCount: 0,
-      lastAttemptAt: null,
     );
   }
 
@@ -299,7 +294,6 @@ class ChatRepository {
       status: MessageStatus.delivered,
       createdAt: now,
       retryCount: 0,
-      lastAttemptAt: null,
       replyToMessageId: replyToMessageId,
     );
   }
@@ -355,7 +349,6 @@ class ChatRepository {
       status: MessageStatus.delivered,
       createdAt: now,
       retryCount: 0,
-      lastAttemptAt: null,
     );
   }
 
@@ -374,7 +367,7 @@ class ChatRepository {
       photoPath: Value(fullPhotoPath),
       textContent: const Value(null),
       status: const Value(MessageStatus.read),
-    ));
+    ),);
 
     return (_db.select(_db.messages)..where((t) => t.id.equals(messageId)))
         .getSingleOrNull();
@@ -391,7 +384,7 @@ class ChatRepository {
     await (_db.update(_db.messages)
           ..where((t) =>
               t.conversationId.equals(conversationId) &
-              t.status.equalsValue(MessageStatus.pending)))
+              t.status.equalsValue(MessageStatus.pending),))
         .write(const MessagesCompanion(status: Value(MessageStatus.failed)));
   }
 
@@ -402,7 +395,7 @@ class ChatRepository {
 
   /// Get unread count for a conversation (messages from peer, not yet read)
   Future<int> getUnreadCount(String conversationId,
-      {String? localUserId}) async {
+      {String? localUserId,}) async {
     final count = _db.messages.id.count();
     final query = _db.selectOnly(_db.messages)
       ..where(_db.messages.conversationId.equals(conversationId))
@@ -439,7 +432,7 @@ class ChatRepository {
               t.conversationId.equals(conversationId) &
               t.senderId.equals(ownUserId) &
               t.status.equalsValue(MessageStatus.sent) &
-              t.contentType.equalsValue(MessageContentType.text)))
+              t.contentType.equalsValue(MessageContentType.text),))
         .write(const MessagesCompanion(status: Value(MessageStatus.read)));
   }
 
@@ -468,7 +461,7 @@ class ChatRepository {
 
   /// Get conversation by peer ID
   Future<ConversationEntry?> getConversationByPeerId(String peerId) async {
-    return await (_db.select(_db.conversations)
+    return (_db.select(_db.conversations)
           ..where((t) => t.peerId.equals(peerId)))
         .getSingleOrNull();
   }
@@ -532,7 +525,7 @@ class ChatRepository {
     return (_db.select(_db.messages)
           ..where((t) =>
               t.contentType.equalsValue(MessageContentType.photoPreview) &
-              t.textContent.like('%$photoId%'))
+              t.textContent.like('%$photoId%'),)
           ..limit(1))
         .getSingleOrNull();
   }
@@ -541,10 +534,10 @@ class ChatRepository {
   /// Used to recover [PendingOutgoingPhoto] data after session restarts.
   Future<MessageEntry?> findMessageByPhotoId(String photoId) async {
     // Try exact content type first (photo messages on the sender side).
-    var result = await (_db.select(_db.messages)
+    final result = await (_db.select(_db.messages)
           ..where((t) =>
               t.contentType.equalsValue(MessageContentType.photo) &
-              t.textContent.like('%$photoId%'))
+              t.textContent.like('%$photoId%'),)
           ..limit(1))
         .getSingleOrNull();
     if (result != null) return result;
@@ -577,7 +570,7 @@ class ChatRepository {
               t.conversationId.equals(conversation.id) &
               t.senderId.equals(ownUserId) &
               t.contentType.equalsValue(MessageContentType.photo) &
-              t.photoPath.isNotNull())
+              t.photoPath.isNotNull(),)
           ..orderBy([(t) => OrderingTerm.desc(t.createdAt)])
           ..limit(1))
         .getSingleOrNull();
@@ -607,7 +600,7 @@ class ChatRepository {
                   t.contentType.equalsValue(MessageContentType.photoPreview)) &
               t.createdAt.isBiggerThanValue(cutoff) &
               t.retryCount.isSmallerThanValue(
-                  AppConstants.messageMaxCrossSessionRetries))
+                  AppConstants.messageMaxCrossSessionRetries,),)
           ..orderBy([(t) => OrderingTerm.asc(t.createdAt)]))
         .get();
   }
@@ -622,7 +615,7 @@ class ChatRepository {
         .write(MessagesCompanion(
       retryCount: Value(retryCount),
       lastAttemptAt: Value(lastAttemptAt),
-    ));
+    ),);
   }
 
   /// Marks all pending/failed outgoing messages older than [window] as failed.
@@ -638,7 +631,7 @@ class ChatRepository {
               (t.status.equalsValue(MessageStatus.pending) |
                   t.status.equalsValue(MessageStatus.queued) |
                   t.status.equalsValue(MessageStatus.failed)) &
-              t.createdAt.isSmallerThanValue(cutoff)))
+              t.createdAt.isSmallerThanValue(cutoff),))
         .write(const MessagesCompanion(status: Value(MessageStatus.failed)));
   }
 
@@ -656,7 +649,7 @@ class ChatRepository {
           ..where((t) =>
               t.messageId.equals(messageId) &
               t.senderId.equals(senderId) &
-              t.emoji.equals(emoji)))
+              t.emoji.equals(emoji),))
         .getSingleOrNull();
 
     if (existing != null) return; // already reacted with same emoji — no-op
@@ -664,7 +657,7 @@ class ChatRepository {
     // Remove any previous reaction from this sender on this message
     await (_db.delete(_db.messageReactions)
           ..where((t) =>
-              t.messageId.equals(messageId) & t.senderId.equals(senderId)))
+              t.messageId.equals(messageId) & t.senderId.equals(senderId),))
         .go();
 
     final id = _uuid.v4();
@@ -689,7 +682,7 @@ class ChatRepository {
           ..where((t) =>
               t.messageId.equals(messageId) &
               t.senderId.equals(senderId) &
-              t.emoji.equals(emoji)))
+              t.emoji.equals(emoji),))
         .go();
   }
 
@@ -706,7 +699,7 @@ class ChatRepository {
       ..where(_db.messages.conversationId.equals(conversationId));
 
     final rows = await query.get();
-    final Map<String, List<ReactionEntry>> result = {};
+    final result = <String, List<ReactionEntry>>{};
     for (final row in rows) {
       final reaction = row.readTable(_db.messageReactions);
       result.putIfAbsent(reaction.messageId, () => []).add(reaction);

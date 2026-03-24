@@ -1,7 +1,6 @@
+import 'package:anchor/data/local_database/database.dart';
 import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
-
-import '../local_database/database.dart';
 
 /// Repository for managing local user profile and photos
 class ProfileRepository {
@@ -14,12 +13,12 @@ class ProfileRepository {
 
   /// Get the local user's profile (there should only be one)
   Future<UserProfileEntry?> getProfile() async {
-    return await (_db.select(_db.userProfiles)..limit(1)).getSingleOrNull();
+    return (_db.select(_db.userProfiles)..limit(1)).getSingleOrNull();
   }
 
   /// Get profile by ID
   Future<UserProfileEntry?> getProfileById(String id) async {
-    return await (_db.select(_db.userProfiles)
+    return (_db.select(_db.userProfiles)
           ..where((t) => t.id.equals(id)))
         .getSingleOrNull();
   }
@@ -104,7 +103,7 @@ class ProfileRepository {
 
   /// Get all photos for a user, ordered by order_index
   Future<List<UserPhotoEntry>> getPhotos(String userId) async {
-    return await (_db.select(_db.userPhotos)
+    return (_db.select(_db.userPhotos)
           ..where((t) => t.userId.equals(userId))
           ..orderBy([(t) => OrderingTerm.asc(t.orderIndex)]))
         .get();
@@ -112,7 +111,7 @@ class ProfileRepository {
 
   /// Get the primary photo for a user
   Future<UserPhotoEntry?> getPrimaryPhoto(String userId) async {
-    return await (_db.select(_db.userPhotos)
+    return (_db.select(_db.userPhotos)
           ..where((t) => t.userId.equals(userId) & t.isPrimary.equals(true)))
         .getSingleOrNull();
   }
@@ -187,7 +186,7 @@ class ProfileRepository {
             .write(UserPhotosCompanion(
           orderIndex: Value(i),
           isPrimary: Value(i == 0),
-        ));
+        ),);
       }
     });
   }

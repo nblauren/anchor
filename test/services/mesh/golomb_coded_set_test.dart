@@ -92,7 +92,7 @@ void main() {
     test('hashItems returns sorted list', () {
       final items = ['z-item', 'a-item', 'm-item'];
       final hashes = gcs.hashItems(items);
-      for (int i = 1; i < hashes.length; i++) {
+      for (var i = 1; i < hashes.length; i++) {
         expect(hashes[i], greaterThanOrEqualTo(hashes[i - 1]));
       }
     });

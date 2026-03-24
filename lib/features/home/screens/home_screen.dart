@@ -1,19 +1,18 @@
+import 'package:anchor/features/chat/bloc/chat_bloc.dart';
+import 'package:anchor/features/chat/bloc/chat_e2ee_bloc.dart';
+import 'package:anchor/features/chat/bloc/conversation_list_bloc.dart';
+import 'package:anchor/features/chat/bloc/photo_transfer_bloc.dart';
+import 'package:anchor/features/chat/bloc/reaction_bloc.dart';
+import 'package:anchor/features/chat/screens/chat_list_screen.dart';
+import 'package:anchor/features/discovery/bloc/anchor_drop_bloc.dart';
+import 'package:anchor/features/discovery/bloc/discovery_filter_cubit.dart';
+import 'package:anchor/features/discovery/screens/discovery_screen.dart';
+import 'package:anchor/features/profile/bloc/profile_bloc.dart';
+import 'package:anchor/features/profile/bloc/profile_state.dart';
+import 'package:anchor/features/profile/screens/profile_view_screen.dart';
+import 'package:anchor/injection.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-
-import '../../../injection.dart';
-import '../../chat/bloc/chat_bloc.dart';
-import '../../chat/bloc/chat_e2ee_bloc.dart';
-import '../../chat/bloc/conversation_list_bloc.dart';
-import '../../chat/bloc/photo_transfer_bloc.dart';
-import '../../chat/bloc/reaction_bloc.dart';
-import '../../chat/screens/chat_list_screen.dart';
-import '../../discovery/bloc/anchor_drop_bloc.dart';
-import '../../discovery/bloc/discovery_filter_cubit.dart';
-import '../../discovery/screens/discovery_screen.dart';
-import '../../profile/bloc/profile_bloc.dart';
-import '../../profile/bloc/profile_state.dart';
-import '../../profile/screens/profile_view_screen.dart';
 
 /// Main screen with bottom navigation bar
 class HomeScreen extends StatefulWidget {

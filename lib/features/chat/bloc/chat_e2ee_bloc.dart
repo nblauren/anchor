@@ -1,10 +1,9 @@
 import 'dart:async';
 
+import 'package:anchor/core/utils/logger.dart';
+import 'package:anchor/services/encryption/encryption.dart';
 import 'package:equatable/equatable.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-
-import '../../../core/utils/logger.dart';
-import '../../../services/encryption/encryption.dart';
 
 // ---------------------------------------------------------------------------
 // Events
@@ -129,9 +128,9 @@ class ChatE2eeBloc extends Bloc<ChatE2eeEvent, ChatE2eeState> {
   }
 
   final EncryptionService _encryptionService;
-  StreamSubscription? _sessionSub;
-  StreamSubscription? _keyStoredSub;
-  StreamSubscription? _timeoutSub;
+  StreamSubscription<String>? _sessionSub;
+  StreamSubscription<String>? _keyStoredSub;
+  StreamSubscription<String>? _timeoutSub;
   int _handshakeRetryCount = 0;
 
   /// Initiate handshake when conversation is opened.
@@ -201,7 +200,7 @@ class ChatE2eeBloc extends Bloc<ChatE2eeEvent, ChatE2eeState> {
       'ChatE2eeBloc',
     );
 
-    await Future.delayed(const Duration(seconds: 2));
+    await Future<void>.delayed(const Duration(seconds: 2));
     if (isClosed) return;
     if (_encryptionService.hasSession(event.peerId) ||
         _encryptionService.hasPendingHandshake(event.peerId)) {

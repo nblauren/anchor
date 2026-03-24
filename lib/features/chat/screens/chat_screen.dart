@@ -1,32 +1,29 @@
 import 'dart:typed_data';
 
+import 'package:anchor/core/theme/app_theme.dart';
+import 'package:anchor/core/widgets/transport_badge.dart';
+import 'package:anchor/data/local_database/database.dart';
+import 'package:anchor/features/chat/bloc/chat_bloc.dart';
+import 'package:anchor/features/chat/bloc/chat_e2ee_bloc.dart';
+import 'package:anchor/features/chat/bloc/chat_event.dart';
+import 'package:anchor/features/chat/bloc/chat_state.dart';
+import 'package:anchor/features/chat/bloc/photo_transfer_bloc.dart';
+import 'package:anchor/features/chat/bloc/reaction_bloc.dart';
+import 'package:anchor/features/chat/widgets/floating_emoji_picker.dart';
+import 'package:anchor/features/chat/widgets/message_bubble_widget.dart';
+import 'package:anchor/features/discovery/bloc/anchor_drop_bloc.dart';
+import 'package:anchor/features/transport/bloc/transport_bloc.dart';
+import 'package:anchor/features/transport/bloc/transport_state.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:image_picker/image_picker.dart';
-
-import '../../../core/theme/app_theme.dart';
-import '../../../core/widgets/transport_badge.dart';
-import '../../../data/local_database/database.dart';
-import '../../discovery/bloc/anchor_drop_bloc.dart';
-import '../../transport/bloc/transport_bloc.dart';
-import '../../transport/bloc/transport_state.dart';
-import '../bloc/chat_bloc.dart';
-import '../bloc/chat_e2ee_bloc.dart';
-import '../bloc/chat_event.dart';
-import '../bloc/chat_state.dart';
-import '../bloc/photo_transfer_bloc.dart';
-import '../bloc/reaction_bloc.dart';
-import '../widgets/floating_emoji_picker.dart';
-import '../widgets/message_bubble_widget.dart';
 
 const _kReactionEmojis = ['❤️', '👍', '😂', '😮', '😢', '🔥'];
 
 /// Screen for individual chat conversation
 class ChatScreen extends StatefulWidget {
   const ChatScreen({
-    super.key,
-    required this.peerId,
-    required this.peerName,
+    required this.peerId, required this.peerName, super.key,
     this.peerThumbnail,
     this.onViewProfile,
     this.isRelayedPeer = false,
@@ -70,7 +67,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _chatBloc.add(OpenConversation(
       peerId: widget.peerId,
       peerName: widget.peerName,
-    ));
+    ),);
 
     // Initiate E2EE handshake via dedicated bloc
     context.read<ChatE2eeBloc>().add(InitiateE2eeHandshake(widget.peerId));
@@ -119,7 +116,7 @@ class _ChatScreenState extends State<ChatScreen> {
       builder: (ctx) => AlertDialog(
         title: const Text('Block User'),
         content:
-            Text('Block $peerName? They won\'t be able to send you messages.'),
+            Text("Block $peerName? They won't be able to send you messages."),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
@@ -132,7 +129,7 @@ class _ChatScreenState extends State<ChatScreen> {
         ],
       ),
     ).then((confirmed) {
-      if (confirmed == true && context.mounted) {
+      if ((confirmed ?? false) && context.mounted) {
         context.read<ChatBloc>().add(const BlockChatPeer());
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('$peerName blocked')),
@@ -202,7 +199,7 @@ class _ChatScreenState extends State<ChatScreen> {
       );
       return;
     }
-    showModalBottomSheet(
+    showModalBottomSheet<void>(
       context: context,
       backgroundColor: AppTheme.darkCard,
       shape: const RoundedRectangleBorder(
@@ -247,7 +244,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> _pickPhoto(ImageSource source) async {
     try {
-      final XFile? image = await _imagePicker.pickImage(
+      final image = await _imagePicker.pickImage(
         source: source,
         maxWidth: 1024,
         maxHeight: 1024,
@@ -265,7 +262,7 @@ class _ChatScreenState extends State<ChatScreen> {
             content: const Text(
               'This person is reached via a relay hop. '
               'A preview thumbnail will be sent now — '
-              'they can tap it to download the full photo once you\'re closer.',
+              "they can tap it to download the full photo once you're closer.",
             ),
             actions: [
               TextButton(
@@ -348,13 +345,13 @@ class _ChatScreenState extends State<ChatScreen> {
                       messageId: message.id,
                       peerId: peerId,
                       emoji: emoji,
-                    ));
+                    ),);
                   } else {
                     _reactionBloc.add(SendReaction(
                       messageId: message.id,
                       peerId: peerId,
                       emoji: emoji,
-                    ));
+                    ),);
                   }
                 },
               ),
@@ -372,7 +369,7 @@ class _ChatScreenState extends State<ChatScreen> {
           messageId: messageId,
           photoId: photoId,
           peerId: peerId,
-        ));
+        ),);
   }
 
   void _retryMessage(String messageId) {
@@ -392,10 +389,10 @@ class _ChatScreenState extends State<ChatScreen> {
         // Load reactions when conversation opens
         if (state.currentConversation != null &&
             state.status == ChatStatus.loaded) {
-          final reactionBloc = context.read<ReactionBloc>();
-          reactionBloc.activePeerName = state.currentConversation!.peerName;
-          reactionBloc.activeMessages = state.messages;
-          reactionBloc.add(LoadReactions(state.currentConversation!.id));
+          context.read<ReactionBloc>()
+            ..activePeerName = state.currentConversation!.peerName
+            ..activeMessages = state.messages
+            ..add(LoadReactions(state.currentConversation!.id));
         }
         // Keep activeMessages in sync
         if (state.currentConversation != null) {
@@ -447,7 +444,7 @@ class _ChatScreenState extends State<ChatScreen> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           const Icon(Icons.hub_outlined,
-                              size: 11, color: AppTheme.textSecondary),
+                              size: 11, color: AppTheme.textSecondary,),
                           const SizedBox(width: 3),
                           Text(
                             widget.hopCount > 0
@@ -470,7 +467,7 @@ class _ChatScreenState extends State<ChatScreen> {
                               content: Row(
                                 children: [
                                   Icon(Icons.lock,
-                                      color: Colors.white, size: 16),
+                                      color: Colors.white, size: 16,),
                                   SizedBox(width: 8),
                                   Text('End-to-end encrypted'),
                                 ],
@@ -606,7 +603,7 @@ class _ChatScreenState extends State<ChatScreen> {
                               state.messages[index + 1].createdAt,
                             );
                         final itemKey = _messageKeys.putIfAbsent(
-                            message.id, () => GlobalKey());
+                            message.id, GlobalKey.new,);
 
                         return Column(
                           key: itemKey,
@@ -657,7 +654,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                               [])
                                           .any((r) =>
                                               r.senderId == ownUserId &&
-                                              r.emoji == emoji);
+                                              r.emoji == emoji,);
                                       if (ownReacted) {
                                         context.read<ReactionBloc>().add(
                                               RemoveReaction(
@@ -676,7 +673,6 @@ class _ChatScreenState extends State<ChatScreen> {
                                             );
                                       }
                                     },
-                              isSelected: false,
                               onReactTap: (!isSentByMe && !state.isBlocked)
                                   ? () => _showFloatingEmojiPicker(
                                         context,
@@ -694,7 +690,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                   : null,
                               onQuotedTap: message.replyToMessageId != null
                                   ? () => _scrollToMessage(
-                                      message.replyToMessageId!)
+                                      message.replyToMessageId!,)
                                   : null,
                             ),
                           ],
@@ -900,7 +896,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _buildReplyBar(
-      MessageEntry replyingTo, String ownUserId, String peerName) {
+      MessageEntry replyingTo, String ownUserId, String peerName,) {
     final isOwnMessage = replyingTo.senderId == ownUserId;
     final senderLabel = isOwnMessage ? 'Yourself' : peerName;
     final isPhoto = replyingTo.contentType == MessageContentType.photo ||
@@ -913,7 +909,6 @@ class _ChatScreenState extends State<ChatScreen> {
         border: Border(top: BorderSide(color: AppTheme.darkCard)),
       ),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           // Colored left accent bar
           Container(
@@ -946,7 +941,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   children: [
                     if (isPhoto) ...[
                       const Icon(Icons.image_outlined,
-                          size: 12, color: AppTheme.textHint),
+                          size: 12, color: AppTheme.textHint,),
                       const SizedBox(width: 4),
                     ],
                     Flexible(
@@ -972,7 +967,7 @@ class _ChatScreenState extends State<ChatScreen> {
             child: Container(
               padding: const EdgeInsets.all(4),
               child: const Icon(Icons.close,
-                  size: 16, color: AppTheme.textSecondary),
+                  size: 16, color: AppTheme.textSecondary,),
             ),
           ),
         ],

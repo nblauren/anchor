@@ -28,8 +28,8 @@ class BloomFilter {
     required int expectedInsertions,
     double falsePositiveRate = 0.01,
   }) {
-    assert(expectedInsertions > 0);
-    assert(falsePositiveRate > 0 && falsePositiveRate < 1);
+    assert(expectedInsertions > 0, 'expectedInsertions must be positive');
+    assert(falsePositiveRate > 0 && falsePositiveRate < 1, 'falsePositiveRate must be between 0 and 1 exclusive');
 
     // Optimal bit array size: m = -n*ln(p) / (ln(2))^2
     final m = (-(expectedInsertions * log(falsePositiveRate)) /
@@ -71,7 +71,7 @@ class BloomFilter {
     final hashes = _getHashes(item);
     for (final hash in hashes) {
       final index = hash % bitCount;
-      bitArray[index ~/ 8] |= (1 << (index % 8));
+      bitArray[index ~/ 8] |= 1 << (index % 8);
     }
     _insertionCount++;
   }
@@ -120,8 +120,8 @@ class BloomFilter {
 
   /// FNV-1a 32-bit hash.
   static int _fnv1a32(String data) {
-    int hash = 0x811c9dc5;
-    for (int i = 0; i < data.length; i++) {
+    var hash = 0x811c9dc5;
+    for (var i = 0; i < data.length; i++) {
       hash ^= data.codeUnitAt(i);
       hash = (hash * 0x01000193) & 0xFFFFFFFF;
     }
@@ -130,9 +130,9 @@ class BloomFilter {
 
   /// MurmurHash3 simplified 32-bit with seed.
   static int _murmur3Seed(String data, int seed) {
-    int hash = seed;
-    for (int i = 0; i < data.length; i++) {
-      int k = data.codeUnitAt(i);
+    var hash = seed;
+    for (var i = 0; i < data.length; i++) {
+      var k = data.codeUnitAt(i);
       k = (k * 0xcc9e2d51) & 0xFFFFFFFF;
       k = ((k << 15) | (k >> 17)) & 0xFFFFFFFF;
       k = (k * 0x1b873593) & 0xFFFFFFFF;

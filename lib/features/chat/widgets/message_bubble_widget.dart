@@ -1,20 +1,19 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:anchor/core/theme/app_theme.dart';
+import 'package:anchor/data/local_database/database.dart';
+import 'package:anchor/features/chat/bloc/chat_state.dart';
+import 'package:anchor/services/image_service.dart';
 import 'package:flutter/material.dart';
 import 'package:photo_view/photo_view.dart';
-
-import '../../../core/theme/app_theme.dart';
-import '../../../data/local_database/database.dart';
-import '../../../services/image_service.dart';
-import '../bloc/chat_state.dart';
 
 /// Groups reactions by emoji and returns a sorted list of (emoji, count, isMine) tuples.
 List<({String emoji, int count, bool isMine})> groupReactions(
   List<ReactionEntry> reactions,
   String ownUserId,
 ) {
-  final Map<String, List<ReactionEntry>> byEmoji = {};
+  final byEmoji = <String, List<ReactionEntry>>{};
   for (final r in reactions) {
     byEmoji.putIfAbsent(r.emoji, () => []).add(r);
   }
@@ -23,7 +22,7 @@ List<({String emoji, int count, bool isMine})> groupReactions(
             emoji: e.key,
             count: e.value.length,
             isMine: e.value.any((r) => r.senderId == ownUserId),
-          ))
+          ),)
       .toList()
     ..sort((a, b) => b.count.compareTo(a.count));
 }
@@ -37,10 +36,7 @@ List<({String emoji, int count, bool isMine})> groupReactions(
 ///     taps to request the full photo via [onRequestFullPhoto].
 class MessageBubbleWidget extends StatelessWidget {
   const MessageBubbleWidget({
-    super.key,
-    required this.message,
-    required this.isSentByMe,
-    required this.ownUserId,
+    required this.message, required this.isSentByMe, required this.ownUserId, super.key,
     this.onRetry,
     this.isRelayedPeer = false,
     this.transferInfo,
@@ -126,7 +122,6 @@ class MessageBubbleWidget extends StatelessWidget {
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   Flexible(
                     child: Stack(
@@ -163,7 +158,7 @@ class MessageBubbleWidget extends StatelessWidget {
                                   right: 8,
                                   child: Container(
                                     padding: const EdgeInsets.symmetric(
-                                        horizontal: 6, vertical: 2),
+                                        horizontal: 6, vertical: 2,),
                                     decoration: BoxDecoration(
                                       color:
                                           Colors.black.withValues(alpha: 0.45),
@@ -182,7 +177,7 @@ class MessageBubbleWidget extends StatelessWidget {
                                         if (isSentByMe && isRelayedPeer) ...[
                                           const SizedBox(width: 4),
                                           const Icon(Icons.hub_outlined,
-                                              size: 11, color: Colors.white70),
+                                              size: 11, color: Colors.white70,),
                                         ],
                                         if (isSentByMe) ...[
                                           const SizedBox(width: 4),
@@ -227,7 +222,7 @@ class MessageBubbleWidget extends StatelessWidget {
                                       if (isSentByMe && isRelayedPeer) ...[
                                         const SizedBox(width: 4),
                                         const Icon(Icons.hub_outlined,
-                                            size: 11, color: Colors.white38),
+                                            size: 11, color: Colors.white38,),
                                       ],
                                       if (isSentByMe) ...[
                                         const SizedBox(width: 4),
@@ -309,7 +304,6 @@ class MessageBubbleWidget extends StatelessWidget {
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             Flexible(
               child: isPhoto
@@ -317,7 +311,7 @@ class MessageBubbleWidget extends StatelessWidget {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Icon(Icons.image_outlined,
-                            size: 13, color: AppTheme.textHint),
+                            size: 13, color: AppTheme.textHint,),
                         SizedBox(width: 5),
                         Text(
                           'Photo',
@@ -348,7 +342,7 @@ class MessageBubbleWidget extends StatelessWidget {
 
   /// Bare emoji row — no container, just the glyphs + optional counts.
   Widget _buildReactionPill(
-      List<({String emoji, int count, bool isMine})> grouped) {
+      List<({String emoji, int count, bool isMine})> grouped,) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: grouped.map((g) {
@@ -413,8 +407,8 @@ class MessageBubbleWidget extends StatelessWidget {
 
   Widget _buildPhotoPreviewContent(BuildContext context) {
     // Parse metadata stored in textContent.
-    String photoId = '';
-    int originalSize = 0;
+    var photoId = '';
+    var originalSize = 0;
     try {
       final meta =
           jsonDecode(message.textContent ?? '{}') as Map<String, dynamic>;
@@ -435,7 +429,7 @@ class MessageBubbleWidget extends StatelessWidget {
   }
 
   void _showFullScreen(BuildContext context, File file) {
-    showDialog(
+    showDialog<void>(
       context: context,
       barrierColor: Colors.black87,
       builder: (context) => Dialog(
@@ -650,7 +644,7 @@ class _PhotoPreviewContentState extends State<_PhotoPreviewContent> {
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
         const Icon(Icons.photo_camera_outlined,
-            color: Colors.white70, size: 32),
+            color: Colors.white70, size: 32,),
         const SizedBox(height: 8),
         Text(
           'Preview sent',
@@ -753,7 +747,7 @@ class _PhotoPreviewContentState extends State<_PhotoPreviewContent> {
         TextButton.icon(
           onPressed: widget.onCancel,
           icon: const Icon(Icons.cancel_outlined,
-              size: 16, color: Colors.white70),
+              size: 16, color: Colors.white70,),
           label: Text(
             'Cancel',
             style: TextStyle(
@@ -890,22 +884,22 @@ class _PhotoContentState extends State<_PhotoContent> {
                           TextButton.icon(
                             onPressed: widget.onCancel,
                             icon: const Icon(Icons.cancel_outlined,
-                                size: 14, color: Colors.white70),
+                                size: 14, color: Colors.white70,),
                             label: const Text(
                               'Cancel',
                               style: TextStyle(
-                                  color: Colors.white70, fontSize: 11),
+                                  color: Colors.white70, fontSize: 11,),
                             ),
                             style: TextButton.styleFrom(
                               padding: const EdgeInsets.symmetric(
-                                  horizontal: 10, vertical: 2),
+                                  horizontal: 10, vertical: 2,),
                               minimumSize: Size.zero,
                             ),
                           ),
                         ],
                       ),
                     ),
-                  )
+                  ),
                 ],
             ),
           ),

@@ -1,29 +1,23 @@
 import 'dart:io';
 
+import 'package:anchor/core/theme/app_theme.dart';
+import 'package:anchor/features/profile/bloc/profile_state.dart';
+import 'package:anchor/services/image_service.dart' show resolvePhotoPath;
 import 'package:flutter/material.dart';
-
-import '../../../core/theme/app_theme.dart';
-import '../../../services/image_service.dart' show resolvePhotoPath;
-import '../bloc/profile_state.dart';
 
 /// Grid widget for displaying and managing profile photos with drag and drop reordering
 class PhotoGridWidget extends StatelessWidget {
   const PhotoGridWidget({
-    super.key,
-    required this.photos,
-    required this.onAddPhoto,
-    required this.onRemovePhoto,
-    required this.onReorder,
-    required this.onSetPrimary,
+    required this.photos, required this.onAddPhoto, required this.onRemovePhoto, required this.onReorder, required this.onSetPrimary, super.key,
     this.isLoading = false,
     this.maxPhotos = 5,
   });
 
   final List<ProfilePhoto> photos;
   final VoidCallback onAddPhoto;
-  final Function(String photoId) onRemovePhoto;
-  final Function(List<String> photoIds) onReorder;
-  final Function(String photoId) onSetPrimary;
+  final void Function(String photoId) onRemovePhoto;
+  final void Function(List<String> photoIds) onReorder;
+  final void Function(String photoId) onSetPrimary;
   final bool isLoading;
   final int maxPhotos;
 
@@ -102,11 +96,7 @@ class PhotoGridWidget extends StatelessWidget {
 
 class _PhotoItem extends StatefulWidget {
   const _PhotoItem({
-    super.key,
-    required this.photo,
-    required this.index,
-    required this.onRemove,
-    required this.onSetPrimary,
+    required this.photo, required this.index, required this.onRemove, required this.onSetPrimary, super.key,
   });
 
   final ProfilePhoto photo;
@@ -166,20 +156,20 @@ class _PhotoItemState extends State<_PhotoItem> {
                       builder: (context, snapshot) {
                         final path = snapshot.data;
                         if (path == null) {
-                          return Container(
+                          return const ColoredBox(
                             color: AppTheme.darkCard,
-                            child: const Icon(Icons.broken_image,
-                                color: AppTheme.textSecondary),
+                            child: Icon(Icons.broken_image,
+                                color: AppTheme.textSecondary,),
                           );
                         }
                         return Image.file(
                           File(path),
                           fit: BoxFit.cover,
                           gaplessPlayback: true,
-                          errorBuilder: (_, __, ___) => Container(
+                          errorBuilder: (_, __, ___) => const ColoredBox(
                             color: AppTheme.darkCard,
-                            child: const Icon(Icons.broken_image,
-                                color: AppTheme.textSecondary),
+                            child: Icon(Icons.broken_image,
+                                color: AppTheme.textSecondary,),
                           ),
                         );
                       },
@@ -196,7 +186,7 @@ class _PhotoItemState extends State<_PhotoItem> {
                       if (photo.isPrimary)
                         Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 4),
+                              horizontal: 8, vertical: 4,),
                           decoration: BoxDecoration(
                             color: AppTheme.primaryColor,
                             borderRadius: BorderRadius.circular(4),
@@ -246,9 +236,7 @@ class _PhotoItemState extends State<_PhotoItem> {
 
 class _AddPhotoButton extends StatelessWidget {
   const _AddPhotoButton({
-    super.key,
-    required this.onTap,
-    required this.isLoading,
+    required this.onTap, required this.isLoading, super.key,
   });
 
   final VoidCallback onTap;
@@ -268,7 +256,6 @@ class _AddPhotoButton extends StatelessWidget {
             border: Border.all(
               color: AppTheme.primaryLight.withValues(alpha: 0.5),
               width: 2,
-              strokeAlign: BorderSide.strokeAlignInside,
             ),
           ),
           child: Center(

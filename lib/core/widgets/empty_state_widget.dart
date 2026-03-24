@@ -1,13 +1,10 @@
+import 'package:anchor/core/theme/app_theme.dart';
 import 'package:flutter/material.dart';
-
-import '../theme/app_theme.dart';
 
 /// Reusable empty state widget with icon, title, subtitle, and optional action
 class EmptyStateWidget extends StatelessWidget {
   const EmptyStateWidget({
-    super.key,
-    required this.icon,
-    required this.title,
+    required this.icon, required this.title, super.key,
     this.subtitle,
     this.actionLabel,
     this.onAction,
@@ -95,9 +92,7 @@ class EmptyStateWidget extends StatelessWidget {
 /// Empty state specifically for lists with pull-to-refresh hint
 class EmptyListState extends StatelessWidget {
   const EmptyListState({
-    super.key,
-    required this.icon,
-    required this.title,
+    required this.icon, required this.title, super.key,
     this.subtitle,
     this.showPullHint = true,
     this.actionLabel,
@@ -125,7 +120,7 @@ class EmptyListState extends StatelessWidget {
 
   /// Wrap in a scrollable for pull-to-refresh support
   Widget inScrollView(BuildContext context,
-      {Future<void> Function()? onRefresh}) {
+      {Future<void> Function()? onRefresh,}) {
     if (onRefresh != null) {
       return RefreshIndicator(
         onRefresh: onRefresh,

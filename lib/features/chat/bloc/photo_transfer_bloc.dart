@@ -3,22 +3,21 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:anchor/core/utils/logger.dart';
+import 'package:anchor/data/local_database/database.dart';
+import 'package:anchor/data/repositories/chat_repository.dart';
+import 'package:anchor/data/repositories/peer_repository.dart';
+import 'package:anchor/features/chat/bloc/chat_state.dart';
+import 'package:anchor/services/ble/ble.dart' as ble;
+import 'package:anchor/services/chat_event_bus.dart';
+import 'package:anchor/services/image_service.dart';
+import 'package:anchor/services/message_send_service.dart';
+import 'package:anchor/services/nearby/nearby.dart';
+import 'package:anchor/services/notification_service.dart';
+import 'package:anchor/services/transport/transport.dart';
 import 'package:equatable/equatable.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:uuid/uuid.dart';
-
-import '../../../core/utils/logger.dart';
-import '../../../data/local_database/database.dart';
-import '../../../data/repositories/chat_repository.dart';
-import '../../../data/repositories/peer_repository.dart';
-import '../../../services/ble/ble.dart' as ble;
-import '../../../services/chat_event_bus.dart';
-import '../../../services/image_service.dart';
-import '../../../services/message_send_service.dart';
-import '../../../services/nearby/nearby.dart';
-import '../../../services/notification_service.dart';
-import '../../../services/transport/transport.dart';
-import 'chat_state.dart';
 
 // ---------------------------------------------------------------------------
 // Events
@@ -267,7 +266,7 @@ class PhotoTransferBloc
     if (highSpeed != null) {
       highSpeed.initialize(ownUserId: ownUserId ?? '').then((_) {
         Logger.info('HighSpeedTransferService initialized', 'PhotoTransfer');
-      }).catchError((e) {
+      }).catchError((Object e) {
         Logger.warning('HighSpeedTransferService init deferred: $e', 'PhotoTransfer');
       });
 
@@ -289,7 +288,7 @@ class PhotoTransferBloc
             messageId: photo.messageId,
             peerId: photo.peerId,
           ),
-        ));
+        ),);
       }
     });
 
@@ -310,19 +309,19 @@ class PhotoTransferBloc
             photoId: parsed['photo_id'] as String?,
             originalSize: parsed['original_size'] as int?,
             messageId: parsed['message_id'] as String?,
-          ));
+          ),);
         } else {
           add(WifiTransferReady(
             fromPeerId: msg.fromPeerId,
             transferId: transferId,
             senderNearbyId: senderNearbyId,
-          ));
+          ),);
         }
       } catch (_) {
         add(WifiTransferReady(
           fromPeerId: msg.fromPeerId,
           transferId: msg.content,
-        ));
+        ),);
       }
     });
   }
@@ -344,7 +343,7 @@ class PhotoTransferBloc
   StreamSubscription<NearbyTransferProgress>? _nearbyProgressSub;
   StreamSubscription<NearbyPayloadReceived>? _nearbyPayloadSub;
   StreamSubscription<ble.ReceivedMessage>? _wifiReadySub;
-  StreamSubscription? _pendingPhotoSub;
+  StreamSubscription<PendingPhoto>? _pendingPhotoSub;
 
   /// Photo download timeout timers (keyed by messageId).
   final Map<String, Timer> _photoDownloadTimers = {};
@@ -388,13 +387,13 @@ class PhotoTransferBloc
       _photoDownloadTimers.remove(progress.messageId)?.cancel();
       updatedTransfers.remove(progress.messageId);
       _chatEventBus.notifyStatusUpdated(
-          progress.messageId, MessageStatus.sent);
+          progress.messageId, MessageStatus.sent,);
     } else if (progress.status == ble.PhotoTransferStatus.failed ||
         progress.status == ble.PhotoTransferStatus.cancelled) {
       _photoDownloadTimers.remove(progress.messageId)?.cancel();
       updatedTransfers.remove(progress.messageId);
       _chatEventBus.notifyStatusUpdated(
-          progress.messageId, MessageStatus.failed);
+          progress.messageId, MessageStatus.failed,);
     } else {
       updatedTransfers[progress.messageId] = PhotoTransferInfo(
         messageId: progress.messageId,
@@ -422,7 +421,7 @@ class PhotoTransferBloc
       final conversation =
           await _chatRepository.getOrCreateConversation(preview.fromPeerId);
 
-      final String? thumbnailPath = preview.thumbnailBytes.isNotEmpty
+      final thumbnailPath = preview.thumbnailBytes.isNotEmpty
           ? await _imageService.saveChatThumbnail(preview.thumbnailBytes)
           : null;
 
@@ -452,8 +451,9 @@ class PhotoTransferBloc
       );
 
       // Notify ChatBloc to add the message to the UI.
-      _chatEventBus.notifyMessageAdded(message);
-      _chatEventBus.notifyConversationsChanged();
+      _chatEventBus
+        ..notifyMessageAdded(message)
+        ..notifyConversationsChanged();
     } catch (e) {
       Logger.error('Failed to handle photo preview', e, null, 'PhotoTransfer');
     }
@@ -489,7 +489,7 @@ class PhotoTransferBloc
       if (!success) {
         _photoDownloadTimers.remove(event.messageId)?.cancel();
         _chatEventBus.notifyStatusUpdated(
-            event.messageId, MessageStatus.delivered);
+            event.messageId, MessageStatus.delivered,);
         final revertedTransfers =
             Map<String, PhotoTransferInfo>.from(state.photoTransfers)
               ..remove(event.messageId);
@@ -601,11 +601,11 @@ class PhotoTransferBloc
       }
 
       // Fire-and-forget: run in background so we don't block the event queue.
-      _sendFullPhoto(
+      unawaited(_sendFullPhoto(
         request: request,
         pending: pending,
         photoBytes: photoBytes,
-      );
+      ),);
     } catch (e) {
       Logger.error('Failed to handle photo request', e, null, 'PhotoTransfer');
     }
@@ -626,7 +626,7 @@ class PhotoTransferBloc
 
       if (success) {
         _chatEventBus.notifyStatusUpdated(
-            pending.messageId, MessageStatus.read);
+            pending.messageId, MessageStatus.read,);
       } else {
         Logger.warning(
           'PhotoTransferBloc: Photo send failed for ${request.photoId}',
@@ -703,7 +703,7 @@ class PhotoTransferBloc
         add(_PreviewUpgraded(
           previewMessageId: previewMsg.id,
           updatedMessage: upgraded ?? previewMsg,
-        ));
+        ),);
       } else {
         final message = await _chatRepository.receiveMessage(
           conversationId: conversation.id,
@@ -843,8 +843,9 @@ class PhotoTransferBloc
           messagePreview: 'Photo – Tap to download',
         );
 
-        _chatEventBus.notifyMessageAdded(message);
-        _chatEventBus.notifyConversationsChanged();
+        _chatEventBus
+          ..notifyMessageAdded(message)
+          ..notifyConversationsChanged();
         return;
       }
 
@@ -852,7 +853,7 @@ class PhotoTransferBloc
       final conversation =
           await _chatRepository.getOrCreateConversation(canonicalPeerId);
 
-      final Uint8List photoBytes = payload.data;
+      final photoBytes = payload.data;
 
       final photoPath = await _imageService.saveReceivedPhoto(photoBytes);
 
@@ -867,7 +868,7 @@ class PhotoTransferBloc
         add(_PreviewUpgraded(
           previewMessageId: previewMsg.id,
           updatedMessage: upgraded ?? previewMsg,
-        ));
+        ),);
       } else {
         final message = await _chatRepository.receiveMessage(
           conversationId: conversation.id,
@@ -886,7 +887,7 @@ class PhotoTransferBloc
       );
     } catch (e) {
       Logger.error(
-          'Failed to handle Nearby payload', e, null, 'PhotoTransfer');
+          'Failed to handle Nearby payload', e, null, 'PhotoTransfer',);
     }
   }
 
@@ -929,7 +930,7 @@ class PhotoTransferBloc
       }
     }
 
-    hsService
+    unawaited(hsService
         .receivePayload(
       transferId: event.transferId,
       peerId: event.senderNearbyId ?? event.fromPeerId,
@@ -941,10 +942,10 @@ class PhotoTransferBloc
           'PhotoTransfer',
         );
       }
-    }).catchError((e) {
+    }).catchError((Object e) {
       Logger.error('PhotoTransferBloc: Wi-Fi receive error', e, null,
-          'PhotoTransfer');
-    });
+          'PhotoTransfer',);
+    }),);
   }
 
   // ---------------------------------------------------------------------------

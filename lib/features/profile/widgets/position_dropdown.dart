@@ -1,7 +1,6 @@
+import 'package:anchor/core/constants/profile_constants.dart';
+import 'package:anchor/core/theme/app_theme.dart';
 import 'package:flutter/material.dart';
-
-import '../../../core/constants/profile_constants.dart';
-import '../../../core/theme/app_theme.dart';
 
 /// Single-select dropdown for the user's position preference.
 ///
@@ -9,9 +8,7 @@ import '../../../core/theme/app_theme.dart';
 /// Provides a "Clear" entry so the user can un-set their position.
 class PositionDropdown extends StatelessWidget {
   const PositionDropdown({
-    super.key,
-    required this.value,
-    required this.onChanged,
+    required this.value, required this.onChanged, super.key,
   });
 
   /// Currently selected position ID, or null if unset.
@@ -51,7 +48,6 @@ class PositionDropdown extends StatelessWidget {
       items: [
         // Explicit "Not set" option
         const DropdownMenuItem<int?>(
-          value: null,
           child: Text('— Not set —'),
         ),
         ...ProfileConstants.positionMap.entries.map(

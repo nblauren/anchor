@@ -51,7 +51,7 @@ void main() {
         ),
       );
 
-      for (int i = 0; i < 5; i++) {
+      for (var i = 0; i < 5; i++) {
         item.attempts++;
       }
       expect(item.isMaxAttempts, true);

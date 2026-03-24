@@ -1,7 +1,6 @@
+import 'package:anchor/data/local_database/database.dart';
+import 'package:anchor/services/transport/transport_enums.dart';
 import 'package:equatable/equatable.dart';
-
-import '../../../data/local_database/database.dart';
-import '../../../services/transport/transport_enums.dart';
 
 enum ChatStatus {
   initial,

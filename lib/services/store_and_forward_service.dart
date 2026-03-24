@@ -3,14 +3,14 @@ import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 
-import '../core/constants/app_constants.dart';
-import '../core/utils/logger.dart';
-import '../data/local_database/database.dart';
-import '../data/repositories/chat_repository.dart';
-import '../data/repositories/peer_repository.dart';
-import '../data/repositories/profile_repository.dart';
-import 'ble/ble_models.dart' as ble;
-import 'transport/transport_manager.dart';
+import 'package:anchor/core/constants/app_constants.dart';
+import 'package:anchor/core/utils/logger.dart';
+import 'package:anchor/data/local_database/database.dart';
+import 'package:anchor/data/repositories/chat_repository.dart';
+import 'package:anchor/data/repositories/peer_repository.dart';
+import 'package:anchor/data/repositories/profile_repository.dart';
+import 'package:anchor/services/ble/ble_models.dart' as ble;
+import 'package:anchor/services/transport/transport_manager.dart';
 
 /// Persists outgoing messages across sessions and retries delivery
 /// whenever the target peer is (re)discovered via any transport.
@@ -156,10 +156,10 @@ class StoreAndForwardService {
 
       // Filter out messages that have exceeded max retries
       final retriable = messages.where((m) =>
-          m.retryCount < AppConstants.messageMaxCrossSessionRetries).toList();
+          m.retryCount < AppConstants.messageMaxCrossSessionRetries,).toList();
 
       final expired = messages.where((m) =>
-          m.retryCount >= AppConstants.messageMaxCrossSessionRetries).toList();
+          m.retryCount >= AppConstants.messageMaxCrossSessionRetries,).toList();
 
       // Mark expired messages
       for (final msg in expired) {
@@ -189,10 +189,10 @@ class StoreAndForwardService {
       for (final message in retriable) {
         if (message.status != MessageStatus.queued) {
           await _chatRepository.updateMessageStatus(
-              message.id, MessageStatus.queued);
+              message.id, MessageStatus.queued,);
           _messageStatusController.add(
             MessageDeliveryUpdate(
-                messageId: message.id, status: MessageStatus.queued),
+                messageId: message.id, status: MessageStatus.queued,),
           );
         }
       }

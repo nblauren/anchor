@@ -1,11 +1,10 @@
 import 'dart:async';
 
+import 'package:anchor/core/utils/logger.dart';
+import 'package:anchor/services/ble/ble_models.dart';
+import 'package:anchor/services/ble/ble_service_interface.dart';
 import 'package:equatable/equatable.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-
-import '../../core/utils/logger.dart';
-import 'ble_models.dart';
-import 'ble_service_interface.dart';
 
 // ==================== Events ====================
 
@@ -222,13 +221,13 @@ class BleStatusBloc extends Bloc<BleStatusEvent, BleStatusState> {
         isBluetoothAvailable: available,
         isBluetoothEnabled: enabled,
         hasPermissions: hasPerms,
-      ));
+      ),);
 
       if (!available) {
         emit(state.copyWith(
           initStatus: BleInitStatus.error,
           errorMessage: 'Bluetooth not available on this device',
-        ));
+        ),);
         return;
       }
 
@@ -236,7 +235,7 @@ class BleStatusBloc extends Bloc<BleStatusEvent, BleStatusState> {
         emit(state.copyWith(
           initStatus: BleInitStatus.error,
           errorMessage: 'Please enable Bluetooth',
-        ));
+        ),);
         return;
       }
 
@@ -244,7 +243,7 @@ class BleStatusBloc extends Bloc<BleStatusEvent, BleStatusState> {
         emit(state.copyWith(
           initStatus: BleInitStatus.error,
           errorMessage: 'Bluetooth permissions required',
-        ));
+        ),);
         return;
       }
 
@@ -254,7 +253,7 @@ class BleStatusBloc extends Bloc<BleStatusEvent, BleStatusState> {
       emit(state.copyWith(
         initStatus: BleInitStatus.initialized,
         bleStatus: _bleService.status,
-      ));
+      ),);
 
       Logger.info('BleStatusBloc: Initialized successfully', 'BLE');
     } catch (e) {
@@ -262,7 +261,7 @@ class BleStatusBloc extends Bloc<BleStatusEvent, BleStatusState> {
       emit(state.copyWith(
         initStatus: BleInitStatus.error,
         errorMessage: 'Failed to initialize: $e',
-      ));
+      ),);
     }
   }
 
@@ -282,7 +281,7 @@ class BleStatusBloc extends Bloc<BleStatusEvent, BleStatusState> {
       Logger.error('BleStatusBloc: Permission request failed', e, null, 'BLE');
       emit(state.copyWith(
         errorMessage: 'Failed to request permissions',
-      ));
+      ),);
     }
   }
 
@@ -300,7 +299,7 @@ class BleStatusBloc extends Bloc<BleStatusEvent, BleStatusState> {
       emit(state.copyWith(
         isScanning: _bleService.isScanning,
         isBroadcasting: _bleService.isBroadcasting,
-      ));
+      ),);
     } catch (e) {
       Logger.error('BleStatusBloc: Start failed', e, null, 'BLE');
       emit(state.copyWith(errorMessage: 'Failed to start'));
@@ -316,7 +315,7 @@ class BleStatusBloc extends Bloc<BleStatusEvent, BleStatusState> {
       emit(state.copyWith(
         isScanning: false,
         isBroadcasting: false,
-      ));
+      ),);
     } catch (e) {
       Logger.error('BleStatusBloc: Stop failed', e, null, 'BLE');
     }
@@ -330,7 +329,7 @@ class BleStatusBloc extends Bloc<BleStatusEvent, BleStatusState> {
       bleStatus: event.status,
       isScanning: _bleService.isScanning,
       isBroadcasting: _bleService.isBroadcasting,
-    ));
+    ),);
   }
 
   Future<void> _onCheckAvailability(
@@ -345,7 +344,7 @@ class BleStatusBloc extends Bloc<BleStatusEvent, BleStatusState> {
       isBluetoothAvailable: available,
       isBluetoothEnabled: enabled,
       hasPermissions: hasPerms,
-    ));
+    ),);
   }
 
   void _onBatteryLevelChanged(

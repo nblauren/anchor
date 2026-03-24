@@ -82,7 +82,7 @@ class PacketFlags {
 ///
 /// ## Header Format (30 bytes fixed)
 ///
-/// ```
+/// ```text
 /// Offset  Size  Field
 /// ------  ----  -----
 ///   0      1    Version (protocol version, currently 1)
@@ -98,7 +98,7 @@ class PacketFlags {
 ///
 /// ## Variable-Length Sections
 ///
-/// ```
+/// ```text
 ///  30      N    Payload (encrypted or plaintext, depending on flags)
 ///  30+N   16    Message ID (UUID bytes, for deduplication)
 /// ```
@@ -113,15 +113,8 @@ class PacketFlags {
 /// MeshPacket header: 46 bytes fixed = **70% less overhead**.
 class MeshPacket {
   const MeshPacket({
-    this.version = 1,
-    required this.type,
-    required this.ttl,
+    required this.type, required this.ttl, required this.timestamp, required this.senderId, required this.recipientId, required this.payload, required this.messageId, this.version = 1,
     this.flags = 0,
-    required this.timestamp,
-    required this.senderId,
-    required this.recipientId,
-    required this.payload,
-    required this.messageId,
     this.sourceRoute,
     this.signature,
   });
@@ -223,19 +216,21 @@ class MeshPacket {
     final effectiveFlags = flags | PacketFlags.typeHidden;
 
     // Header
-    data.setUint8(0, version);
-    data.setUint8(1, maskedType);
-    data.setUint8(2, ttl);
-    data.setUint8(3, effectiveFlags);
+    data
+      ..setUint8(0, version)
+      ..setUint8(1, maskedType)
+      ..setUint8(2, ttl)
+      ..setUint8(3, effectiveFlags)
 
-    // Timestamp (ms since epoch, big-endian)
-    data.setUint32(4, (ms >> 32) & 0xFFFFFFFF, Endian.big);
-    data.setUint32(8, ms & 0xFFFFFFFF, Endian.big);
+      // Timestamp (ms since epoch, big-endian)
+      ..setUint32(4, (ms >> 32) & 0xFFFFFFFF)
+      ..setUint32(8, ms & 0xFFFFFFFF);
 
     final result = Uint8List(totalSize);
     final headerBytes = data.buffer.asUint8List();
-    result.setRange(0, headerSize, headerBytes);
-    result.setRange(12, 20, senderBytes);
+    result
+      ..setRange(0, headerSize, headerBytes)
+      ..setRange(12, 20, senderBytes);
 
     // Recipient ID (8 bytes)
     final recipientBytes = _truncatedIdBytes(recipientId);
@@ -274,7 +269,7 @@ class MeshPacket {
 
     // Check for signature: if hasSignature flag is set, last 64 bytes are sig
     Uint8List? signature;
-    Uint8List effectiveData = data;
+    var effectiveData = data;
     if ((flags & PacketFlags.hasSignature) != 0) {
       if (data.length < headerSize + messageIdSize + 64) return null;
       signature = Uint8List.fromList(data.sublist(data.length - 64));
@@ -282,8 +277,8 @@ class MeshPacket {
     }
 
     // Timestamp
-    final msHigh = bd.getUint32(4, Endian.big);
-    final msLow = bd.getUint32(8, Endian.big);
+    final msHigh = bd.getUint32(4);
+    final msLow = bd.getUint32(8);
     final ms = (msHigh << 32) | msLow;
     final timestamp = DateTime.fromMillisecondsSinceEpoch(ms);
 
@@ -346,14 +341,14 @@ class MeshPacket {
   /// Synchronous truncation using simple hash (for packet creation).
   static String truncateIdSync(String fullId) {
     // FNV-1a 64-bit for deterministic truncation
-    int hash = 0xcbf29ce484222325;
-    for (int i = 0; i < fullId.length; i++) {
+    // ignore: avoid_js_rounded_ints
+    var hash = 0xcbf29ce484222325;
+    for (var i = 0; i < fullId.length; i++) {
       hash ^= fullId.codeUnitAt(i);
       hash = (hash * 0x100000001b3) & 0xFFFFFFFFFFFFFFFF;
     }
     final bytes = Uint8List(8);
-    final bd = ByteData.sublistView(bytes);
-    bd.setUint64(0, hash, Endian.big);
+    ByteData.sublistView(bytes).setUint64(0, hash);
     return _bytesToHex(bytes);
   }
 
@@ -371,9 +366,9 @@ class MeshPacket {
     final sig = await signFn(serialized);
     if (sig == null || sig.length != 64) return null;
     // Create new buffer: serialized + signature
-    final signed = Uint8List(serialized.length + 64);
-    signed.setRange(0, serialized.length, serialized);
-    signed.setRange(serialized.length, signed.length, sig);
+    final signed = Uint8List(serialized.length + 64)
+      ..setRange(0, serialized.length, serialized)
+      ..setRange(serialized.length, serialized.length + 64, sig);
     // Set hasSignature flag in byte 3
     signed[3] = signed[3] | PacketFlags.hasSignature;
     return signed;
@@ -382,7 +377,7 @@ class MeshPacket {
   /// Extract unsigned bytes and signature from signed packet data.
   /// Returns null if [PacketFlags.hasSignature] is not set or data is too short.
   static ({Uint8List unsigned, Uint8List signature})? extractSignature(
-      Uint8List data) {
+      Uint8List data,) {
     if (data.length < headerSize + messageIdSize + 64) return null;
     final flags = data[3];
     if ((flags & PacketFlags.hasSignature) == 0) return null;
@@ -448,7 +443,6 @@ class MeshPacket {
     return MeshPacket(
       type: type,
       ttl: ttl,
-      flags: 0,
       timestamp: DateTime.now(),
       senderId: truncateIdSync(senderId),
       recipientId: destinationId.isEmpty

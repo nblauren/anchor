@@ -1,9 +1,9 @@
-import '../core/utils/logger.dart';
-import '../data/local_database/database.dart';
-import '../data/repositories/anchor_drop_repository.dart';
-import '../data/repositories/chat_repository.dart';
-import '../data/repositories/peer_repository.dart';
-import '../data/repositories/profile_repository.dart';
+import 'package:anchor/core/utils/logger.dart';
+import 'package:anchor/data/local_database/database.dart';
+import 'package:anchor/data/repositories/anchor_drop_repository.dart';
+import 'package:anchor/data/repositories/chat_repository.dart';
+import 'package:anchor/data/repositories/peer_repository.dart';
+import 'package:anchor/data/repositories/profile_repository.dart';
 
 /// Service for managing database access and repositories
 class DatabaseService {

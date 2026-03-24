@@ -1,21 +1,20 @@
 import 'dart:typed_data';
 
+import 'package:anchor/core/theme/app_theme.dart';
+import 'package:anchor/data/local_database/database.dart';
+import 'package:anchor/data/repositories/chat_repository.dart';
+import 'package:anchor/features/chat/bloc/chat_bloc.dart';
+import 'package:anchor/features/chat/bloc/chat_e2ee_bloc.dart';
+import 'package:anchor/features/chat/bloc/conversation_list_bloc.dart';
+import 'package:anchor/features/chat/bloc/photo_transfer_bloc.dart';
+import 'package:anchor/features/chat/bloc/reaction_bloc.dart';
+import 'package:anchor/features/chat/screens/chat_screen.dart';
+import 'package:anchor/features/discovery/bloc/anchor_drop_bloc.dart';
+import 'package:anchor/features/discovery/bloc/discovery_bloc.dart';
+import 'package:anchor/features/discovery/bloc/discovery_state.dart';
+import 'package:anchor/features/discovery/screens/peer_detail_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-
-import '../../../core/theme/app_theme.dart';
-import '../../../data/local_database/database.dart';
-import '../../../data/repositories/chat_repository.dart';
-import '../../discovery/bloc/anchor_drop_bloc.dart';
-import '../../discovery/bloc/discovery_bloc.dart';
-import '../../discovery/bloc/discovery_state.dart';
-import '../../discovery/screens/peer_detail_screen.dart';
-import '../bloc/chat_bloc.dart';
-import '../bloc/chat_e2ee_bloc.dart';
-import '../bloc/conversation_list_bloc.dart';
-import '../bloc/photo_transfer_bloc.dart';
-import '../bloc/reaction_bloc.dart';
-import 'chat_screen.dart';
 
 /// Screen showing list of all conversations
 class ChatListScreen extends StatefulWidget {
@@ -47,7 +46,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
     await Navigator.push(
       context,
-      MaterialPageRoute(
+      MaterialPageRoute<void>(
         builder: (_) => MultiBlocProvider(
           providers: [
             BlocProvider.value(value: chatBloc),
@@ -62,7 +61,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
             peerThumbnail: thumbnail,
             onViewProfile: peer != null
                 ? () => Navigator.of(context).push(
-                      MaterialPageRoute(
+                      MaterialPageRoute<void>(
                         builder: (_) => MultiBlocProvider(
                           providers: [
                             BlocProvider.value(value: discoveryBloc),
@@ -171,7 +170,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
         child: const Icon(Icons.delete, color: Colors.white),
       ),
       confirmDismiss: (_) async {
-        return await showDialog<bool>(
+        return showDialog<bool>(
           context: context,
           builder: (context) => AlertDialog(
             backgroundColor: AppTheme.darkCard,

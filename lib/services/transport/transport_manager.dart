@@ -3,20 +3,19 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:anchor/core/constants/app_constants.dart';
+import 'package:anchor/core/utils/logger.dart';
+import 'package:anchor/services/ble/binary_message_codec.dart';
+import 'package:anchor/services/ble/ble_models.dart' as ble;
+import 'package:anchor/services/ble/ble_service_interface.dart';
+import 'package:anchor/services/encryption/encryption.dart';
+import 'package:anchor/services/lan/lan.dart';
+import 'package:anchor/services/mesh/mesh.dart';
+import 'package:anchor/services/nearby/nearby.dart';
+import 'package:anchor/services/transport/transport_enums.dart';
+import 'package:anchor/services/transport/transport_health_tracker.dart';
+import 'package:anchor/services/wifi_aware/wifi_aware_transport_service.dart';
 import 'package:wifi_aware_p2p/wifi_aware_p2p.dart' as wa;
-
-import '../../core/constants/app_constants.dart';
-import '../../core/utils/logger.dart';
-import '../ble/binary_message_codec.dart';
-import '../ble/ble_models.dart' as ble;
-import '../ble/ble_service_interface.dart';
-import '../encryption/encryption.dart';
-import '../lan/lan.dart';
-import '../mesh/mesh.dart';
-import '../nearby/nearby.dart';
-import '../wifi_aware/wifi_aware_transport_service.dart';
-import 'transport_enums.dart';
-import 'transport_health_tracker.dart';
 
 /// Unified transport manager that abstracts over LAN, Wi-Fi Aware, and BLE,
 /// presenting a single interface to blocs.
@@ -103,9 +102,9 @@ class TransportManager {
 
   // ── Subscription lists (per-transport) ──────────────────────────────────
 
-  final List<StreamSubscription> _bleSubscriptions = [];
-  final List<StreamSubscription> _lanSubscriptions = [];
-  final List<StreamSubscription> _wifiAwareSubscriptions = [];
+  final List<StreamSubscription<dynamic>> _bleSubscriptions = [];
+  final List<StreamSubscription<dynamic>> _lanSubscriptions = [];
+  final List<StreamSubscription<dynamic>> _wifiAwareSubscriptions = [];
   bool _lanSubscribed = false;
   bool _wifiAwareSubscribed = false;
 
@@ -190,7 +189,7 @@ class TransportManager {
 
     // Try LAN first — works on both iOS and Android wherever a local network
     // interface is available (e.g. ship Wi-Fi).
-    bool lanAvailable = false;
+    var lanAvailable = false;
     if (AppConstants.enableLanTransport) {
       try {
         final available = await _lanService.isAvailable;
@@ -258,7 +257,7 @@ class TransportManager {
     }
 
     // Android: try Wi-Fi Aware as secondary transport
-    bool wifiAwareAvailable = false;
+    var wifiAwareAvailable = false;
     try {
       final supported = await wa.WifiAwareP2P.isSupported();
       Logger.info(
@@ -343,12 +342,12 @@ class TransportManager {
     }
     if (_wifiAwareSubscribed) {
       // Fire-and-forget: don't block BLE advertising if Wi-Fi Aware hangs.
-      unawaited(_wifiAwareService.start().catchError((e) {
+      unawaited(_wifiAwareService.start().catchError((Object e) {
         Logger.warning(
           'TransportManager: Wi-Fi Aware start failed: $e',
           'Transport',
         );
-      }));
+      }),);
     }
     // BLE start is handled by BleConnectionBloc — don't double-start here.
   }
@@ -586,7 +585,7 @@ class TransportManager {
       final success = await _lanService.sendMessage(peerId, encPayload);
       sw.stop();
       _healthTracker?.recordSendResult(peerId, TransportType.lan,
-          success: success, rttMs: sw.elapsedMilliseconds);
+          success: success, rttMs: sw.elapsedMilliseconds,);
       if (success) return true;
       Logger.warning(
         'TransportManager: LAN send failed, trying next transport',
@@ -601,7 +600,7 @@ class TransportManager {
       final success = await _wifiAwareService.sendMessage(peerId, encPayload);
       sw.stop();
       _healthTracker?.recordSendResult(peerId, TransportType.wifiAware,
-          success: success, rttMs: sw.elapsedMilliseconds);
+          success: success, rttMs: sw.elapsedMilliseconds,);
       if (success) return true;
       Logger.warning(
         'TransportManager: Wi-Fi Aware send failed, trying BLE',
@@ -624,7 +623,7 @@ class TransportManager {
     final success = await _bleService.sendMessage(bleId, payload);
     sw.stop();
     _healthTracker?.recordSendResult(peerId, TransportType.ble,
-        success: success, rttMs: sw.elapsedMilliseconds);
+        success: success, rttMs: sw.elapsedMilliseconds,);
     return success;
   }
 
@@ -648,7 +647,7 @@ class TransportManager {
       );
       sw.stop();
       _healthTracker?.recordSendResult(peerId, TransportType.lan,
-          success: success, rttMs: sw.elapsedMilliseconds);
+          success: success, rttMs: sw.elapsedMilliseconds,);
       if (success) return true;
       Logger.warning(
         'TransportManager: LAN photo send failed, trying next transport',
@@ -667,7 +666,7 @@ class TransportManager {
       );
       sw.stop();
       _healthTracker?.recordSendResult(peerId, TransportType.wifiAware,
-          success: success, rttMs: sw.elapsedMilliseconds);
+          success: success, rttMs: sw.elapsedMilliseconds,);
       if (success) return true;
       Logger.warning(
         'TransportManager: Wi-Fi Aware photo send failed, trying next transport',
@@ -696,10 +695,10 @@ class TransportManager {
     // (via PhotoTransferHandler._encryptionService), so do NOT encrypt here.
     final sw = Stopwatch()..start();
     final success = await _bleService.sendPhoto(
-        bleId, photoData, messageId, photoId: photoId);
+        bleId, photoData, messageId, photoId: photoId,);
     sw.stop();
     _healthTracker?.recordSendResult(peerId, TransportType.ble,
-        success: success, rttMs: sw.elapsedMilliseconds);
+        success: success, rttMs: sw.elapsedMilliseconds,);
     return success;
   }
 
@@ -843,8 +842,8 @@ class TransportManager {
 
   Future<void> startScanning() => _bleService.startScanning();
   Future<void> stopScanning() => _bleService.stopScanning();
-  Future<void> setBatterySaverMode(bool enabled) =>
-      _bleService.setBatterySaverMode(enabled);
+  Future<void> setBatterySaverMode({required bool enabled}) =>
+      _bleService.setBatterySaverMode(enabled: enabled);
 
   bool isPeerReachable(String peerId) {
     final transports = _peerRegistry.transportsFor(peerId);
@@ -953,7 +952,7 @@ class TransportManager {
       final success = await sendFuture;
       sw.stop();
       _healthTracker?.recordSendResult(peerId, TransportType.wifiDirect,
-          success: success, rttMs: sw.elapsedMilliseconds);
+          success: success, rttMs: sw.elapsedMilliseconds,);
 
       if (success) {
         Logger.info('TransportManager: Wi-Fi Direct transfer succeeded', 'Transport');
@@ -1012,7 +1011,7 @@ class TransportManager {
           oldPeerId: event.oldCanonicalId,
           newPeerId: event.newCanonicalId,
           userId: event.userId!,
-        ));
+        ),);
       }
 
       // Emit transport change event.
@@ -1023,7 +1022,7 @@ class TransportManager {
         peerId: event.userId ?? event.newCanonicalId,
         oldTransport: null,
         newTransport: bestTransport ?? TransportType.ble,
-      ));
+      ),);
 
       Logger.info(
         'TransportManager: PeerRegistry transport ID changed '
@@ -1070,50 +1069,49 @@ class TransportManager {
     final gossip = _gossipSync;
     if (gossip == null) return;
 
-    gossip.onSendGossip = (peerId, payload) {
-      final ownId = _ownUserId;
-      if (ownId == null) return;
+    gossip
+      ..onSendGossip = (peerId, payload) {
+        final ownId = _ownUserId;
+        if (ownId == null) return;
 
-      // Convert the JSON-style gossip payload to binary
-      final gcsBase64 = payload['gcs'] as String?;
-      final n = payload['n'] as int?;
-      if (gcsBase64 == null || n == null) return;
+        // Convert the JSON-style gossip payload to binary
+        final gcsBase64 = payload['gcs'] as String?;
+        final n = payload['n'] as int?;
+        if (gcsBase64 == null || n == null) return;
 
-      final gcsBytes = base64Decode(gcsBase64);
-      final binaryData = BinaryMessageCodec.encodeGossipSync(
-        senderId: ownId,
-        gcsBytes: Uint8List.fromList(gcsBytes),
-        messageCount: n,
-      );
+        final gcsBytes = base64Decode(gcsBase64);
+        final binaryData = BinaryMessageCodec.encodeGossipSync(
+          senderId: ownId,
+          gcsBytes: Uint8List.fromList(gcsBytes),
+          messageCount: n,
+        );
 
-      // Send via best transport for this peer
-      _sendRawBytes(peerId, binaryData);
-    };
+        // Send via best transport for this peer
+        _sendRawBytes(peerId, binaryData);
+      }
 
-    gossip.onMissingMessages = (peerId, missingIds, originalN) {
-      final ownId = _ownUserId;
-      if (ownId == null) return;
+      ..onMissingMessages = (peerId, missingIds, originalN) {
+        final ownId = _ownUserId;
+        if (ownId == null) return;
 
-      // Convert string indices back to int for the binary codec
-      final indices = missingIds
-          .map((s) => int.tryParse(s))
-          .whereType<int>()
-          .toList();
-      if (indices.isEmpty) return;
+        // Convert string indices back to int for the binary codec
+        final indices = missingIds
+            .map(int.tryParse)
+            .whereType<int>()
+            .toList();
+        if (indices.isEmpty) return;
 
-      final binaryData = BinaryMessageCodec.encodeGossipRequest(
-        senderId: ownId,
-        recipientId: peerId,
-        missingIndices: indices,
-        originalN: originalN,
-      );
+        final binaryData = BinaryMessageCodec.encodeGossipRequest(
+          senderId: ownId,
+          recipientId: peerId,
+          missingIndices: indices,
+          originalN: originalN,
+        );
 
-      _sendRawBytes(peerId, binaryData);
-    };
+        _sendRawBytes(peerId, binaryData);
+      }
 
-    gossip.onResendMessage = (peerId, messageBytes) {
-      _sendRawBytes(peerId, messageBytes);
-    };
+      ..onResendMessage = _sendRawBytes;
   }
 
   // ==================== Mesh Relay Wiring ====================
@@ -1152,7 +1150,7 @@ class TransportManager {
           _peerRegistry.resolveCanonical(relay.excludeTransportId) ??
               relay.excludeTransportId;
 
-      int relayCount = 0;
+      var relayCount = 0;
       for (final canonicalId in _peerRegistry.allCanonicalIds) {
         if (canonicalId == excludeCanonical) continue;
         if (canonicalId == _ownUserId) continue;
@@ -1179,7 +1177,7 @@ class TransportManager {
     if (_encryptionService == null) return packetBytes;
     final signed = await MeshPacket.signSerialized(
       packetBytes,
-      (data) => _encryptionService.sign(data),
+      _encryptionService.sign,
     );
     return signed ?? packetBytes;
   }
@@ -1204,7 +1202,7 @@ class TransportManager {
           if (_bleService.isPeerReachable(bleId)) {
             _bleService.sendRawBytes(bleId, signedData);
           }
-        });
+        },);
         return;
       }
 
@@ -1299,7 +1297,7 @@ class TransportManager {
                 content: msg.content,
                 timestamp: msg.timestamp,
                 replyToId: msg.replyToId,
-              ));
+              ),);
       }),
       _bleService.photoPreviewReceivedStream.listen((preview) {
         final canonical =
@@ -1313,7 +1311,7 @@ class TransportManager {
                 thumbnailBytes: preview.thumbnailBytes,
                 originalSize: preview.originalSize,
                 timestamp: preview.timestamp,
-              ));
+              ),);
       }),
       _bleService.photoRequestReceivedStream.listen((req) {
         final canonical = _peerRegistry.resolveCanonical(req.fromPeerId) ?? req.fromPeerId;
@@ -1324,13 +1322,13 @@ class TransportManager {
                 messageId: req.messageId,
                 photoId: req.photoId,
                 timestamp: req.timestamp,
-              ));
+              ),);
       }),
       _bleService.photoProgressStream.listen((progress) {
         final canonical = _peerRegistry.resolveCanonical(progress.peerId) ?? progress.peerId;
         _photoProgressController.add(canonical == progress.peerId
             ? progress
-            : progress.copyWith(peerId: canonical));
+            : progress.copyWith(peerId: canonical),);
       }),
       _bleService.photoReceivedStream.listen((photo) async {
         final canonical = _peerRegistry.resolveCanonical(photo.fromPeerId) ?? photo.fromPeerId;
@@ -1356,7 +1354,7 @@ class TransportManager {
             : ble.AnchorDropReceived(
                 fromPeerId: canonical,
                 timestamp: drop.timestamp,
-              ));
+              ),);
       }),
       _bleService.reactionReceivedStream.listen((reaction) {
         final canonical =
@@ -1374,7 +1372,7 @@ class TransportManager {
                 emoji: reaction.emoji,
                 action: reaction.action,
                 timestamp: reaction.timestamp,
-              ));
+              ),);
       }),
       _bleService.peerIdChangedStream.listen((change) {
         // BLE-internal ID change (e.g. Central→Peripheral UUID on iOS).
@@ -1479,9 +1477,7 @@ class TransportManager {
       _lanService.photoProgressStream.listen(
         _photoProgressController.add,
       ),
-      _lanService.photoReceivedStream.listen((photo) {
-        _photoReceivedController.add(photo);
-      }),
+      _lanService.photoReceivedStream.listen(_photoReceivedController.add),
       _lanService.anchorDropReceivedStream.listen(
         _anchorDropReceivedController.add,
       ),
@@ -1512,15 +1508,16 @@ class TransportManager {
     final enc = _encryptionService;
     if (enc == null) return;
 
-    // Incoming from BLE: translate BLE UUID → canonical ID before processing.
-    _bleSubscriptions.add(
-      _bleService.noiseHandshakeStream.listen(_processIncomingHandshake),
-    );
+    _bleSubscriptions
+      // Incoming from BLE: translate BLE UUID → canonical ID before processing.
+      ..add(
+        _bleService.noiseHandshakeStream.listen(_processIncomingHandshake),
+      )
 
-    // Outbound from EncryptionService: route to the correct transport.
-    _bleSubscriptions.add(
-      enc.outboundHandshakeStream.listen(_routeOutboundHandshake),
-    );
+      // Outbound from EncryptionService: route to the correct transport.
+      ..add(
+        enc.outboundHandshakeStream.listen(_routeOutboundHandshake),
+      );
   }
 
   /// Route an incoming handshake frame to EncryptionService, translating
@@ -1559,7 +1556,7 @@ class TransportManager {
     // Only accept the FIRST match — never fall through to a second candidate,
     // which could be a different concurrent handshake.
     if (msg.step >= 2 && !enc.hasPendingHandshake(canonicalId)) {
-      bool resolved = false;
+      var resolved = false;
       // Try the raw BLE ID directly (Central UUID before registry update)
       if (enc.hasPendingHandshake(rawId)) {
         Logger.info(
@@ -1609,11 +1606,11 @@ class TransportManager {
       (result) {
         if (result.sessionEstablished) {
           Logger.info(
-              'E2EE session established with $canonicalId', 'Transport');
+              'E2EE session established with $canonicalId', 'Transport',);
         }
         if (result.hasError) {
           Logger.warning(
-              'Handshake error from $canonicalId: ${result.error}', 'Transport');
+              'Handshake error from $canonicalId: ${result.error}', 'Transport',);
         }
       },
       onError: (Object e) =>
@@ -1638,7 +1635,7 @@ class TransportManager {
       if (ok) return;
       Logger.warning(
           'LAN handshake send failed for $canonicalId step ${msg.step}, trying BLE',
-          'Transport');
+          'Transport',);
     }
 
     // BLE fallback — resolve canonical → BLE UUID.
@@ -1715,9 +1712,7 @@ class TransportManager {
       _wifiAwareService.photoProgressStream.listen(
         _photoProgressController.add,
       ),
-      _wifiAwareService.photoReceivedStream.listen((photo) {
-        _photoReceivedController.add(photo);
-      }),
+      _wifiAwareService.photoReceivedStream.listen(_photoReceivedController.add),
       _wifiAwareService.anchorDropReceivedStream.listen(
         _anchorDropReceivedController.add,
       ),

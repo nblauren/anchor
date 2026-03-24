@@ -186,7 +186,7 @@ class FakeBleService implements BleServiceInterface {
 
   @override
   Future<bool> sendPhoto(String peerId, Uint8List photoData, String messageId,
-      {String? photoId}) async => true;
+      {String? photoId,}) async => true;
 
   @override
   Future<bool> sendPhotoPreview({
@@ -236,7 +236,7 @@ class FakeBleService implements BleServiceInterface {
   Future<void> cancelPhotoTransfer(String messageId) async {}
 
   @override
-  Future<void> setBatterySaverMode(bool enabled) async {}
+  Future<void> setBatterySaverMode({required bool enabled}) async {}
 
   @override
   int? getSignalStrength(String peerId) => null;
@@ -270,7 +270,7 @@ class FakeBleService implements BleServiceInterface {
       _reactionReceivedController.stream;
 
   @override
-  Future<void> setMeshRelayMode(bool enabled) async => _meshEnabled = enabled;
+  Future<void> setMeshRelayMode({required bool enabled}) async => _meshEnabled = enabled;
 
   @override
   bool get isMeshRelayEnabled => _meshEnabled;
@@ -286,7 +286,7 @@ class FakeBleService implements BleServiceInterface {
 
   @override
   Future<void> sendHandshakeMessage(
-      String peerId, int step, Uint8List payload) async {}
+      String peerId, int step, Uint8List payload,) async {}
 
   @override
   Future<bool> sendRawBytes(String peerId, Uint8List data) async => true;

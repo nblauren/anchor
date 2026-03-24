@@ -1,11 +1,12 @@
+import 'dart:async';
+
+import 'package:anchor/core/theme/app_theme.dart';
+import 'package:anchor/core/widgets/widgets.dart';
+import 'package:anchor/data/local_database/database.dart';
+import 'package:anchor/injection.dart';
+import 'package:anchor/services/database_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-
-import '../../../core/theme/app_theme.dart';
-import '../../../core/widgets/widgets.dart';
-import '../../../data/local_database/database.dart';
-import '../../../injection.dart';
-import '../../../services/database_service.dart';
 
 /// Screen showing list of blocked users with unblock option
 class BlockedUsersScreen extends StatefulWidget {
@@ -49,7 +50,7 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
   }
 
   Future<void> _unblockPeer(DiscoveredPeerEntry peer) async {
-    HapticFeedback.selectionClick();
+    unawaited(HapticFeedback.selectionClick());
 
     final confirmed = await showDialog<bool>(
       context: context,
@@ -72,10 +73,10 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
       ),
     );
 
-    if (confirmed == true) {
+    if (confirmed ?? false) {
       try {
         await _db.peerRepository.unblockPeer(peer.peerId);
-        _loadBlockedPeers();
+        unawaited(_loadBlockedPeers());
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('${peer.name} unblocked')),
@@ -118,7 +119,7 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
         icon: Icons.check_circle_outline,
         title: 'No Blocked Users',
         subtitle:
-            'People you block will appear here.\nThey won\'t be able to discover you or message you.',
+            "People you block will appear here.\nThey won't be able to discover you or message you.",
       );
     }
 

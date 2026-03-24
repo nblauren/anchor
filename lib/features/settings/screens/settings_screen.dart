@@ -1,17 +1,16 @@
+import 'package:anchor/core/theme/app_theme.dart';
+import 'package:anchor/features/profile/bloc/profile_bloc.dart';
+import 'package:anchor/features/profile/bloc/profile_event.dart';
+import 'package:anchor/features/profile/screens/profile_setup_screen.dart';
+import 'package:anchor/features/settings/screens/blocked_users_screen.dart';
+import 'package:anchor/features/settings/screens/debug_menu_screen.dart';
+import 'package:anchor/injection.dart';
+import 'package:anchor/services/ble/ble_connection_bloc.dart';
+import 'package:anchor/services/database_service.dart';
+import 'package:anchor/services/panic_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-
-import '../../../core/theme/app_theme.dart';
-import '../../../injection.dart';
-import '../../../services/ble/ble_connection_bloc.dart';
-import '../../../services/database_service.dart';
-import '../../../services/panic_service.dart';
-import '../../profile/bloc/profile_bloc.dart';
-import '../../profile/bloc/profile_event.dart';
-import '../../profile/screens/profile_setup_screen.dart';
-import 'blocked_users_screen.dart';
-import 'debug_menu_screen.dart';
 
 /// Settings screen with app configuration options
 class SettingsScreen extends StatelessWidget {
@@ -68,7 +67,7 @@ class SettingsScreen extends StatelessWidget {
               value: bleState.isVisible,
               onChanged: (value) {
                 HapticFeedback.selectionClick();
-                context.read<BleConnectionBloc>().add(SetVisibility(value));
+                context.read<BleConnectionBloc>().add(SetVisibility(visible: value));
               },
             ),
           ),
@@ -81,7 +80,7 @@ class SettingsScreen extends StatelessWidget {
               value: bleState.isBatterySaver,
               onChanged: (value) {
                 HapticFeedback.selectionClick();
-                context.read<BleConnectionBloc>().add(SetBatterySaver(value));
+                context.read<BleConnectionBloc>().add(SetBatterySaver(enabled: value));
               },
             ),
           ),
@@ -95,7 +94,7 @@ class SettingsScreen extends StatelessWidget {
               value: bleState.isMeshRelay,
               onChanged: (value) {
                 HapticFeedback.selectionClick();
-                context.read<BleConnectionBloc>().add(SetMeshRelay(value));
+                context.read<BleConnectionBloc>().add(SetMeshRelay(enabled: value));
               },
             ),
           ),
@@ -142,7 +141,6 @@ class SettingsScreen extends StatelessWidget {
             icon: Icons.info_outline,
             title: 'App Version',
             subtitle: '1.0.0 (Build 1)',
-            onTap: null,
           ),
           _buildTile(
             context,
@@ -259,9 +257,7 @@ class SettingsScreen extends StatelessWidget {
     BuildContext context, {
     required IconData icon,
     required String title,
-    String? subtitle,
-    required bool value,
-    required ValueChanged<bool> onChanged,
+    required bool value, required ValueChanged<bool> onChanged, String? subtitle,
   }) {
     return ListTile(
       leading: Container(
@@ -302,7 +298,7 @@ class SettingsScreen extends StatelessWidget {
   void _openEditProfile(BuildContext context) {
     Navigator.push(
       context,
-      MaterialPageRoute(
+      MaterialPageRoute<void>(
         builder: (_) => BlocProvider.value(
           value: context.read<ProfileBloc>(),
           child: ProfileSetupScreen(
@@ -319,7 +315,7 @@ class SettingsScreen extends StatelessWidget {
   void _openBlockedUsers(BuildContext context) {
     Navigator.push(
       context,
-      MaterialPageRoute(
+      MaterialPageRoute<void>(
         builder: (_) => const BlockedUsersScreen(),
       ),
     );
@@ -328,14 +324,14 @@ class SettingsScreen extends StatelessWidget {
   void _openDebugMenu(BuildContext context) {
     Navigator.push(
       context,
-      MaterialPageRoute(
+      MaterialPageRoute<void>(
         builder: (_) => const DebugMenuScreen(),
       ),
     );
   }
 
   void _showClearDiscoveryDialog(BuildContext context) {
-    showDialog(
+    showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: AppTheme.darkCard,
@@ -368,7 +364,7 @@ class SettingsScreen extends StatelessWidget {
   }
 
   void _showClearAllDialog(BuildContext context) {
-    showDialog(
+    showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: AppTheme.darkCard,
@@ -401,7 +397,7 @@ class SettingsScreen extends StatelessWidget {
   }
 
   void _confirmPanicMode(BuildContext context) {
-    showDialog(
+    showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: AppTheme.darkCard,

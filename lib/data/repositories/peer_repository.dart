@@ -1,7 +1,6 @@
+import 'package:anchor/core/utils/logger.dart';
+import 'package:anchor/data/local_database/database.dart';
 import 'package:drift/drift.dart';
-
-import '../../core/utils/logger.dart';
-import '../local_database/database.dart';
 
 /// Repository for managing discovered peers and blocking logic.
 ///
@@ -16,18 +15,18 @@ class PeerRepository {
 
   /// Get all discovered peers (excluding blocked)
   Future<List<DiscoveredPeerEntry>> getAllPeers(
-      {bool includeBlocked = false}) async {
+      {bool includeBlocked = false,}) async {
     final query = _db.select(_db.discoveredPeers);
     if (!includeBlocked) {
       query.where((t) => t.isBlocked.equals(false));
     }
     query.orderBy([(t) => OrderingTerm.desc(t.lastSeenAt)]);
-    return await query.get();
+    return query.get();
   }
 
   /// Get a peer by ID (peerId = stable app-level userId).
   Future<DiscoveredPeerEntry?> getPeerById(String peerId) async {
-    return await (_db.select(_db.discoveredPeers)
+    return (_db.select(_db.discoveredPeers)
           ..where((t) => t.peerId.equals(peerId)))
         .getSingleOrNull();
   }
@@ -35,10 +34,10 @@ class PeerRepository {
   /// Get peers seen within a time window
   Future<List<DiscoveredPeerEntry>> getRecentPeers(Duration window) async {
     final cutoff = DateTime.now().subtract(window);
-    return await (_db.select(_db.discoveredPeers)
+    return (_db.select(_db.discoveredPeers)
           ..where((t) =>
               t.lastSeenAt.isBiggerOrEqualValue(cutoff) &
-              t.isBlocked.equals(false))
+              t.isBlocked.equals(false),)
           ..orderBy([(t) => OrderingTerm.desc(t.lastSeenAt)]))
         .get();
   }
@@ -156,7 +155,7 @@ class PeerRepository {
       final dupes = await (_db.select(_db.discoveredPeers)
             ..where((t) =>
                 t.publicKeyHex.equals(publicKeyHex) &
-                t.peerId.isNotValue(peerId)))
+                t.peerId.isNotValue(peerId),))
           .get();
       if (dupes.isNotEmpty) {
         Logger.warning(
@@ -178,7 +177,7 @@ class PeerRepository {
         .write(DiscoveredPeersCompanion(
       lastSeenAt: Value(DateTime.now()),
       rssi: rssi != null ? Value(rssi) : const Value.absent(),
-    ));
+    ),);
   }
 
   /// Delete a peer and their conversations/messages/aliases
@@ -272,14 +271,14 @@ class PeerRepository {
 
   /// Get all blocked peers
   Future<List<BlockedUserEntry>> getBlockedPeers() async {
-    return await (_db.select(_db.blockedUsers)
+    return (_db.select(_db.blockedUsers)
           ..orderBy([(t) => OrderingTerm.desc(t.blockedAt)]))
         .get();
   }
 
   /// Get blocked peer details (joins with discovered peers)
   Future<List<DiscoveredPeerEntry>> getBlockedPeerDetails() async {
-    return await (_db.select(_db.discoveredPeers)
+    return (_db.select(_db.discoveredPeers)
           ..where((t) => t.isBlocked.equals(true))
           ..orderBy([(t) => OrderingTerm.desc(t.lastSeenAt)]))
         .get();
@@ -308,12 +307,12 @@ class PeerRepository {
   /// Clear all peers older than a duration
   Future<int> clearOldPeers(Duration olderThan) async {
     final cutoff = DateTime.now().subtract(olderThan);
-    return await _db.transaction(() async {
+    return _db.transaction(() async {
       // Find peers to delete
       final peersToDelete = await (_db.select(_db.discoveredPeers)
             ..where((t) =>
                 t.lastSeenAt.isSmallerThanValue(cutoff) &
-                t.isBlocked.equals(false)))
+                t.isBlocked.equals(false),))
           .get();
 
       if (peersToDelete.isEmpty) return 0;
@@ -337,17 +336,17 @@ class PeerRepository {
       }
 
       // Now delete the peers
-      return await (_db.delete(_db.discoveredPeers)
+      return (_db.delete(_db.discoveredPeers)
             ..where((t) =>
                 t.lastSeenAt.isSmallerThanValue(cutoff) &
-                t.isBlocked.equals(false)))
+                t.isBlocked.equals(false),))
           .go();
     });
   }
 
   /// Search peers by name
   Future<List<DiscoveredPeerEntry>> searchPeers(String query) async {
-    return await (_db.select(_db.discoveredPeers)
+    return (_db.select(_db.discoveredPeers)
           ..where((t) => t.name.like('%$query%') & t.isBlocked.equals(false))
           ..orderBy([(t) => OrderingTerm.desc(t.lastSeenAt)]))
         .get();
@@ -383,7 +382,7 @@ class PeerRepository {
 
   /// Get all persisted aliases (for PeerRegistry hydration at startup).
   Future<List<PeerAliasEntry>> getAllAliases() async {
-    return await _db.select(_db.peerAliases).get();
+    return _db.select(_db.peerAliases).get();
   }
 
   /// Delete all aliases pointing to a given canonical peerId.

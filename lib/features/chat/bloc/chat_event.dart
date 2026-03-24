@@ -1,7 +1,6 @@
+import 'package:anchor/data/local_database/database.dart';
+import 'package:anchor/services/ble/ble.dart' as ble;
 import 'package:equatable/equatable.dart';
-
-import '../../../data/local_database/database.dart';
-import '../../../services/ble/ble.dart' as ble;
 
 abstract class ChatEvent extends Equatable {
   const ChatEvent();
@@ -160,4 +159,3 @@ class ChatPeerLost extends ChatEvent {
 
 // Note: E2EE events are now in chat_e2ee_bloc.dart
 // Note: Reaction events are now in reaction_bloc.dart
-

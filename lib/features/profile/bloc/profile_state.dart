@@ -1,7 +1,6 @@
+import 'package:anchor/core/constants/profile_constants.dart';
+import 'package:anchor/data/local_database/database.dart';
 import 'package:equatable/equatable.dart';
-
-import '../../../core/constants/profile_constants.dart';
-import '../../../data/local_database/database.dart';
 
 enum ProfileStatus {
   initial,
@@ -100,8 +99,8 @@ class ProfileState extends Equatable {
 
   /// Get sorted photos by order index
   List<ProfilePhoto> get sortedPhotos {
-    final sorted = List<ProfilePhoto>.from(photos);
-    sorted.sort((a, b) => a.orderIndex.compareTo(b.orderIndex));
+    final sorted = List<ProfilePhoto>.from(photos)
+      ..sort((a, b) => a.orderIndex.compareTo(b.orderIndex));
     return sorted;
   }
 

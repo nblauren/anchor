@@ -1,17 +1,16 @@
+import 'package:anchor/core/app_lifecycle_observer.dart';
+import 'package:anchor/core/screens/splash_screen.dart';
+import 'package:anchor/core/theme/app_theme.dart';
+import 'package:anchor/features/home/home.dart';
+import 'package:anchor/features/onboarding/screens/onboarding_screen.dart';
+import 'package:anchor/features/profile/bloc/profile_bloc.dart';
+import 'package:anchor/features/profile/bloc/profile_event.dart';
+import 'package:anchor/features/profile/bloc/profile_state.dart';
+import 'package:anchor/features/profile/screens/profile_setup_screen.dart';
+import 'package:anchor/services/ble/ble.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
-import '../../features/home/home.dart';
-import '../../features/onboarding/screens/onboarding_screen.dart';
-import '../../features/profile/bloc/profile_bloc.dart';
-import '../../features/profile/bloc/profile_event.dart';
-import '../../features/profile/bloc/profile_state.dart';
-import '../../features/profile/screens/profile_setup_screen.dart';
-import '../../services/ble/ble.dart';
-import '../app_lifecycle_observer.dart';
-import '../screens/splash_screen.dart';
-import '../theme/app_theme.dart';
 
 /// App shell that handles routing based on app state:
 ///   1. Onboarding (intro + BLE permissions) — shown once

@@ -1,20 +1,18 @@
 import 'dart:math';
 
+import 'package:anchor/core/constants/profile_constants.dart';
+import 'package:anchor/core/utils/logger.dart';
+import 'package:anchor/core/utils/profile_validator.dart';
+import 'package:anchor/features/profile/bloc/profile_event.dart';
+import 'package:anchor/features/profile/bloc/profile_state.dart';
+import 'package:anchor/services/database_service.dart';
+import 'package:anchor/services/image_service.dart'
+    show ImageService, resolvePhotoPath;
+import 'package:anchor/services/nsfw_detection_service.dart';
+import 'package:anchor/services/profile_broadcast_service.dart';
+import 'package:drift/drift.dart' show Value;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-
-import 'package:drift/drift.dart' show Value;
-
-import '../../../core/constants/profile_constants.dart';
-import '../../../core/utils/logger.dart';
-import '../../../core/utils/profile_validator.dart';
-import '../../../services/database_service.dart';
-import '../../../services/image_service.dart'
-    show ImageService, resolvePhotoPath;
-import '../../../services/nsfw_detection_service.dart';
-import '../../../services/profile_broadcast_service.dart';
-import 'profile_event.dart';
-import 'profile_state.dart';
 
 /// Manages the device owner's profile.
 ///
@@ -79,14 +77,14 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
         emit(state.copyWith(
           isProcessingPhoto: false,
           nsfwBlockedPhotoId: photoId,
-        ));
+        ),);
         return false;
       }
       return true;
     } catch (e) {
       // On detection error, allow the photo — don't block on service failure.
       Logger.error(
-          'NSFW detection failed, allowing photo', e, null, 'ProfileBloc');
+          'NSFW detection failed, allowing photo', e, null, 'ProfileBloc',);
       return true;
     }
   }
@@ -107,7 +105,7 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
 
       final photos =
           await _databaseService.profileRepository.getPhotos(profile.id);
-      final photoList = photos.map((p) => ProfilePhoto.fromEntry(p)).toList();
+      final photoList = photos.map(ProfilePhoto.fromEntry).toList();
 
       emit(state.copyWith(
         status: ProfileStatus.loaded,
@@ -118,7 +116,7 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
         position: profile.position,
         interestIds: ProfileConstants.parseInterests(profile.interests),
         photos: photoList,
-      ));
+      ),);
 
       // Broadcast profile via BLE so this device is discoverable
       add(const BroadcastProfile());
@@ -127,7 +125,7 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
       emit(state.copyWith(
         status: ProfileStatus.error,
         errorMessage: 'Failed to load profile',
-      ));
+      ),);
     }
   }
 
@@ -176,7 +174,7 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
       final profile = await _databaseService.profileRepository.createProfile(
         name: event.name.trim(),
         age: event.age,
-        bio: sanitizedBio?.isNotEmpty == true ? sanitizedBio : null,
+        bio: sanitizedBio?.isNotEmpty ?? false ? sanitizedBio : null,
         position: event.position,
         interests: ProfileConstants.encodeInterests(event.interests),
       );
@@ -190,7 +188,7 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
         position: profile.position,
         interestIds: ProfileConstants.parseInterests(profile.interests),
         photos: [],
-      ));
+      ),);
 
       Logger.info('Profile created: ${profile.id}', 'ProfileBloc');
 
@@ -201,7 +199,7 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
       emit(state.copyWith(
         status: ProfileStatus.error,
         errorMessage: 'Failed to create profile',
-      ));
+      ),);
     }
   }
 
@@ -261,22 +259,22 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
           : null;
 
       // Build position Value — explicit clear vs. no-op vs. new value.
-      final Value<int?> positionValue = event.clearPosition
-          ? const Value(null)
+      final positionValue = event.clearPosition
+          ? const Value<int?>(null)
           : event.position != null
-              ? Value(event.position)
-              : const Value.absent();
+              ? Value<int?>(event.position)
+              : const Value<int?>.absent();
 
-      // Build interests Value — null list = no-op, empty = clear.
-      final Value<String?> interestsValue = event.interests != null
-          ? Value(ProfileConstants.encodeInterests(event.interests!))
-          : const Value.absent();
+      // Build interests Value - null list = no-op, empty = clear.
+      final interestsValue = event.interests != null
+          ? Value<String?>(ProfileConstants.encodeInterests(event.interests!))
+          : const Value<String?>.absent();
 
       await _databaseService.profileRepository.updateProfile(
         id: state.profileId!,
         name: event.name?.trim(),
         age: event.age,
-        bio: sanitizedBio?.isNotEmpty == true ? sanitizedBio : event.bio?.trim(),
+        bio: sanitizedBio?.isNotEmpty ?? false ? sanitizedBio : event.bio?.trim(),
         position: positionValue,
         interests: interestsValue,
       );
@@ -285,7 +283,7 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
       final newPosition =
           event.clearPosition ? null : (event.position ?? state.position);
       final newInterestIds = event.interests ?? state.interestIds;
-      final newBio = sanitizedBio?.isNotEmpty == true
+      final newBio = sanitizedBio?.isNotEmpty ?? false
           ? sanitizedBio
           : (event.bio?.trim() ?? state.bio);
 
@@ -296,7 +294,7 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
         bio: newBio,
         position: newPosition,
         interestIds: newInterestIds,
-      ));
+      ),);
 
       Logger.info('Profile updated', 'ProfileBloc');
 
@@ -307,7 +305,7 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
       emit(state.copyWith(
         status: ProfileStatus.error,
         errorMessage: 'Failed to update profile',
-      ));
+      ),);
     }
   }
 
@@ -322,7 +320,7 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
 
     if (!state.canAddMorePhotos) {
       emit(state.copyWith(
-          errorMessage: 'Maximum ${ProfileState.maxPhotos} photos allowed'));
+          errorMessage: 'Maximum ${ProfileState.maxPhotos} photos allowed',),);
       return;
     }
 
@@ -334,7 +332,7 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
 
       // This will be the first (primary) photo — run NSFW check before broadcasting.
       final willBePrimary = state.photos.isEmpty;
-      bool isPrimary = willBePrimary;
+      var isPrimary = willBePrimary;
 
       if (willBePrimary) {
         final absolutePath =
@@ -364,10 +362,10 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
         // Preserve nsfwBlockedPhotoId if it was set in _passesNsfwCheck above;
         // use the real DB photo.id now that we have it.
         nsfwBlockedPhotoId: (!isPrimary && willBePrimary) ? photo.id : null,
-      ));
+      ),);
 
       Logger.info(
-          'Photo added: ${photo.id} (primary=$isPrimary)', 'ProfileBloc');
+          'Photo added: ${photo.id} (primary=$isPrimary)', 'ProfileBloc',);
 
       // Only rebroadcast when the new photo is actually primary.
       if (isPrimary) {
@@ -378,7 +376,7 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
       emit(state.copyWith(
         isProcessingPhoto: false,
         errorMessage: 'Failed to add photo',
-      ));
+      ),);
     }
   }
 
@@ -407,7 +405,7 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
       if (state.profileId != null) {
         final photos = await _databaseService.profileRepository
             .getPhotos(state.profileId!);
-        final photoList = photos.map((p) => ProfilePhoto.fromEntry(p)).toList();
+        final photoList = photos.map(ProfilePhoto.fromEntry).toList();
         emit(state.copyWith(photos: photoList));
       } else {
         emit(state.copyWith(photos: updatedPhotos));
@@ -470,7 +468,7 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
       // Reload photos to get updated order and primary flag.
       final photos =
           await _databaseService.profileRepository.getPhotos(state.profileId!);
-      final photoList = photos.map((p) => ProfilePhoto.fromEntry(p)).toList();
+      final photoList = photos.map(ProfilePhoto.fromEntry).toList();
 
       emit(state.copyWith(photos: photoList));
 
@@ -517,7 +515,7 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
       // Reload photos to get updated primary status
       final photos =
           await _databaseService.profileRepository.getPhotos(state.profileId!);
-      final photoList = photos.map((p) => ProfilePhoto.fromEntry(p)).toList();
+      final photoList = photos.map(ProfilePhoto.fromEntry).toList();
 
       emit(state.copyWith(photos: photoList, isProcessingPhoto: false));
 
@@ -530,7 +528,7 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
       emit(state.copyWith(
         isProcessingPhoto: false,
         errorMessage: 'Failed to set primary photo',
-      ));
+      ),);
     }
   }
 
@@ -610,7 +608,7 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
         'Sage',
         'River',
         'Logan',
-        'Elliot'
+        'Elliot',
       ];
 
       const bios = [
@@ -638,7 +636,7 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
         'Looking for someone to share sunsets with',
         'Fluent in sarcasm and cocktails',
         'Making memories > making plans',
-        'Here for fun, not stress'
+        'Here for fun, not stress',
       ];
 
       final name = names[rng.nextInt(names.length)];
@@ -669,7 +667,7 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
         bio: profile.bio,
         position: profile.position,
         interestIds: ProfileConstants.parseInterests(profile.interests),
-      ));
+      ),);
 
       Logger.info('Quick setup profile created: ${profile.id}', 'ProfileBloc');
 
@@ -679,7 +677,7 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
       emit(state.copyWith(
         status: ProfileStatus.error,
         errorMessage: 'Quick setup failed',
-      ));
+      ),);
     }
   }
 
@@ -687,7 +685,7 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
     ClearError event,
     Emitter<ProfileState> emit,
   ) {
-    emit(state.copyWith(errorMessage: null));
+    emit(state.copyWith());
   }
 
   void _onDismissNsfwWarning(

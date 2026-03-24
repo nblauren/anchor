@@ -1,6 +1,6 @@
 import 'dart:collection';
 
-import '../../core/utils/logger.dart';
+import 'package:anchor/core/utils/logger.dart';
 
 // ---------------------------------------------------------------------------
 // HandshakeRateLimiter

@@ -1,6 +1,5 @@
+import 'package:anchor/data/models/chat_message.dart';
 import 'package:equatable/equatable.dart';
-
-import 'chat_message.dart';
 
 /// Conversation model representing a chat between two users
 class Conversation extends Equatable {
@@ -8,11 +7,9 @@ class Conversation extends Equatable {
     required this.id,
     required this.participantId,
     required this.participantName,
-    this.participantPhotoUrl,
+    required this.createdAt, required this.updatedAt, this.participantPhotoUrl,
     this.lastMessage,
     this.unreadCount = 0,
-    required this.createdAt,
-    required this.updatedAt,
   });
 
   final String id;

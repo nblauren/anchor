@@ -3,14 +3,13 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:anchor/core/utils/logger.dart';
+import 'package:anchor/data/local_database/database.dart';
+import 'package:anchor/data/repositories/chat_repository.dart';
+import 'package:anchor/services/ble/ble.dart' as ble;
+import 'package:anchor/services/image_service.dart';
+import 'package:anchor/services/transport/transport.dart';
 import 'package:uuid/uuid.dart';
-
-import '../core/utils/logger.dart';
-import '../data/local_database/database.dart';
-import '../data/repositories/chat_repository.dart';
-import '../services/ble/ble.dart' as ble;
-import '../services/image_service.dart';
-import '../services/transport/transport.dart';
 
 /// Delivery status update emitted by [MessageSendService].
 class SendDeliveryUpdate {
@@ -112,7 +111,7 @@ class MessageSendService {
           photoPath: photoPath,
           message: message,
           peerId: peerId,
-        ));
+        ),);
   }
 
   /// Enqueue a photo retry for background sending.
@@ -152,7 +151,7 @@ class MessageSendService {
           messageId: message.id,
           type: PendingSendType.text,
           payload: payload,
-        ));
+        ),);
         // Show clock icon — retry queue will update to sent/failed later.
         _emitDelivery(message.id, MessageStatus.queued);
         _conversationsChangedController.add(null);
@@ -201,7 +200,7 @@ class MessageSendService {
         localPhotoPath: absolutePath,
         messageId: message.id,
         peerId: peerId,
-      ));
+      ),);
 
       // 4. Send lightweight notification (no thumbnail).
       final previewSent = await _transportManager.sendPhotoPreview(
@@ -263,7 +262,7 @@ class MessageSendService {
         localPhotoPath: absolutePath,
         messageId: message.id,
         peerId: peerId,
-      ));
+      ),);
 
       final success = await _transportManager.sendPhotoPreview(
         peerId: peerId,
@@ -308,7 +307,7 @@ class MessageSendService {
     _deliveryController.add(SendDeliveryUpdate(
       messageId: messageId,
       status: status,
-    ));
+    ),);
   }
 
   void dispose() {

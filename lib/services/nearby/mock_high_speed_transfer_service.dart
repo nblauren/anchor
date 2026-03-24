@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'dart:typed_data';
 
-import '../../core/utils/logger.dart';
-import 'high_speed_transfer_service.dart';
-import 'nearby_models.dart';
+import 'package:anchor/core/utils/logger.dart';
+import 'package:anchor/services/nearby/high_speed_transfer_service.dart';
+import 'package:anchor/services/nearby/nearby_models.dart';
 
 /// Mock implementation of [HighSpeedTransferService] for testing and
 /// simulator environments where Wi-Fi Direct / Nearby is unavailable.
@@ -51,16 +51,16 @@ class MockHighSpeedTransferService implements HighSpeedTransferService {
       peerId: peerId,
       status: NearbyTransferStatus.transferring,
       progress: 0.5,
-    ));
+    ),);
 
-    await Future.delayed(const Duration(milliseconds: 500));
+    await Future<void>.delayed(const Duration(milliseconds: 500));
 
     _progressController.add(NearbyTransferProgress(
       transferId: transferId,
       peerId: peerId,
       status: NearbyTransferStatus.completed,
-      progress: 1.0,
-    ));
+      progress: 1,
+    ),);
 
     return true;
   }
@@ -73,14 +73,14 @@ class MockHighSpeedTransferService implements HighSpeedTransferService {
   }) async {
     if (!simulateAvailable) return false;
 
-    await Future.delayed(const Duration(milliseconds: 500));
+    await Future<void>.delayed(const Duration(milliseconds: 500));
 
     _payloadController.add(NearbyPayloadReceived(
       transferId: transferId,
       fromPeerId: peerId,
       data: Uint8List(0),
       timestamp: DateTime.now(),
-    ));
+    ),);
 
     return true;
   }
@@ -92,7 +92,7 @@ class MockHighSpeedTransferService implements HighSpeedTransferService {
       peerId: '',
       status: NearbyTransferStatus.cancelled,
       progress: 0,
-    ));
+    ),);
   }
 
   @override

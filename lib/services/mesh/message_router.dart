@@ -3,13 +3,13 @@ import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 
-import '../../core/utils/logger.dart';
-import '../encryption/encryption.dart';
-import '../transport/transport_enums.dart';
-import 'bloom_filter.dart';
-import 'gossip_sync_service.dart';
-import 'mesh_packet.dart';
-import 'peer_registry.dart';
+import 'package:anchor/core/utils/logger.dart';
+import 'package:anchor/services/encryption/encryption.dart';
+import 'package:anchor/services/mesh/bloom_filter.dart';
+import 'package:anchor/services/mesh/gossip_sync_service.dart';
+import 'package:anchor/services/mesh/mesh_packet.dart';
+import 'package:anchor/services/mesh/peer_registry.dart';
+import 'package:anchor/services/transport/transport_enums.dart';
 
 /// Configuration for the message router.
 class RouterConfig {
@@ -175,7 +175,7 @@ class MessageRouter {
 
     final effectiveTtl = ttl ?? _ttlForType(type);
 
-    int flags = 0;
+    var flags = 0;
     if (recipientId == MeshPacket.broadcastRecipientId) {
       flags |= PacketFlags.broadcast;
     }
@@ -211,9 +211,9 @@ class MessageRouter {
     }
 
     // Wire format: nonce (24) || ciphertext+tag
-    final wire = Uint8List(result.nonce.length + result.ciphertext.length);
-    wire.setRange(0, result.nonce.length, result.nonce);
-    wire.setRange(result.nonce.length, wire.length, result.ciphertext);
+    final wire = Uint8List(result.nonce.length + result.ciphertext.length)
+      ..setRange(0, result.nonce.length, result.nonce)
+      ..setRange(result.nonce.length, result.nonce.length + result.ciphertext.length, result.ciphertext);
 
     return (data: wire, encrypted: true);
   }
@@ -279,8 +279,8 @@ class MessageRouter {
 
     if (isForUs) {
       // 4. Decrypt if encrypted
-      Uint8List effectivePayload = payload;
-      bool wasEncrypted = false;
+      var effectivePayload = payload;
+      var wasEncrypted = false;
 
       if ((flags & PacketFlags.encrypted) != 0) {
         final decrypted = await decryptPayload(canonicalSender, payload);
@@ -305,7 +305,7 @@ class MessageRouter {
         timestamp: timestamp ?? DateTime.now(),
         fromTransport: fromTransport,
         isEncrypted: wasEncrypted,
-      ));
+      ),);
     }
 
     // 6. Gossip relay — forward to mesh if TTL > 0 and not photo data
@@ -320,7 +320,7 @@ class MessageRouter {
         recipientId: recipientId ?? MeshPacket.broadcastRecipientId,
         excludeTransportId: rawSenderId,
         timestamp: timestamp ?? DateTime.now(),
-      ));
+      ),);
     }
   }
 
@@ -337,7 +337,7 @@ class MessageRouter {
     final ttl = json['ttl'] as int? ?? 0;
     final destinationId = json['destination_id'] as String?;
 
-    int flags = 0;
+    var flags = 0;
     if (json['v'] == 1) flags |= PacketFlags.encrypted;
 
     // For encrypted messages, rebuild the ciphertext from JSON fields
@@ -348,9 +348,9 @@ class MessageRouter {
       if (nonce != null && ciphertext != null) {
         final nonceBytes = base64.decode(nonce);
         final ctBytes = base64.decode(ciphertext);
-        payload = Uint8List(nonceBytes.length + ctBytes.length);
-        payload.setRange(0, nonceBytes.length, nonceBytes);
-        payload.setRange(nonceBytes.length, payload.length, ctBytes);
+        payload = Uint8List(nonceBytes.length + ctBytes.length)
+          ..setRange(0, nonceBytes.length, nonceBytes)
+          ..setRange(nonceBytes.length, nonceBytes.length + ctBytes.length, ctBytes);
       } else {
         payload = Uint8List.fromList(utf8.encode(content));
       }
@@ -442,7 +442,13 @@ class MessageRouter {
       case PacketType.photoData:
       case PacketType.wifiTransferReady:
         return _config.photoMetaTtl;
-      default:
+      case PacketType.message:
+      case PacketType.handshake:
+      case PacketType.ack:
+      case PacketType.reaction:
+      case PacketType.readReceipt:
+      case PacketType.gossipSync:
+      case PacketType.gossipRequest:
         return _config.defaultTtl;
     }
   }

@@ -1,10 +1,9 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:anchor/services/encryption/noise_handshake.dart';
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter_test/flutter_test.dart';
-
-import 'package:anchor/services/encryption/noise_handshake.dart';
 
 // ---------------------------------------------------------------------------
 // E2EE Unit Tests — Noise_XK handshake + XChaCha20-Poly1305 round-trip
@@ -124,11 +123,11 @@ void main() {
       final x25519 = X25519();
       final responderKp = await x25519.newKeyPair();
       final respPub = Uint8List.fromList(
-          (await responderKp.extractPublicKey()).bytes);
+          (await responderKp.extractPublicKey()).bytes,);
 
       final sym = await NoiseHandshakeProcessor.initSymmetricState(respPub);
       final msg1 = await NoiseHandshakeProcessor.writeMessage1(
-          sym.h, sym.ck, null, 0, respPub);
+          sym.h, sym.ck, null, 0, respPub,);
 
       // 32 bytes ephemeral key + 16 bytes Poly1305 tag (empty plaintext)
       expect(msg1.payload.length, equals(48));
@@ -138,19 +137,19 @@ void main() {
       final x25519 = X25519();
       final respKp = await x25519.newKeyPair();
       final respPub = Uint8List.fromList(
-          (await respKp.extractPublicKey()).bytes);
+          (await respKp.extractPublicKey()).bytes,);
       final respPriv = Uint8List.fromList(await respKp.extractPrivateKeyBytes());
 
       final initSym = await NoiseHandshakeProcessor.initSymmetricState(respPub);
       final msg1 = await NoiseHandshakeProcessor.writeMessage1(
-          initSym.h, initSym.ck, null, 0, respPub);
+          initSym.h, initSym.ck, null, 0, respPub,);
 
       final respSym = await NoiseHandshakeProcessor.initSymmetricState(respPub);
       final readMsg1 = await NoiseHandshakeProcessor.readMessage1(
-          respSym.h, respSym.ck, null, 0, msg1.payload, respPriv);
+          respSym.h, respSym.ck, null, 0, msg1.payload, respPriv,);
       final msg2 = await NoiseHandshakeProcessor.writeMessage2(
           readMsg1.h, readMsg1.ck, readMsg1.k, readMsg1.n,
-          readMsg1.initiatorEphPublic);
+          readMsg1.initiatorEphPublic,);
 
       // 32 bytes ephemeral key + 16 bytes tag
       expect(msg2.payload.length, equals(48));
@@ -163,28 +162,28 @@ void main() {
       final initiatorPriv =
           Uint8List.fromList(await initiatorKp.extractPrivateKeyBytes());
       final initiatorPub = Uint8List.fromList(
-          (await initiatorKp.extractPublicKey()).bytes);
+          (await initiatorKp.extractPublicKey()).bytes,);
       final respPriv =
           Uint8List.fromList(await respKp.extractPrivateKeyBytes());
       final respPub = Uint8List.fromList(
-          (await respKp.extractPublicKey()).bytes);
+          (await respKp.extractPublicKey()).bytes,);
 
       final initSym = await NoiseHandshakeProcessor.initSymmetricState(respPub);
       final msg1 = await NoiseHandshakeProcessor.writeMessage1(
-          initSym.h, initSym.ck, null, 0, respPub);
+          initSym.h, initSym.ck, null, 0, respPub,);
 
       final respSym = await NoiseHandshakeProcessor.initSymmetricState(respPub);
       final readMsg1 = await NoiseHandshakeProcessor.readMessage1(
-          respSym.h, respSym.ck, null, 0, msg1.payload, respPriv);
+          respSym.h, respSym.ck, null, 0, msg1.payload, respPriv,);
       final msg2 = await NoiseHandshakeProcessor.writeMessage2(
           readMsg1.h, readMsg1.ck, readMsg1.k, readMsg1.n,
-          readMsg1.initiatorEphPublic);
+          readMsg1.initiatorEphPublic,);
 
       final readMsg2 = await NoiseHandshakeProcessor.readMessage2(
-          msg1.h, msg1.ck, msg1.k, msg1.n, msg2.payload, msg1.localEphPriv);
+          msg1.h, msg1.ck, msg1.k, msg1.n, msg2.payload, msg1.localEphPriv,);
       final msg3 = await NoiseHandshakeProcessor.writeMessage3(
           readMsg2.h, readMsg2.ck, readMsg2.k, readMsg2.n,
-          initiatorPriv, initiatorPub, readMsg2.responderEphPublic);
+          initiatorPriv, initiatorPub, readMsg2.responderEphPublic,);
 
       // 48 bytes (encrypted static key + tag) + 16 bytes (empty payload tag)
       expect(msg3.payload.length, equals(64));
@@ -194,13 +193,13 @@ void main() {
       final x25519 = X25519();
       final respKp = await x25519.newKeyPair();
       final respPub = Uint8List.fromList(
-          (await respKp.extractPublicKey()).bytes);
+          (await respKp.extractPublicKey()).bytes,);
       final respPriv = Uint8List.fromList(
-          await respKp.extractPrivateKeyBytes());
+          await respKp.extractPrivateKeyBytes(),);
 
       final initSym = await NoiseHandshakeProcessor.initSymmetricState(respPub);
       final msg1 = await NoiseHandshakeProcessor.writeMessage1(
-          initSym.h, initSym.ck, null, 0, respPub);
+          initSym.h, initSym.ck, null, 0, respPub,);
 
       // Flip a bit in the auth tag
       final tampered = Uint8List.fromList(msg1.payload);
@@ -209,7 +208,7 @@ void main() {
       final respSym = await NoiseHandshakeProcessor.initSymmetricState(respPub);
       expect(
         () => NoiseHandshakeProcessor.readMessage1(
-            respSym.h, respSym.ck, null, 0, tampered, respPriv),
+            respSym.h, respSym.ck, null, 0, tampered, respPriv,),
         throwsA(isA<NoiseHandshakeException>()),
       );
     });
@@ -224,7 +223,7 @@ void main() {
       final plaintext = utf8.encode('Hello, Anchor! 🏳️‍🌈⚓');
 
       final box = await xchacha.encrypt(plaintext,
-          secretKey: key, nonce: nonce);
+          secretKey: key, nonce: nonce,);
 
       // Concatenate ciphertext + tag (as EncryptionService does)
       final ctWithTag = Uint8List(box.cipherText.length + 16)
@@ -248,7 +247,7 @@ void main() {
       final plaintext = utf8.encode('Secret message');
 
       final box = await xchacha.encrypt(plaintext,
-          secretKey: key, nonce: nonce);
+          secretKey: key, nonce: nonce,);
 
       // Flip a byte in ciphertext
       final tampered = List<int>.from(box.cipherText);
@@ -270,9 +269,9 @@ void main() {
       final plaintext = utf8.encode('Same message');
 
       final box1 = await xchacha.encrypt(plaintext,
-          secretKey: key, nonce: nonce1);
+          secretKey: key, nonce: nonce1,);
       final box2 = await xchacha.encrypt(plaintext,
-          secretKey: key, nonce: nonce2);
+          secretKey: key, nonce: nonce2,);
 
       expect(box1.cipherText, isNot(equals(box2.cipherText)));
     });

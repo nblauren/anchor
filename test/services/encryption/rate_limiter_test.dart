@@ -13,7 +13,7 @@ void main() {
       test('allows up to 10 attempts per peer', () {
         for (var i = 0; i < 10; i++) {
           expect(limiter.tryAcquire('peer-a'), isTrue,
-              reason: 'Attempt ${i + 1} should be allowed');
+              reason: 'Attempt ${i + 1} should be allowed',);
         }
       });
 
@@ -38,7 +38,7 @@ void main() {
         for (var i = 0; i < 30; i++) {
           // Use a different peer each time to avoid per-peer limit.
           expect(limiter.tryAcquire('peer-$i'), isTrue,
-              reason: 'Global attempt ${i + 1} should be allowed');
+              reason: 'Global attempt ${i + 1} should be allowed',);
         }
       });
 
@@ -56,9 +56,10 @@ void main() {
       });
 
       test('does not consume an attempt', () {
-        limiter.isAllowed('peer-a');
-        limiter.isAllowed('peer-a');
-        limiter.isAllowed('peer-a');
+        limiter
+          ..isAllowed('peer-a')
+          ..isAllowed('peer-a')
+          ..isAllowed('peer-a');
         // Still should allow 10 actual attempts.
         for (var i = 0; i < 10; i++) {
           expect(limiter.tryAcquire('peer-a'), isTrue);
@@ -86,8 +87,9 @@ void main() {
       });
 
       test('decrements with each attempt', () {
-        limiter.tryAcquire('peer-a');
-        limiter.tryAcquire('peer-a');
+        limiter
+          ..tryAcquire('peer-a')
+          ..tryAcquire('peer-a');
         expect(limiter.remainingForPeer('peer-a'), 8);
       });
 
@@ -152,11 +154,12 @@ void main() {
           limiter.tryAcquire('peer-a');
         }
         // This should be rejected but NOT recorded.
-        limiter.tryAcquire('peer-a');
-        limiter.tryAcquire('peer-a');
+        limiter
+          ..tryAcquire('peer-a')
+          ..tryAcquire('peer-a')
 
-        // After clearing, peer-a should have 10 slots again.
-        limiter.clear();
+          // After clearing, peer-a should have 10 slots again.
+          ..clear();
         for (var i = 0; i < 10; i++) {
           expect(limiter.tryAcquire('peer-a'), isTrue);
         }

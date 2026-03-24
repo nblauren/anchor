@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'encryption_models.dart';
-import 'encryption_service.dart';
+import 'package:anchor/services/encryption/encryption_models.dart';
+import 'package:anchor/services/encryption/encryption_service.dart';
 
 /// Shared message encryption/decryption logic used by ALL transports.
 ///
@@ -61,8 +61,7 @@ class DecryptedMessageContent {
 Future<EncryptedEnvelope?> encryptMessageContent({
   required String peerId,
   required String content,
-  String? replyToId,
-  required EncryptionService encService,
+  required EncryptionService encService, String? replyToId,
 }) async {
   if (!encService.hasSession(peerId)) return null;
 
@@ -148,7 +147,7 @@ Future<Uint8List> encryptPhotoBytes({
   if (encPayload == null) return bytes;
 
   return Uint8List.fromList(
-      [kEncPhotoMagic, ...encPayload.nonce, ...encPayload.ciphertext]);
+      [kEncPhotoMagic, ...encPayload.nonce, ...encPayload.ciphertext],);
 }
 
 /// Decrypt photo bytes from wire format.

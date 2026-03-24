@@ -1,17 +1,13 @@
+import 'package:anchor/core/theme/app_theme.dart';
+import 'package:anchor/data/local_database/database.dart';
 import 'package:flutter/material.dart';
-
-import '../../../core/theme/app_theme.dart';
-import '../../../data/local_database/database.dart';
 
 /// Floating emoji picker shown as an overlay above a message bubble.
 /// Animates in with a scale+fade on the container and staggered pop per emoji.
 class FloatingEmojiPicker extends StatefulWidget {
   const FloatingEmojiPicker({
-    super.key,
-    required this.emojis,
-    required this.onEmojiTap,
+    required this.emojis, required this.onEmojiTap, required this.ownUserId, super.key,
     this.currentReactions = const [],
-    required this.ownUserId,
   });
 
   final List<String> emojis;
@@ -91,7 +87,7 @@ class _FloatingEmojiPickerState extends State<FloatingEmojiPicker>
               children: List.generate(widget.emojis.length, (i) {
                 final emoji = widget.emojis[i];
                 final alreadyReacted = widget.currentReactions.any(
-                    (r) => r.senderId == widget.ownUserId && r.emoji == emoji);
+                    (r) => r.senderId == widget.ownUserId && r.emoji == emoji,);
                 return ScaleTransition(
                   scale: _emojiAnimation(i),
                   child: GestureDetector(

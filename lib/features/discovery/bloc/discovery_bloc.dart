@@ -1,17 +1,16 @@
 import 'dart:async';
 import 'dart:math';
 
+import 'package:anchor/core/utils/logger.dart';
+import 'package:anchor/data/repositories/peer_repository.dart';
+import 'package:anchor/features/discovery/bloc/discovery_event.dart';
+import 'package:anchor/features/discovery/bloc/discovery_state.dart';
+import 'package:anchor/services/ble/ble.dart' as ble;
+import 'package:anchor/services/notification_service.dart';
+import 'package:anchor/services/transport/transport.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:uuid/uuid.dart';
-
-import '../../../core/utils/logger.dart';
-import '../../../data/repositories/peer_repository.dart';
-import '../../../services/ble/ble.dart' as ble;
-import '../../../services/notification_service.dart';
-import '../../../services/transport/transport.dart';
-import 'discovery_event.dart';
-import 'discovery_state.dart';
 
 /// Private event used to apply debounced state updates safely via add()
 class _ApplyDebouncedState extends DiscoveryEvent {
@@ -59,7 +58,7 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
       // by PeerLost events that fired between scheduling and debounce expiry.
       final currentPeerIds = {for (final p in state.peers) p.peerId};
       final debouncedPeerMap = {
-        for (final p in event.newState.peers) p.peerId: p
+        for (final p in event.newState.peers) p.peerId: p,
       };
 
       // Update existing current peers with debounced data
@@ -93,7 +92,7 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
       (change) => add(PeerTransportChangedEvent(
         peerId: change.peerId,
         newTransport: change.newTransport,
-      )),
+      ),),
     );
 
     // Debounce timer for batching peer updates
@@ -131,7 +130,7 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
           publicKeyHex: peer.publicKeyHex,
           transportId: peer.transportId,
           transportType: peer.transportType,
-        ));
+        ),);
       }
     });
   }
@@ -153,7 +152,7 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
       emit(state.copyWith(
         isScanning: false,
         errorMessage: 'Failed to start discovery',
-      ));
+      ),);
     }
   }
 
@@ -179,20 +178,20 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
     emit(state.copyWith(status: DiscoveryStatus.loading));
 
     try {
-      final entries = await _peerRepository.getAllPeers(includeBlocked: false);
+      final entries = await _peerRepository.getAllPeers();
       final peers = entries.map(DiscoveredPeer.fromEntry).toList();
 
       emit(state.copyWith(
         status: DiscoveryStatus.loaded,
         peers: peers,
         lastRefreshed: DateTime.now(),
-      ));
+      ),);
     } catch (e) {
       Logger.error('Failed to load peers', e, null, 'DiscoveryBloc');
       emit(state.copyWith(
         status: DiscoveryStatus.error,
         errorMessage: 'Failed to load discovered peers',
-      ));
+      ),);
     }
   }
 
@@ -224,7 +223,6 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
           thumbnailData: event.thumbnailData,
           photoThumbnails: event.photoThumbnails,
           lastSeenAt: DateTime.now(),
-          rssi: null,
           isRelayed: true,
           hopCount: event.hopCount,
           fullPhotoCount: event.fullPhotoCount,
@@ -285,10 +283,10 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
       } else {
         updatedPeers = [peer, ...state.peers];
         // Notify user about new peer (useful when app is backgrounded on iOS)
-        _notificationService?.showPeerDiscoveredNotification(
+        unawaited(_notificationService?.showPeerDiscoveredNotification(
           peerId: peer.peerId,
           peerName: peer.name,
-        );
+        ),);
       }
       final newState = state.copyWith(
         status: DiscoveryStatus.loaded,
@@ -305,7 +303,7 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
       }
     } catch (e) {
       Logger.error(
-          'Failed to process discovered peer', e, null, 'DiscoveryBloc');
+          'Failed to process discovered peer', e, null, 'DiscoveryBloc',);
     }
   }
 
@@ -423,19 +421,19 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
       emit(state.copyWith(isScanning: true));
     } catch (e) {
       Logger.warning(
-          'Could not start scan during refresh: $e', 'DiscoveryBloc');
+          'Could not start scan during refresh: $e', 'DiscoveryBloc',);
     }
 
     // Load existing peers from database
     try {
-      final entries = await _peerRepository.getAllPeers(includeBlocked: false);
+      final entries = await _peerRepository.getAllPeers();
       final peers = entries.map(DiscoveredPeer.fromEntry).toList();
 
       emit(state.copyWith(
         status: DiscoveryStatus.loaded,
         peers: peers,
         lastRefreshed: DateTime.now(),
-      ));
+      ),);
     } catch (e) {
       Logger.error('Failed to refresh peers', e, null, 'DiscoveryBloc');
       emit(state.copyWith(errorMessage: 'Failed to refresh'));
@@ -465,20 +463,20 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
       }
 
       // Reload from database
-      final entries = await _peerRepository.getAllPeers(includeBlocked: false);
+      final entries = await _peerRepository.getAllPeers();
       final peers = entries.map(DiscoveredPeer.fromEntry).toList();
 
       emit(state.copyWith(
         status: DiscoveryStatus.loaded,
         peers: peers,
         lastRefreshed: DateTime.now(),
-      ));
+      ),);
     } catch (e) {
       Logger.error('Failed to load mock peers', e, null, 'DiscoveryBloc');
       emit(state.copyWith(
         status: DiscoveryStatus.error,
         errorMessage: 'Failed to load mock data',
-      ));
+      ),);
     }
   }
 
@@ -487,7 +485,7 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
     ClearDiscoveryError event,
     Emitter<DiscoveryState> emit,
   ) {
-    emit(state.copyWith(errorMessage: null));
+    emit(state.copyWith());
   }
 
   /// Fetch all full-size profile photos for a peer via fff4.
@@ -595,7 +593,6 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
         thumbnailData: avatars[index],
         lastSeenAt: now.subtract(Duration(minutes: minutesAgo)),
         rssi: -45 - random.nextInt(35), // -45 to -80
-        isBlocked: false,
       );
     });
   }
@@ -620,7 +617,7 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
       _transportManager.updateBlockedPeerIds(blockedIds);
     } catch (e) {
       Logger.warning(
-          'Failed to push block list to transport: $e', 'DiscoveryBloc');
+          'Failed to push block list to transport: $e', 'DiscoveryBloc',);
     }
   }
 

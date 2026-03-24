@@ -1,14 +1,14 @@
 import 'dart:async';
 
+import 'package:anchor/core/utils/logger.dart';
+import 'package:anchor/data/local_database/database.dart';
+import 'package:anchor/data/repositories/anchor_drop_repository.dart';
+import 'package:anchor/data/repositories/peer_repository.dart';
+import 'package:anchor/services/ble/ble_models.dart' as ble;
+import 'package:anchor/services/notification_service.dart';
+import 'package:anchor/services/transport/transport.dart';
 import 'package:equatable/equatable.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-
-import '../../../core/utils/logger.dart';
-import '../../../data/local_database/database.dart';
-import '../../../data/repositories/anchor_drop_repository.dart';
-import '../../../data/repositories/peer_repository.dart';
-import '../../../services/notification_service.dart';
-import '../../../services/transport/transport.dart';
 
 // ---------------------------------------------------------------------------
 // Events
@@ -145,7 +145,7 @@ class AnchorDropBloc extends Bloc<AnchorDropEvent, AnchorDropState> {
       (change) => add(AnchorDropPeerIdMigrated(
         oldPeerId: change.oldPeerId,
         newPeerId: change.newPeerId,
-      )),
+      ),),
     );
 
     // Listen to peer discovery — retry pending drops when a peer reappears.
@@ -164,9 +164,9 @@ class AnchorDropBloc extends Bloc<AnchorDropEvent, AnchorDropState> {
   final TransportManager _transportManager;
   final NotificationService? _notificationService;
 
-  StreamSubscription? _anchorDropSub;
-  StreamSubscription? _peerIdChangedSub;
-  StreamSubscription? _peerDiscoveredSub;
+  StreamSubscription<ble.AnchorDropReceived>? _anchorDropSub;
+  StreamSubscription<ble.PeerIdChanged>? _peerIdChangedSub;
+  StreamSubscription<ble.DiscoveredPeer>? _peerDiscoveredSub;
 
   /// Prevent concurrent retry attempts for the same peer.
   final Set<String> _retryingPeerIds = {};
@@ -176,7 +176,7 @@ class AnchorDropBloc extends Bloc<AnchorDropEvent, AnchorDropState> {
     Emitter<AnchorDropState> emit,
   ) async {
     final sentDropPeerIds =
-        await _anchorDropRepository.getSentPeerIdsSince(hours: 24);
+        await _anchorDropRepository.getSentPeerIdsSince();
     emit(state.copyWith(droppedAnchorPeerIds: sentDropPeerIds));
   }
 
@@ -205,15 +205,15 @@ class AnchorDropBloc extends Bloc<AnchorDropEvent, AnchorDropState> {
       if (success) {
         Logger.info(
             'AnchorDropBloc: Anchor dropped on ${event.peerName}',
-            'AnchorDrop');
+            'AnchorDrop',);
       } else {
         Logger.info(
             'AnchorDropBloc: Anchor queued for ${event.peerName} (peer unreachable)',
-            'AnchorDrop');
+            'AnchorDrop',);
       }
     } catch (e) {
       Logger.error(
-          'AnchorDropBloc: Failed to drop anchor', e, null, 'AnchorDrop');
+          'AnchorDropBloc: Failed to drop anchor', e, null, 'AnchorDrop',);
     }
   }
 
@@ -244,7 +244,7 @@ class AnchorDropBloc extends Bloc<AnchorDropEvent, AnchorDropState> {
       }
     } catch (e) {
       Logger.error(
-          'AnchorDropBloc: Retry failed', e, null, 'AnchorDrop');
+          'AnchorDropBloc: Retry failed', e, null, 'AnchorDrop',);
     } finally {
       _retryingPeerIds.remove(peerId);
     }
@@ -260,7 +260,7 @@ class AnchorDropBloc extends Bloc<AnchorDropEvent, AnchorDropState> {
       final peerName = peer?.name ?? 'Someone';
 
       // Discard if blocked.
-      if (peer?.isBlocked == true) return;
+      if (peer?.isBlocked ?? false) return;
 
       await _anchorDropRepository.recordDrop(
         peerId: event.fromPeerId,
@@ -282,10 +282,10 @@ class AnchorDropBloc extends Bloc<AnchorDropEvent, AnchorDropState> {
 
       Logger.info(
           'AnchorDropBloc: Received anchor drop from $peerName',
-          'AnchorDrop');
+          'AnchorDrop',);
     } catch (e) {
       Logger.error('AnchorDropBloc: Failed to handle anchor drop', e, null,
-          'AnchorDrop');
+          'AnchorDrop',);
     }
   }
 

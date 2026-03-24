@@ -10,10 +10,10 @@ void main() {
   group('DiscoveryState.visiblePeers', () {
     test('excludes blocked peers', () {
       final state = DiscoveryState(peers: [
-        TestFixtures.makePeer(peerId: 'p1', isBlocked: false),
+        TestFixtures.makePeer(peerId: 'p1'),
         TestFixtures.makePeer(peerId: 'p2', isBlocked: true),
-        TestFixtures.makePeer(peerId: 'p3', isBlocked: false),
-      ]);
+        TestFixtures.makePeer(peerId: 'p3'),
+      ],);
 
       expect(state.visiblePeers.map((p) => p.peerId), containsAll(['p1', 'p3']));
       expect(state.visiblePeers.map((p) => p.peerId), isNot(contains('p2')));
@@ -21,9 +21,9 @@ void main() {
 
     test('deduplicates peers by peerId, keeping first occurrence', () {
       final state = DiscoveryState(peers: [
-        TestFixtures.makePeer(peerId: 'p1', name: 'Alice'),
+        TestFixtures.makePeer(peerId: 'p1'),
         TestFixtures.makePeer(peerId: 'p1', name: 'Alice-duplicate'),
-      ]);
+      ],);
 
       final visible = state.visiblePeers;
       expect(visible.length, 1);
@@ -34,7 +34,7 @@ void main() {
       final state = DiscoveryState(peers: [
         TestFixtures.makePeer(peerId: 'p1', isBlocked: true),
         TestFixtures.makePeer(peerId: 'p2', isBlocked: true),
-      ]);
+      ],);
       expect(state.visiblePeers, isEmpty);
     });
 
@@ -43,8 +43,8 @@ void main() {
     test('puts online peers before offline peers', () {
       final state = DiscoveryState(peers: [
         TestFixtures.makePeer(peerId: 'offline', isOnline: false, rssi: -40),
-        TestFixtures.makePeer(peerId: 'online', isOnline: true, rssi: -80),
-      ]);
+        TestFixtures.makePeer(peerId: 'online', rssi: -80),
+      ],);
 
       final visible = state.visiblePeers;
       expect(visible.first.peerId, 'online');
@@ -57,8 +57,8 @@ void main() {
       final state = DiscoveryState(peers: [
         TestFixtures.makePeer(peerId: 'far', rssi: -80),
         TestFixtures.makePeer(peerId: 'close', rssi: -40),
-        TestFixtures.makePeer(peerId: 'mid', rssi: -60),
-      ]);
+        TestFixtures.makePeer(peerId: 'mid'),
+      ],);
 
       final ids = state.visiblePeers.map((p) => p.peerId).toList();
       // Insertion order preserved — no RSSI sorting in visiblePeers
@@ -68,9 +68,9 @@ void main() {
     test('peers within same 10dBm bucket stay in insertion order (stable sort)', () {
       // -60 and -65 fall in the same bucket (-60 ~/ 10 = -6)
       final state = DiscoveryState(peers: [
-        TestFixtures.makePeer(peerId: 'first', rssi: -60),
+        TestFixtures.makePeer(peerId: 'first'),
         TestFixtures.makePeer(peerId: 'second', rssi: -65),
-      ]);
+      ],);
 
       final ids = state.visiblePeers.map((p) => p.peerId).toList();
       // Both in bucket -6, insertion order preserved
@@ -79,9 +79,9 @@ void main() {
 
     test('peer with null RSSI treated as -100 (far away) among online peers', () {
       final state = DiscoveryState(peers: [
-        TestFixtures.makePeer(peerId: 'strong', rssi: -60),
+        TestFixtures.makePeer(peerId: 'strong'),
         TestFixtures.makePeer(peerId: 'no-rssi', rssi: null),
-      ]);
+      ],);
 
       final ids = state.visiblePeers.map((p) => p.peerId).toList();
       expect(ids.first, 'strong');
@@ -97,7 +97,7 @@ void main() {
         TestFixtures.makePeer(peerId: 'p1'),
         TestFixtures.makePeer(peerId: 'p2', isBlocked: true),
         TestFixtures.makePeer(peerId: 'p3'),
-      ]);
+      ],);
       expect(state.peerCount, 2);
       expect(state.hasPeers, isTrue);
     });
@@ -112,12 +112,12 @@ void main() {
   group('DiscoveryState.copyWith', () {
     test('explicit null clears errorMessage', () {
       const state = DiscoveryState(errorMessage: 'some error');
-      final cleared = state.copyWith(errorMessage: null);
+      final cleared = state.copyWith();
       expect(cleared.errorMessage, isNull);
     });
 
     test('preserves all unmodified fields', () {
-      final now = DateTime(2024, 6, 1);
+      final now = DateTime(2024, 6);
       final state = DiscoveryState(
         status: DiscoveryStatus.loaded,
         lastRefreshed: now,

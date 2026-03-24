@@ -80,11 +80,11 @@ Future<List<Uint8List>> _noiseHkdf(
 ///   [0, 0, 0, 0] || little-endian uint64(n)
 Uint8List _noiseNonce(int n) {
   final nonce = Uint8List(12);
-  final bd = ByteData.sublistView(nonce);
-  // 4 leading zero bytes; little-endian uint64 at offset 4
-  bd.setUint32(0, 0, Endian.big);
-  bd.setUint32(4, n & 0xFFFFFFFF, Endian.little);
-  bd.setUint32(8, (n >> 32) & 0xFFFFFFFF, Endian.little);
+  ByteData.sublistView(nonce)
+    // 4 leading zero bytes; little-endian uint64 at offset 4
+    ..setUint32(0, 0)
+    ..setUint32(4, n & 0xFFFFFFFF, Endian.little)
+    ..setUint32(8, (n >> 32) & 0xFFFFFFFF, Endian.little);
   return nonce;
 }
 
@@ -114,7 +114,7 @@ class NoiseHandshakeProcessor {
   }) async {
     // h = ck = ASCII bytes of protocol name (32 bytes exactly)
     var h = Uint8List.fromList(utf8.encode(_kProtocolName));
-    var ck = Uint8List.fromList(h);
+    final ck = Uint8List.fromList(h);
 
     // MixHash(prologue)
     if (prologue != null && prologue.isNotEmpty) {
@@ -163,9 +163,9 @@ class NoiseHandshakeProcessor {
       aad: ad,
     );
     // Concatenate ciphertext + 16-byte Poly1305 tag
-    final result = Uint8List(box.cipherText.length + box.mac.bytes.length);
-    result.setRange(0, box.cipherText.length, box.cipherText);
-    result.setRange(box.cipherText.length, result.length, box.mac.bytes);
+    final result = Uint8List(box.cipherText.length + box.mac.bytes.length)
+      ..setRange(0, box.cipherText.length, box.cipherText)
+      ..setRange(box.cipherText.length, box.cipherText.length + box.mac.bytes.length, box.mac.bytes);
     return result;
   }
 
@@ -308,8 +308,8 @@ class NoiseHandshakeProcessor {
     // es: DH(e, rs) → MixKey
     final es = await _dh(eph.privateKey, responderStaticPublic);
     final mixed = await _mixKey(ck, es);
-    var newCk = mixed.ck;
-    var newK = mixed.k;
+    final newCk = mixed.ck;
+    final newK = mixed.k;
     var newN = 0; // MixKey resets n
 
     // EncryptAndHash("") — empty payload
@@ -363,8 +363,8 @@ class NoiseHandshakeProcessor {
     //       From responder's view: DH(s_resp, e_init) — same result.
     final es = await _dh(responderStaticPrivate, initiatorEph);
     final mixed = await _mixKey(ck, es);
-    var newCk = mixed.ck;
-    var newK = mixed.k;
+    final newCk = mixed.ck;
+    final newK = mixed.k;
     var newN = 0;
 
     // DecryptAndHash(encPayload) — verifies auth tag, plaintext should be empty
@@ -408,8 +408,8 @@ class NoiseHandshakeProcessor {
     // ee: DH(e_resp, e_init)
     final ee = await _dh(eph.privateKey, initiatorEphPublic);
     final mixed = await _mixKey(ck, ee);
-    var newCk = mixed.ck;
-    var newK = mixed.k;
+    final newCk = mixed.ck;
+    final newK = mixed.k;
     var newN = 0;
 
     // EncryptAndHash("") — empty payload → 16-byte tag
@@ -461,8 +461,8 @@ class NoiseHandshakeProcessor {
     // ee: DH(e_init, e_resp)
     final ee = await _dh(initiatorEphPrivate, responderEph);
     final mixed = await _mixKey(ck, ee);
-    var newCk = mixed.ck;
-    var newK = mixed.k;
+    final newCk = mixed.ck;
+    final newK = mixed.k;
     var newN = 0;
 
     // DecryptAndHash(encPayload)

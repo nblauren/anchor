@@ -63,7 +63,7 @@ void main() {
     mockRepo = MockPeerRepository();
 
     // Default stubs — most tests reuse these
-    when(() => mockRepo.getAllPeers(includeBlocked: false))
+    when(() => mockRepo.getAllPeers())
         .thenAnswer((_) async => []);
     when(() => mockRepo.isPeerBlocked(any())).thenAnswer((_) async => false);
     when(() => mockRepo.upsertPeer(
@@ -78,10 +78,10 @@ void main() {
           publicKeyHex: any(named: 'publicKeyHex'),
           transportId: any(named: 'transportId'),
           transportType: any(named: 'transportType'),
-        )).thenAnswer((inv) async => defaultEntry(
+        ),).thenAnswer((inv) async => defaultEntry(
           peerId: inv.namedArguments[#peerId] as String,
           name: inv.namedArguments[#name] as String,
-        ));
+        ),);
     when(() => mockRepo.blockPeer(any())).thenAnswer((_) async {});
     when(() => mockRepo.unblockPeer(any())).thenAnswer((_) async {});
     when(() => mockRepo.getPeerById(any())).thenAnswer((_) async => null);
@@ -113,7 +113,7 @@ void main() {
 
   blocTest<DiscoveryBloc, DiscoveryState>(
     'LoadDiscoveredPeers emits loading → loaded with empty list',
-    build: () => buildBloc(),
+    build: buildBloc,
     act: (b) => b.add(const LoadDiscoveredPeers()),
     expect: () => [
       isA<DiscoveryState>().having((s) => s.status, 'status', DiscoveryStatus.loading),
@@ -125,11 +125,11 @@ void main() {
   blocTest<DiscoveryBloc, DiscoveryState>(
     'LoadDiscoveredPeers populates peers from repository',
     build: () {
-      when(() => mockRepo.getAllPeers(includeBlocked: false))
+      when(() => mockRepo.getAllPeers())
           .thenAnswer((_) async => [
-                TestFixtures.makeEntry(peerId: 'p1', name: 'Alice'),
+                TestFixtures.makeEntry(peerId: 'p1'),
                 TestFixtures.makeEntry(peerId: 'p2', name: 'Bob'),
-              ]);
+              ],);
       return buildBloc();
     },
     act: (b) => b.add(const LoadDiscoveredPeers()),
@@ -144,7 +144,7 @@ void main() {
   blocTest<DiscoveryBloc, DiscoveryState>(
     'LoadDiscoveredPeers emits error when repo throws',
     build: () {
-      when(() => mockRepo.getAllPeers(includeBlocked: false))
+      when(() => mockRepo.getAllPeers())
           .thenThrow(Exception('DB error'));
       return buildBloc();
     },
@@ -161,7 +161,7 @@ void main() {
 
   blocTest<DiscoveryBloc, DiscoveryState>(
     'StartDiscovery sets isScanning = true',
-    build: () => buildBloc(),
+    build: buildBloc,
     act: (b) => b.add(const StartDiscovery()),
     expect: () => [
       isA<DiscoveryState>().having((s) => s.isScanning, 'isScanning', isTrue),
@@ -170,7 +170,7 @@ void main() {
 
   blocTest<DiscoveryBloc, DiscoveryState>(
     'StopDiscovery sets isScanning = false',
-    build: () => buildBloc(),
+    build: buildBloc,
     seed: () => const DiscoveryState(isScanning: true),
     act: (b) => b.add(const StopDiscovery()),
     expect: () => [
@@ -182,9 +182,9 @@ void main() {
 
   blocTest<DiscoveryBloc, DiscoveryState>(
     'BLE peer discovered → peer appears in state',
-    build: () => buildBloc(),
+    build: buildBloc,
     act: (b) async {
-      fakeBle.emitPeerDiscovered(TestFixtures.makeBlePeer(peerId: 'p1', name: 'Alice'));
+      fakeBle.emitPeerDiscovered(TestFixtures.makeBlePeer(peerId: 'p1'));
       await Future<void>.delayed(const Duration(milliseconds: 100));
     },
     wait: const Duration(milliseconds: 200),
@@ -206,23 +206,23 @@ void main() {
     },
     act: (b) async {
       fakeBle.emitPeerDiscovered(
-          TestFixtures.makeBlePeer(peerId: 'p-blocked', name: 'Blocked'));
+          TestFixtures.makeBlePeer(peerId: 'p-blocked', name: 'Blocked'),);
       await Future<void>.delayed(const Duration(milliseconds: 100));
     },
     wait: const Duration(milliseconds: 200),
-    expect: () => [], // no state changes
+    expect: () => <DiscoveryState>[], // no state changes
   );
 
   blocTest<DiscoveryBloc, DiscoveryState>(
     'Relayed peer is not persisted to database',
-    build: () => buildBloc(),
+    build: buildBloc,
     act: (b) async {
       fakeBle.emitPeerDiscovered(TestFixtures.makeBlePeer(
         peerId: 'relayed-p',
         name: 'Remote',
         isRelayed: true,
         hopCount: 1,
-      ));
+      ),);
       await Future<void>.delayed(const Duration(milliseconds: 100));
     },
     wait: const Duration(milliseconds: 200),
@@ -239,19 +239,18 @@ void main() {
             publicKeyHex: any(named: 'publicKeyHex'),
             transportId: any(named: 'transportId'),
             transportType: any(named: 'transportType'),
-          ));
+          ),);
     },
   );
 
   blocTest<DiscoveryBloc, DiscoveryState>(
     'Direct peer upserted to database on discovery',
-    build: () => buildBloc(),
+    build: buildBloc,
     act: (b) async {
       fakeBle.emitPeerDiscovered(TestFixtures.makeBlePeer(
         peerId: 'direct-p',
         name: 'Direct Alice',
-        isRelayed: false,
-      ));
+      ),);
       await Future<void>.delayed(const Duration(milliseconds: 100));
     },
     wait: const Duration(milliseconds: 200),
@@ -268,16 +267,16 @@ void main() {
             publicKeyHex: any(named: 'publicKeyHex'),
             transportId: any(named: 'transportId'),
             transportType: any(named: 'transportType'),
-          )).called(1);
+          ),).called(1);
     },
   );
 
   blocTest<DiscoveryBloc, DiscoveryState>(
     'Relayed peer does not overwrite directly-seen peer',
-    build: () => buildBloc(),
+    build: buildBloc,
     seed: () => DiscoveryState(
       status: DiscoveryStatus.loaded,
-      peers: [TestFixtures.makePeer(peerId: 'p1', name: 'Direct', isRelayed: false)],
+      peers: [TestFixtures.makePeer(peerId: 'p1', name: 'Direct')],
     ),
     act: (b) {
       // Send a relayed version of the same peer
@@ -285,19 +284,19 @@ void main() {
         peerId: 'p1',
         name: 'Relayed version',
         isRelayed: true,
-      ));
+      ),);
     },
-    expect: () => [], // no state change, direct peer preserved
+    expect: () => <DiscoveryState>[], // no state change, direct peer preserved
   );
 
   // ── PeerLost ──────────────────────────────────────────────────────────────
 
   blocTest<DiscoveryBloc, DiscoveryState>(
     'PeerLost marks peer as offline but does not remove it',
-    build: () => buildBloc(),
+    build: buildBloc,
     seed: () => DiscoveryState(
       status: DiscoveryStatus.loaded,
-      peers: [TestFixtures.makePeer(peerId: 'p1', isOnline: true)],
+      peers: [TestFixtures.makePeer(peerId: 'p1')],
     ),
     act: (b) => b.add(const PeerLost('p1')),
     expect: () => [
@@ -313,10 +312,10 @@ void main() {
 
   blocTest<DiscoveryBloc, DiscoveryState>(
     'BlockPeer marks peer isBlocked=true and calls repo',
-    build: () => buildBloc(),
+    build: buildBloc,
     seed: () => DiscoveryState(
       status: DiscoveryStatus.loaded,
-      peers: [TestFixtures.makePeer(peerId: 'p1', isBlocked: false)],
+      peers: [TestFixtures.makePeer(peerId: 'p1')],
     ),
     act: (b) => b.add(const BlockPeer('p1')),
     expect: () => [
@@ -346,7 +345,7 @@ void main() {
         50,
         (i) => TestFixtures.makeEntry(peerId: 'peer-$i', name: 'User $i'),
       );
-      when(() => mockRepo.getAllPeers(includeBlocked: false))
+      when(() => mockRepo.getAllPeers())
           .thenAnswer((_) async => entries);
       return buildBloc();
     },
@@ -380,7 +379,7 @@ void main() {
           peerId: 'peer-$i',
           name: 'User $i',
           rssi: -50,
-        ));
+        ),);
       }
 
       // Wait for isPeerBlocked futures + debounce window + apply event
@@ -400,13 +399,13 @@ void main() {
 
   blocTest<DiscoveryBloc, DiscoveryState>(
     'PeerDiscovered with thumbnail emits immediately (bypasses debounce)',
-    build: () => buildBloc(),
+    build: buildBloc,
     act: (b) {
       b.add(PeerDiscovered(
         peerId: 'p-thumb',
         name: 'Thumb User',
         thumbnailData: Uint8List.fromList([1, 2, 3]),
-      ));
+      ),);
     },
     wait: const Duration(milliseconds: 50),
     expect: () => [
@@ -422,16 +421,16 @@ void main() {
 
   blocTest<DiscoveryBloc, DiscoveryState>(
     'PeerTransportChangedEvent is handled without removing peer',
-    build: () => buildBloc(),
+    build: buildBloc,
     seed: () => DiscoveryState(
       status: DiscoveryStatus.loaded,
-      peers: [TestFixtures.makePeer(peerId: 'p1', isOnline: true)],
+      peers: [TestFixtures.makePeer(peerId: 'p1')],
     ),
     act: (b) => b.add(const PeerTransportChangedEvent(
       peerId: 'p1',
       newTransport: TransportType.ble,
-    )),
-    expect: () => [], // handler logs only, no state change
+    ),),
+    expect: () => <DiscoveryState>[], // handler logs only, no state change
   );
 
   test(
@@ -445,7 +444,7 @@ void main() {
       fakeBle.emitPeerDiscovered(TestFixtures.makeBlePeer(
         peerId: 'p1',
         name: 'Alex',
-      ));
+      ),);
 
       await Future<void>.delayed(const Duration(milliseconds: 200));
 
@@ -477,7 +476,7 @@ void main() {
       fakeBle.emitPeerDiscovered(TestFixtures.makeBlePeer(
         peerId: 'ble-only',
         name: 'BLE User',
-      ));
+      ),);
       await Future<void>.delayed(const Duration(milliseconds: 200));
 
       expect(bloc.state.peers.any((p) => p.peerId == 'ble-only'), isTrue);
@@ -502,7 +501,7 @@ void main() {
       fakeBle.emitPeerDiscovered(TestFixtures.makeBlePeer(
         peerId: 'p1',
         name: 'Test',
-      ));
+      ),);
 
       // Give stream time to propagate
       Future<void>.delayed(const Duration(milliseconds: 100)).then((_) {

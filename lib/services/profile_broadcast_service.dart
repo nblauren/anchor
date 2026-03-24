@@ -3,11 +3,10 @@ import 'dart:typed_data';
 
 import 'package:anchor/core/constants/profile_constants.dart';
 import 'package:anchor/core/utils/logger.dart';
+import 'package:anchor/features/profile/bloc/profile_state.dart';
 import 'package:anchor/services/ble/ble.dart' as ble;
 import 'package:anchor/services/image_service.dart' show resolvePhotoPath;
 import 'package:anchor/services/transport/transport.dart';
-
-import '../features/profile/bloc/profile_state.dart';
 
 /// Encapsulates the logic for broadcasting a user's profile over the
 /// transport layer (BLE, Wi-Fi Aware, LAN).
@@ -35,7 +34,7 @@ class ProfileBroadcastService {
     try {
       // Collect thumbnails for all profile photos in display order.
       final sortedPhotos = state.sortedPhotos;
-      final List<Uint8List> allThumbnails = [];
+      final allThumbnails = <Uint8List>[];
 
       Logger.info(
         'broadcast: photos=${sortedPhotos.length}',

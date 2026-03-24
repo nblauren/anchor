@@ -1,16 +1,13 @@
 import 'dart:io';
 
+import 'package:anchor/core/theme/app_theme.dart';
+import 'package:anchor/data/models/discovered_user.dart';
 import 'package:flutter/material.dart';
-
-import '../../../core/theme/app_theme.dart';
-import '../../../data/models/discovered_user.dart';
 
 /// Card widget displaying a discovered user in the grid
 class UserCardWidget extends StatelessWidget {
   const UserCardWidget({
-    super.key,
-    required this.user,
-    required this.onTap,
+    required this.user, required this.onTap, super.key,
   });
 
   final DiscoveredUser user;
@@ -46,9 +43,9 @@ class UserCardWidget extends StatelessWidget {
                   fit: BoxFit.cover,
                 )
               else
-                Container(
+                const ColoredBox(
                   color: AppTheme.darkCard,
-                  child: const Center(
+                  child: Center(
                     child: Icon(
                       Icons.person,
                       size: 48,

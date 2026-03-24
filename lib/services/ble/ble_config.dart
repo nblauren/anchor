@@ -146,11 +146,7 @@ class BleConfig {
 
   /// Create config from environment variables
   factory BleConfig.fromEnvironment() {
-    const useMock = bool.fromEnvironment('USE_MOCK_BLE', defaultValue: false);
-
-    return const BleConfig(
-      useMockService: useMock,
-    );
+    return BleConfig.production;
   }
 
   /// Development config (always uses mock)
@@ -160,7 +156,7 @@ class BleConfig {
 
   /// Production config
   static const BleConfig production = BleConfig(
-    useMockService: false,
+    
   );
 
   @override

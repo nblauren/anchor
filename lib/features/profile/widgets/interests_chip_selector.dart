@@ -1,7 +1,6 @@
+import 'package:anchor/core/constants/profile_constants.dart';
+import 'package:anchor/core/theme/app_theme.dart';
 import 'package:flutter/material.dart';
-
-import '../../../core/constants/profile_constants.dart';
-import '../../../core/theme/app_theme.dart';
 
 /// Multi-select chip grid for interest tags.
 ///
@@ -11,9 +10,7 @@ import '../../../core/theme/app_theme.dart';
 /// - Emits the full updated [List<int>] of selected IDs via [onChanged].
 class InterestsChipSelector extends StatelessWidget {
   const InterestsChipSelector({
-    super.key,
-    required this.selectedIds,
-    required this.onChanged,
+    required this.selectedIds, required this.onChanged, super.key,
   });
 
   /// Currently selected interest IDs.

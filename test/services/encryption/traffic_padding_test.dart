@@ -62,7 +62,7 @@ void main() {
           final data = Uint8List(entry.key);
           final padded = TrafficPadding.pad(data);
           expect(padded.length, entry.value,
-              reason: 'Input size ${entry.key} should pad to ${entry.value}');
+              reason: 'Input size ${entry.key} should pad to ${entry.value}',);
         }
       });
 
@@ -77,7 +77,7 @@ void main() {
         // "hey" (3 bytes) and "hello there" (11 bytes) both pad to 64.
         final a = TrafficPadding.pad(Uint8List.fromList([1, 2, 3]));
         final b = TrafficPadding.pad(
-            Uint8List.fromList([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]));
+            Uint8List.fromList([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]),);
         expect(a.length, b.length);
         expect(a.length, 64);
       });
@@ -120,7 +120,7 @@ void main() {
         for (final size in [
           0, 1, 2, 10, 32, 61, 62, 63, 64, 100, 126, 127, 128, 200, 254,
           255, 256, 500, 510, 511, 512, 1000, 1022, 1023, 1024, 2000, 2046,
-          2047, 2048, 3000, 4000, 4094, 4095, 4096, 5000
+          2047, 2048, 3000, 4000, 4094, 4095, 4096, 5000,
         ]) {
           final data = Uint8List(size);
           for (var i = 0; i < size; i++) {
@@ -129,21 +129,21 @@ void main() {
 
           final padded = TrafficPadding.pad(data);
           expect(padded.length, greaterThanOrEqualTo(size + 2),
-              reason: 'Padded size must be >= original + header for size $size');
+              reason: 'Padded size must be >= original + header for size $size',);
 
           final recovered = TrafficPadding.unpad(padded);
           expect(recovered, isNotNull,
-              reason: 'Unpad should succeed for size $size');
+              reason: 'Unpad should succeed for size $size',);
           expect(recovered!.length, size,
-              reason: 'Recovered length must match original for size $size');
+              reason: 'Recovered length must match original for size $size',);
           expect(recovered, equals(data),
-              reason: 'Recovered data must match original for size $size');
+              reason: 'Recovered data must match original for size $size',);
         }
       });
 
       test('padding preserves original data bytes exactly', () {
         final data = Uint8List.fromList(
-            List.generate(100, (i) => (i * 7 + 13) % 256));
+            List.generate(100, (i) => (i * 7 + 13) % 256),);
         final padded = TrafficPadding.pad(data);
         // Data starts at offset 2 (after 2-byte header).
         expect(padded.sublist(2, 102), equals(data));
@@ -158,7 +158,7 @@ void main() {
           final padded = TrafficPadding.pad(Uint8List(size));
           expect(blockSizes.contains(padded.length), isTrue,
               reason:
-                  'Padded size ${padded.length} for input $size is not a standard block');
+                  'Padded size ${padded.length} for input $size is not a standard block',);
         }
       });
 
@@ -167,7 +167,7 @@ void main() {
           final padded = TrafficPadding.pad(Uint8List(size));
           expect(padded.length % 4096, 0,
               reason: 'Padded size ${padded.length} for input $size '
-                  'should be a multiple of 4096');
+                  'should be a multiple of 4096',);
         }
       });
 
@@ -185,7 +185,7 @@ void main() {
         // Bytes after data (offset 12 to end) should be zero.
         for (var i = 12; i < padded.length; i++) {
           expect(padded[i], 0,
-              reason: 'Byte at offset $i should be zero fill');
+              reason: 'Byte at offset $i should be zero fill',);
         }
       });
     });

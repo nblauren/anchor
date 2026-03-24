@@ -1,14 +1,13 @@
 import 'dart:async';
 
+import 'package:anchor/core/utils/logger.dart';
+import 'package:anchor/services/ble/ble_models.dart';
+import 'package:anchor/services/ble/ble_service_interface.dart';
+import 'package:anchor/services/transport/transport_manager.dart';
 import 'package:battery_plus/battery_plus.dart';
 import 'package:equatable/equatable.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
-import '../../core/utils/logger.dart';
-import '../transport/transport_manager.dart';
-import 'ble_models.dart';
-import 'ble_service_interface.dart';
 
 // ==================== Events ====================
 
@@ -51,7 +50,7 @@ class AppPaused extends BleConnectionEvent {
 
 /// Toggle whether this device is visible to others (scanning + broadcasting)
 class SetVisibility extends BleConnectionEvent {
-  const SetVisibility(this.visible);
+  const SetVisibility({required this.visible});
   final bool visible;
 
   @override
@@ -60,7 +59,7 @@ class SetVisibility extends BleConnectionEvent {
 
 /// Toggle battery saver mode (reduces scan frequency)
 class SetBatterySaver extends BleConnectionEvent {
-  const SetBatterySaver(this.enabled);
+  const SetBatterySaver({required this.enabled});
   final bool enabled;
 
   @override
@@ -69,7 +68,7 @@ class SetBatterySaver extends BleConnectionEvent {
 
 /// Toggle mesh relay (message forwarding through intermediate devices)
 class SetMeshRelay extends BleConnectionEvent {
-  const SetMeshRelay(this.enabled);
+  const SetMeshRelay({required this.enabled});
   final bool enabled;
 
   @override
@@ -309,9 +308,9 @@ class BleConnectionBloc extends Bloc<BleConnectionEvent, BleConnectionState> {
     emit(state.copyWith(
         isVisible: isVisible,
         isBatterySaver: isBatterySaver,
-        isMeshRelay: isMeshRelay));
-    if (isBatterySaver) await _bleService.setBatterySaverMode(true);
-    if (!isMeshRelay) await _bleService.setMeshRelayMode(false);
+        isMeshRelay: isMeshRelay,),);
+    if (isBatterySaver) await _bleService.setBatterySaverMode(enabled: true);
+    if (!isMeshRelay) await _bleService.setMeshRelayMode(enabled: false);
 
     try {
       // Initialize first so state-change listeners are set up regardless of BT state.
@@ -323,7 +322,7 @@ class BleConnectionBloc extends Bloc<BleConnectionEvent, BleConnectionState> {
         emit(state.copyWith(
           status: BleConnectionStatus.unavailable,
           isBluetoothAvailable: false,
-        ));
+        ),);
         return;
       }
 
@@ -333,7 +332,7 @@ class BleConnectionBloc extends Bloc<BleConnectionEvent, BleConnectionState> {
           status: BleConnectionStatus.disabled,
           isBluetoothAvailable: true,
           isBluetoothEnabled: false,
-        ));
+        ),);
         return;
       }
 
@@ -344,7 +343,7 @@ class BleConnectionBloc extends Bloc<BleConnectionEvent, BleConnectionState> {
           isBluetoothAvailable: true,
           isBluetoothEnabled: true,
           hasPermissions: false,
-        ));
+        ),);
         return;
       }
 
@@ -353,7 +352,7 @@ class BleConnectionBloc extends Bloc<BleConnectionEvent, BleConnectionState> {
         isBluetoothAvailable: true,
         isBluetoothEnabled: true,
         hasPermissions: true,
-      ));
+      ),);
 
       Logger.info('BleConnectionBloc: Initialized successfully', 'BLE');
 
@@ -366,7 +365,7 @@ class BleConnectionBloc extends Bloc<BleConnectionEvent, BleConnectionState> {
       emit(state.copyWith(
         status: BleConnectionStatus.error,
         errorMessage: 'Failed to initialize: $e',
-      ));
+      ),);
     }
   }
 
@@ -404,14 +403,14 @@ class BleConnectionBloc extends Bloc<BleConnectionEvent, BleConnectionState> {
         status: BleConnectionStatus.active,
         isScanning: _bleService.isScanning,
         isBroadcasting: _bleService.isBroadcasting,
-      ));
+      ),);
       Logger.info('BleConnectionBloc: Started', 'BLE');
     } catch (e) {
       Logger.error('BleConnectionBloc: Start failed', e, null, 'BLE');
       emit(state.copyWith(
         status: BleConnectionStatus.error,
         errorMessage: 'Failed to start',
-      ));
+      ),);
     }
   }
 
@@ -425,7 +424,7 @@ class BleConnectionBloc extends Bloc<BleConnectionEvent, BleConnectionState> {
         status: BleConnectionStatus.ready,
         isScanning: false,
         isBroadcasting: false,
-      ));
+      ),);
       Logger.info('BleConnectionBloc: Stopped', 'BLE');
     } catch (e) {
       Logger.error('BleConnectionBloc: Stop failed', e, null, 'BLE');
@@ -487,7 +486,7 @@ class BleConnectionBloc extends Bloc<BleConnectionEvent, BleConnectionState> {
   ) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_prefBatterySaver, event.enabled);
-    await _bleService.setBatterySaverMode(event.enabled);
+    await _bleService.setBatterySaverMode(enabled: event.enabled);
     emit(state.copyWith(isBatterySaver: event.enabled));
     Logger.info('Battery saver set to ${event.enabled}', 'BLE');
   }
@@ -498,7 +497,7 @@ class BleConnectionBloc extends Bloc<BleConnectionEvent, BleConnectionState> {
   ) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_prefMeshRelay, event.enabled);
-    await _bleService.setMeshRelayMode(event.enabled);
+    await _bleService.setMeshRelayMode(enabled: event.enabled);
     emit(state.copyWith(isMeshRelay: event.enabled));
     Logger.info('Mesh relay set to ${event.enabled}', 'BLE');
   }
@@ -516,21 +515,21 @@ class BleConnectionBloc extends Bloc<BleConnectionEvent, BleConnectionState> {
           isBluetoothEnabled: false,
           isScanning: false,
           isBroadcasting: false,
-        ));
+        ),);
       case BleStatus.noPermission:
         emit(state.copyWith(
           status: BleConnectionStatus.noPermission,
           hasPermissions: false,
           isScanning: false,
           isBroadcasting: false,
-        ));
+        ),);
       case BleStatus.error:
         emit(state.copyWith(
           status: BleConnectionStatus.error,
           isScanning: false,
           isBroadcasting: false,
           errorMessage: 'Bluetooth error',
-        ));
+        ),);
       case BleStatus.ready:
         // Bluetooth was re-enabled — transition to ready.
         // Only auto-start if we were previously disabled (not if already active).
@@ -542,7 +541,7 @@ class BleConnectionBloc extends Bloc<BleConnectionEvent, BleConnectionState> {
           hasPermissions: true,
           isScanning: false,
           isBroadcasting: false,
-        ));
+        ),);
         if (wasDisabled && state.isInForeground && state.isVisible) {
           add(const StartBleService());
         }
@@ -555,7 +554,7 @@ class BleConnectionBloc extends Bloc<BleConnectionEvent, BleConnectionState> {
           hasPermissions: true,
           isScanning: _bleService.isScanning,
           isBroadcasting: _bleService.isBroadcasting,
-        ));
+        ),);
     }
   }
 

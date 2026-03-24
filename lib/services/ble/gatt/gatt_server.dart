@@ -5,11 +5,10 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:anchor/core/utils/logger.dart';
+import 'package:anchor/services/ble/ble_config.dart';
+import 'package:anchor/services/ble/ble_models.dart';
 import 'package:bluetooth_low_energy/bluetooth_low_energy.dart';
-
-import '../../../core/utils/logger.dart';
-import '../ble_config.dart';
-import '../ble_models.dart';
 
 /// Manages the BLE GATT server (peripheral side): service setup, read
 /// request handling, notification pushes, and advertising lifecycle.
@@ -35,10 +34,10 @@ class GattServer {
   static final _reversePathCharUuid = BleUuids.reversePathChar;
 
   // GATT characteristics (server side)
-  GATTCharacteristic? _profileChar;
-  GATTCharacteristic? _thumbnailChar;
+  late GATTCharacteristic _profileChar;
+  late GATTCharacteristic _thumbnailChar;
   GATTCharacteristic? _messagingChar;
-  GATTCharacteristic? _fullPhotosChar;
+  late GATTCharacteristic _fullPhotosChar;
   GATTCharacteristic? _reversePathChar;
 
   // Connected Centrals — tracked so we can send GATT notifications back
@@ -77,10 +76,10 @@ class GattServer {
   BroadcastPayload? _pendingPayload;
 
   // Subscriptions
-  StreamSubscription? _stateSubscription;
-  StreamSubscription? _charReadSubscription;
-  StreamSubscription? _charWriteSubscription;
-  StreamSubscription? _charNotifyStateSubscription;
+  StreamSubscription<BluetoothLowEnergyStateChangedEventArgs>? _stateSubscription;
+  StreamSubscription<GATTCharacteristicReadRequestedEventArgs>? _charReadSubscription;
+  StreamSubscription<GATTCharacteristicWriteRequestedEventArgs>? _charWriteSubscription;
+  StreamSubscription<GATTCharacteristicNotifyStateChangedEventArgs>? _charNotifyStateSubscription;
 
   /// Periodic timer that restarts advertising to prevent stale BLE caches.
   /// Both iOS and Android cache advertisement data aggressively — restarting
@@ -213,10 +212,10 @@ class GattServer {
         isPrimary: true,
         includedServices: [],
         characteristics: [
-          _profileChar!,
-          _thumbnailChar!,
+          _profileChar,
+          _thumbnailChar,
           _messagingChar!,
-          _fullPhotosChar!,
+          _fullPhotosChar,
           _reversePathChar!,
         ],
       );
@@ -371,7 +370,7 @@ class GattServer {
 
   /// Remove all services and reset state. Called during stop().
   Future<void> teardown() async {
-    _peripheralReadySub?.cancel();
+    await _peripheralReadySub?.cancel();
     _peripheralReadySub = null;
     await stopAdvertising();
     try {
@@ -388,7 +387,7 @@ class GattServer {
   Future<void> dispose() async {
     _reAnnounceTimer?.cancel();
     _reAnnounceTimer = null;
-    _peripheralReadySub?.cancel();
+    await _peripheralReadySub?.cancel();
     _peripheralReadySub = null;
     await _stateSubscription?.cancel();
     await _charReadSubscription?.cancel();
@@ -435,7 +434,7 @@ class GattServer {
   /// Replaces the old polling approach (5 retries × 2s) with an event-driven
   /// listener that reacts immediately when the peripheral becomes ready,
   /// regardless of how long it takes.
-  StreamSubscription? _peripheralReadySub;
+  StreamSubscription<BluetoothLowEnergyStateChangedEventArgs>? _peripheralReadySub;
 
   void _waitForPeripheralReady() {
     // Already ready — handle immediately.
@@ -540,7 +539,7 @@ class GattServer {
         try {
           await _peripheral.startAdvertising(Advertisement(
             serviceUUIDs: [_serviceUuid],
-          ));
+          ),);
           _isBroadcasting = true;
           _scheduleReAnnounce(payload);
           Logger.info(
@@ -573,11 +572,11 @@ class GattServer {
           await _peripheral.startAdvertising(Advertisement(
             name: compactName,
             serviceUUIDs: [_serviceUuid],
-          ));
+          ),);
         } catch (_) {
           await _peripheral.startAdvertising(Advertisement(
             serviceUUIDs: [_serviceUuid],
-          ));
+          ),);
         }
       } catch (e) {
         Logger.warning('GattServer: Re-announce failed: $e', 'BLE');
@@ -637,8 +636,8 @@ class GattServer {
   /// full-photos (fff4) are served from the correct data buffer.
   ///
   /// iOS issues Read Blob Requests with increasing offsets for data > ATT MTU.
-  void _onCharacteristicReadRequested(
-      GATTCharacteristicReadRequestedEventArgs args) async {
+  Future<void> _onCharacteristicReadRequested(
+      GATTCharacteristicReadRequestedEventArgs args,) async {
     try {
       final charUuid = args.characteristic.uuid;
       final offset = args.request.offset;
@@ -694,7 +693,7 @@ class GattServer {
       );
     } catch (e) {
       Logger.error(
-          'GattServer: Characteristic read response failed', e, null, 'BLE');
+          'GattServer: Characteristic read response failed', e, null, 'BLE',);
     }
   }
 
@@ -702,8 +701,8 @@ class GattServer {
 
   /// Receives writes on the messaging characteristic (fff3), responds to the
   /// GATT write request, then delegates raw data to the orchestrator callback.
-  void _onWriteRequested(
-      GATTCharacteristicWriteRequestedEventArgs args) async {
+  Future<void> _onWriteRequested(
+      GATTCharacteristicWriteRequestedEventArgs args,) async {
     try {
       await _peripheral.respondWriteRequest(args.request);
 
@@ -818,8 +817,8 @@ class GattServer {
 
   /// Push the primary thumbnail in MTU-sized chunks when a central subscribes
   /// to the thumbnail characteristic (fff2).
-  void _onThumbnailNotifyStateChanged(
-      GATTCharacteristicNotifyStateChangedEventArgs args) async {
+  Future<void> _onThumbnailNotifyStateChanged(
+      GATTCharacteristicNotifyStateChangedEventArgs args,) async {
     if (args.characteristic.uuid != _thumbnailCharUuid) return;
     if (!args.state) {
       Logger.debug(
@@ -855,7 +854,7 @@ class GattServer {
       try {
         await _peripheral.notifyCharacteristic(
           central,
-          _thumbnailChar!,
+          _thumbnailChar,
           value: chunk,
         );
         offset = end;
@@ -885,8 +884,8 @@ class GattServer {
 
   /// Push ALL photo thumbnails concatenated when a central subscribes
   /// to the full-photos characteristic (fff4).
-  void _onFullPhotosNotifyStateChanged(
-      GATTCharacteristicNotifyStateChangedEventArgs args) async {
+  Future<void> _onFullPhotosNotifyStateChanged(
+      GATTCharacteristicNotifyStateChangedEventArgs args,) async {
     if (args.characteristic.uuid != _fullPhotosCharUuid) return;
     if (!args.state) {
       Logger.debug(
@@ -922,7 +921,7 @@ class GattServer {
       try {
         await _peripheral.notifyCharacteristic(
           central,
-          _fullPhotosChar!,
+          _fullPhotosChar,
           value: chunk,
         );
         offset = end;

@@ -1,4 +1,4 @@
-import '../constants/profile_constants.dart';
+import 'package:anchor/core/constants/profile_constants.dart';
 
 /// Centralised validation for all user-entered profile fields.
 ///

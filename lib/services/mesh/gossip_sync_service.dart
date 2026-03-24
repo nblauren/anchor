@@ -2,8 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
-import '../../core/utils/logger.dart';
-import 'golomb_coded_set.dart';
+import 'package:anchor/core/utils/logger.dart';
+import 'package:anchor/services/mesh/golomb_coded_set.dart';
 
 /// Gossip-based message synchronization using Golomb-Coded Sets (GCS).
 ///
@@ -157,7 +157,7 @@ class GossipSyncService {
       }
     } catch (e) {
       Logger.warning(
-          'GossipSync: Failed to process sync from $fromPeerId: $e', 'Mesh');
+          'GossipSync: Failed to process sync from $fromPeerId: $e', 'Mesh',);
     }
   }
 

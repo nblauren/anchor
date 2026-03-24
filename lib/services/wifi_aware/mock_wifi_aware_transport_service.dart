@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'dart:typed_data';
 
-import '../../core/utils/logger.dart';
-import '../ble/ble_models.dart' as ble;
-import 'wifi_aware_transport_service.dart';
+import 'package:anchor/core/utils/logger.dart';
+import 'package:anchor/services/ble/ble_models.dart' as ble;
+import 'package:anchor/services/wifi_aware/wifi_aware_transport_service.dart';
 
 /// Mock implementation of [WifiAwareTransportService] for testing and
 /// simulator environments where Wi-Fi Aware is unavailable.

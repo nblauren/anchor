@@ -1,6 +1,5 @@
+import 'package:anchor/data/models/user_profile.dart';
 import 'package:equatable/equatable.dart';
-
-import 'user_profile.dart';
 
 /// Represents a user discovered via BLE mesh network
 class DiscoveredUser extends Equatable {

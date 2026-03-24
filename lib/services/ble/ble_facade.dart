@@ -4,24 +4,24 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:anchor/core/utils/logger.dart';
+import 'package:anchor/services/ble/binary_message_codec.dart';
+import 'package:anchor/services/ble/ble_config.dart';
+import 'package:anchor/services/ble/ble_models.dart';
+import 'package:anchor/services/ble/ble_service_interface.dart';
+import 'package:anchor/services/ble/connection/connection_manager.dart';
+import 'package:anchor/services/ble/discovery/ble_scanner.dart';
+import 'package:anchor/services/ble/discovery/profile_reader.dart';
+import 'package:anchor/services/ble/gatt/gatt_server.dart';
+import 'package:anchor/services/ble/gatt/gatt_write_queue.dart';
+import 'package:anchor/services/ble/mesh/mesh_relay_service.dart';
+import 'package:anchor/services/ble/transfer/photo_transfer_handler.dart';
+import 'package:anchor/services/encryption/encryption.dart';
+import 'package:anchor/services/mesh/gossip_sync_service.dart';
+import 'package:anchor/services/mesh/mesh_packet.dart';
 import 'package:bluetooth_low_energy/bluetooth_low_energy.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../../core/utils/logger.dart';
-import '../encryption/encryption.dart';
-import 'ble_config.dart';
-import 'ble_models.dart';
-import 'ble_service_interface.dart';
-import 'connection/connection_manager.dart';
-import 'discovery/ble_scanner.dart';
-import 'discovery/profile_reader.dart';
-import 'gatt/gatt_server.dart';
-import 'gatt/gatt_write_queue.dart';
-import '../mesh/gossip_sync_service.dart';
-import '../mesh/mesh_packet.dart';
-import 'binary_message_codec.dart';
-import 'mesh/mesh_relay_service.dart';
-import 'transfer/photo_transfer_handler.dart';
 
 /// Production [BleServiceInterface] — thin orchestrator that wires together
 /// the extracted BLE subsystems:
@@ -115,8 +115,8 @@ class BleFacade implements BleServiceInterface {
   // GATT server setup, reads, notifications, advertising are now managed by GattServer.
 
   // Subscriptions
-  StreamSubscription? _centralStateSubscription;
-  StreamSubscription? _charNotifiedSubscription;
+  StreamSubscription<BluetoothLowEnergyStateChangedEventArgs>? _centralStateSubscription;
+  StreamSubscription<GATTCharacteristicNotifiedEventArgs>? _charNotifiedSubscription;
 
   // In-memory message ID deduplication — capacity-bounded LRU cache.
   // Evicts the oldest entry when full instead of using fire-and-forget timers.
@@ -148,7 +148,6 @@ class BleFacade implements BleServiceInterface {
 
       _connectionManager = ConnectionManager(
         central: _central,
-        config: config,
       );
       _connectionManager.startListening();
       _writeQueue = GattWriteQueue(central: _central);
@@ -169,11 +168,12 @@ class BleFacade implements BleServiceInterface {
         connectionManager: _connectionManager,
         prefs: prefs,
       );
-      _profileReader.loadPersistedSizes();
-      _profileReader.onProfileRead = _onProfileReadResult;
-      _profileReader.onThumbnailAssembled = _onThumbnailAssembled;
-      _profileReader.onPhotosAssembled = _onPhotosAssembled;
-      _profileReader.onFullPhotosAssembled = _onFullPhotosAssembled;
+      _profileReader
+        ..loadPersistedSizes()
+        ..onProfileRead = _onProfileReadResult
+        ..onThumbnailAssembled = _onThumbnailAssembled
+        ..onPhotosAssembled = _onPhotosAssembled
+        ..onFullPhotosAssembled = _onFullPhotosAssembled;
 
       // MeshRelayService: mesh relay, peer announce, routing
       _meshRelay = MeshRelayService(
@@ -319,17 +319,13 @@ class BleFacade implements BleServiceInterface {
         }
         // Retry pending advertising (central ready — peripheral may already be ready too)
         _gattServer.retryAdvertisingIfNeeded();
-        break;
       case BluetoothLowEnergyState.poweredOff:
         _setStatus(BleStatus.disabled);
-        break;
       case BluetoothLowEnergyState.unauthorized:
         _setStatus(BleStatus.noPermission);
-        break;
       case BluetoothLowEnergyState.unsupported:
         _setStatus(BleStatus.disabled);
-        break;
-      default:
+      case BluetoothLowEnergyState.unknown:
         break;
     }
   }
@@ -510,12 +506,12 @@ class BleFacade implements BleServiceInterface {
               'BLE',
             );
           }
-        }, onError: (e) {
+        }, onError: (Object e) {
           Logger.debug(
             'BLE: Ed25519 verification error: $e',
             'BLE',
           );
-        });
+        },);
       }
     }
 
@@ -575,7 +571,12 @@ class BleFacade implements BleServiceInterface {
         _handleGossipSync(packet, fromPeerId);
       case PacketType.gossipRequest:
         _handleGossipRequest(packet, fromPeerId);
-      default:
+      case PacketType.ack:
+      case PacketType.photoPreview:
+      case PacketType.photoRequest:
+      case PacketType.photoData:
+      case PacketType.wifiTransferReady:
+      case PacketType.readReceipt:
         Logger.debug('BLE: Unhandled binary packet type: ${packet.type.name}', 'BLE');
     }
   }
@@ -662,7 +663,6 @@ class BleFacade implements BleServiceInterface {
         content: chat.content ?? '',
         timestamp: packet.timestamp,
         replyToId: chat.replyToId,
-        isEncrypted: false,
       );
       _messageReceivedController.add(message);
     } else {
@@ -694,7 +694,7 @@ class BleFacade implements BleServiceInterface {
       fromPeerId: fromPeerId,
       step: hs.step,
       payload: hs.payload,
-    ));
+    ),);
   }
 
   /// Handle a binary-encoded reaction.
@@ -705,7 +705,7 @@ class BleFacade implements BleServiceInterface {
       emoji: reaction.emoji,
       action: reaction.action,
       timestamp: timestamp,
-    ));
+    ),);
     Logger.info(
       'BleService: Binary reaction ${reaction.emoji} (${reaction.action}) from '
       '${fromPeerId.substring(0, min(8, fromPeerId.length))}',
@@ -793,7 +793,7 @@ class BleFacade implements BleServiceInterface {
       final encPayload = enc?.parseEncryptedFields(json);
 
       String content;
-      String? replyToId = json['reply_to_id'] as String?;
+      final replyToId = json['reply_to_id'] as String?;
 
       if (encPayload != null && enc != null) {
         // Decrypt the inner envelope asynchronously, then emit.
@@ -844,7 +844,6 @@ class BleFacade implements BleServiceInterface {
         content: content,
         timestamp: DateTime.now(),
         replyToId: replyToId,
-        isEncrypted: false,
       );
       _messageReceivedController.add(message);
       Logger.info(
@@ -875,7 +874,7 @@ class BleFacade implements BleServiceInterface {
       fromPeerId: fromPeerId,
       step: step,
       payload: Uint8List.fromList(base64.decode(payloadB64)),
-    ));
+    ),);
   }
 
   @override
@@ -889,7 +888,7 @@ class BleFacade implements BleServiceInterface {
   /// resolves canonical userId -> BLE UUID before calling this).
   @override
   Future<void> sendHandshakeMessage(
-      String peerId, int step, Uint8List payload) async {
+      String peerId, int step, Uint8List payload,) async {
     // Clear dead-peer status so connection attempts aren't silently blocked.
     _connectionManager.clearDeadStatus(peerId);
 
@@ -931,7 +930,7 @@ class BleFacade implements BleServiceInterface {
           'E2EE',
         );
       } finally {
-        connSub.cancel();
+        unawaited(connSub.cancel());
       }
     }
     if (conn == null || !conn.canSendMessages) {
@@ -983,7 +982,6 @@ class BleFacade implements BleServiceInterface {
       peripheral: conn.peripheral,
       characteristic: conn.messagingChar!,
       data: data,
-      priority: WritePriority.userMessage,
     )
         .catchError((Object e) {
       Logger.error('Handshake write failed for $peerId', e, null, 'E2EE');
@@ -1046,9 +1044,9 @@ class BleFacade implements BleServiceInterface {
   ///
   /// Falls back to [centralId] if no match is found.
   String _resolveIncomingPeerId(String centralId,
-      {String? truncatedSenderId}) {
+      {String? truncatedSenderId,}) {
     // Fast path: centralId is already a known peer with an E2EE session.
-    if (encryptionService?.hasSession(centralId) == true) {
+    if (encryptionService?.hasSession(centralId) ?? false) {
       return centralId;
     }
 
@@ -1062,7 +1060,7 @@ class BleFacade implements BleServiceInterface {
           final truncated = MeshPacket.truncateIdSync(userId);
           if (truncated == truncatedSenderId) {
             // Found the peer — use whichever ID has an active E2EE session.
-            if (encryptionService?.hasSession(entry.key) == true) {
+            if (encryptionService?.hasSession(entry.key) ?? false) {
               Logger.info(
                 'BLE: Resolved Central ${centralId.substring(0, min(8, centralId.length))} '
                 '→ Peripheral ${entry.key.substring(0, min(8, entry.key.length))} '
@@ -1073,7 +1071,7 @@ class BleFacade implements BleServiceInterface {
             }
             // Also try the userId directly — TransportManager may have
             // established the session under the canonical userId.
-            if (encryptionService?.hasSession(userId) == true) {
+            if (encryptionService?.hasSession(userId) ?? false) {
               Logger.info(
                 'BLE: Resolved Central ${centralId.substring(0, min(8, centralId.length))} '
                 '→ userId ${userId.substring(0, min(8, userId.length))} '
@@ -1103,7 +1101,7 @@ class BleFacade implements BleServiceInterface {
       final userId = directEntry!.userId!;
       for (final entry in _visiblePeers.entries) {
         if (entry.key != centralId && entry.value.userId == userId) {
-          if (encryptionService?.hasSession(entry.key) == true) {
+          if (encryptionService?.hasSession(entry.key) ?? false) {
             Logger.info(
               'BLE: Resolved Central ${centralId.substring(0, min(8, centralId.length))} '
               '→ sibling ${entry.key.substring(0, min(8, entry.key.length))} '
@@ -1147,7 +1145,7 @@ class BleFacade implements BleServiceInterface {
   // ==================== Mesh Relay (delegated to MeshRelayService) ====================
 
   @override
-  Future<void> setMeshRelayMode(bool enabled) async {
+  Future<void> setMeshRelayMode({required bool enabled}) async {
     _meshRelay.enabled = enabled;
   }
 
@@ -1284,11 +1282,11 @@ class BleFacade implements BleServiceInterface {
     if (myPublicKeyHex == null) {
       Logger.warning(
           'broadcastProfile: E2EE public key not ready — profile will NOT include pk',
-          'E2EE');
+          'E2EE',);
     } else {
       Logger.debug(
           'broadcastProfile: embedding pk ${myPublicKeyHex.substring(0, 8)}…',
-          'E2EE');
+          'E2EE',);
     }
     final myEd25519PublicKeyHex = encryptionService?.localEd25519PublicKeyHex;
     final payloadWithKey = myPublicKeyHex != null
@@ -1360,7 +1358,7 @@ class BleFacade implements BleServiceInterface {
 
   /// Called by BleScanner when a peer is discovered via advertisement.
   void _onScannerPeerDiscovered(
-      String peerId, String name, int? age, int rssi, Peripheral peripheral) {
+      String peerId, String name, int? age, int rssi, Peripheral peripheral,) {
     // Preserve age, bio and thumbnail already fetched via GATT in a prior scan
     // cycle. Advertisement packets can be truncated (31-byte limit).
     final existing = _visiblePeers[peerId];
@@ -1434,7 +1432,7 @@ class BleFacade implements BleServiceInterface {
             oldPeerId: entry.key,
             newPeerId: peerId,
             userId: userId,
-          ));
+          ),);
           _onPeerLost(entry.key);
           break;
         }
@@ -1683,7 +1681,7 @@ class BleFacade implements BleServiceInterface {
       }
     } catch (e) {
       Logger.error(
-          'BleService: fff3 notification processing failed', e, null, 'BLE');
+          'BleService: fff3 notification processing failed', e, null, 'BLE',);
     }
   }
 
@@ -1740,7 +1738,7 @@ class BleFacade implements BleServiceInterface {
       }
     } catch (e) {
       Logger.error(
-          'BleService: Reverse-path notification failed', e, null, 'BLE');
+          'BleService: Reverse-path notification failed', e, null, 'BLE',);
     }
   }
 
@@ -1759,7 +1757,7 @@ class BleFacade implements BleServiceInterface {
   /// reply messages route correctly even if GATT profile reading hasn't
   /// completed yet.
   void _registerCentralAsPeer(
-      String centralId, String userId, String? senderName) {
+      String centralId, String userId, String? senderName,) {
     // Check if we already have this Central UUID mapped to the correct userId.
     final existing = _visiblePeers[centralId];
     if (existing != null && existing.userId == userId) return;
@@ -1876,7 +1874,7 @@ class BleFacade implements BleServiceInterface {
     _onProfileReadResult(ProfileReadResult(
       peerId: centralId,
       profileJson: json,
-    ));
+    ),);
   }
 
   void _emitPeer(DiscoveredPeer peer) {
@@ -2026,7 +2024,7 @@ class BleFacade implements BleServiceInterface {
         }
 
         Logger.info(
-            'BleService: Peer not reachable: $peerId — triggering scan', 'BLE');
+            'BleService: Peer not reachable: $peerId — triggering scan', 'BLE',);
         _scanner.triggerImmediateScan();
         return false;
       }
@@ -2041,7 +2039,6 @@ class BleFacade implements BleServiceInterface {
         peripheral: conn.peripheral,
         characteristic: conn.messagingChar!,
         data: data,
-        priority: WritePriority.userMessage,
       );
 
       if (success) {
@@ -2131,7 +2128,7 @@ class BleFacade implements BleServiceInterface {
 
         Logger.info(
             'BleService: Cannot drop anchor — peer not reachable: $peerId',
-            'BLE');
+            'BLE',);
         return false;
       }
 
@@ -2140,7 +2137,6 @@ class BleFacade implements BleServiceInterface {
         peripheral: conn.peripheral,
         characteristic: conn.messagingChar!,
         data: data,
-        priority: WritePriority.userMessage,
       );
 
       if (success) {
@@ -2218,7 +2214,6 @@ class BleFacade implements BleServiceInterface {
         peripheral: conn.peripheral,
         characteristic: conn.messagingChar!,
         data: data,
-        priority: WritePriority.userMessage,
       );
 
       if (success) {
@@ -2298,7 +2293,7 @@ class BleFacade implements BleServiceInterface {
   /// Synchronous serialization (used for mesh relay path — no E2EE for relayed
   /// messages since we don't know the final hop's session state).
   Uint8List _serializeMessagePayload(MessagePayload payload,
-      {String? destinationUserId}) {
+      {String? destinationUserId,}) {
     final ownUserId = _gattServer.ownUserId;
     final ownName = _gattServer.pendingPayload?.name;
     return BinaryMessageCodec.encodeMessage(
@@ -2357,17 +2352,17 @@ class BleFacade implements BleServiceInterface {
 
     // No session or encryption failed — fall back to plaintext
     return _serializeMessagePayload(payload,
-        destinationUserId: destinationUserId);
+        destinationUserId: destinationUserId,);
   }
 
   // ==================== Photo Transfer (delegated to PhotoTransferHandler) ====================
 
   @override
   Future<bool> sendPhoto(String peerId, Uint8List photoData, String messageId,
-      {String? photoId}) {
+      {String? photoId,}) {
     _ensureInitialized();
     return _photoTransfer.sendPhoto(peerId, photoData, messageId,
-        photoId: photoId);
+        photoId: photoId,);
   }
 
   @override
@@ -2435,7 +2430,7 @@ class BleFacade implements BleServiceInterface {
       'sender_id': _gattServer.ownUserId,
       'message_id': messageId,
       'photo_id': photoId,
-    })));
+    }),),);
 
     // On iOS, Central UUID ≠ Peripheral UUID. peerId is the Peripheral UUID
     // (from scanning), but GattServer tracks Centrals by Central UUID.
@@ -2496,10 +2491,10 @@ class BleFacade implements BleServiceInterface {
   List<String> get visiblePeerIds => _visiblePeers.keys.toList();
 
   @override
-  Future<void> setBatterySaverMode(bool enabled) async {
-    _scanner.setBatterySaverMode(enabled);
+  Future<void> setBatterySaverMode({required bool enabled}) async {
+    _scanner.setBatterySaverMode(enabled: enabled);
     Logger.info(
-        'BleService: Battery saver ${enabled ? 'enabled' : 'disabled'}', 'BLE');
+        'BleService: Battery saver ${enabled ? 'enabled' : 'disabled'}', 'BLE',);
   }
 }
 

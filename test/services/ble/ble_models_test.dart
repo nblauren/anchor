@@ -116,9 +116,7 @@ void main() {
         age: 28,
         bio: 'bio',
         rssi: -55,
-        timestamp: DateTime(2024, 1, 1),
-        isRelayed: false,
-        hopCount: 0,
+        timestamp: DateTime(2024),
       );
 
       final copy = original.copyWith(rssi: -70);
@@ -193,7 +191,7 @@ void main() {
       const p = PhotoTransferProgress(
         messageId: 'm',
         peerId: 'p',
-        progress: 1.0,
+        progress: 1,
         status: PhotoTransferStatus.completed,
       );
       expect(p.isComplete, isTrue);
@@ -204,7 +202,7 @@ void main() {
       const p = PhotoTransferProgress(
         messageId: 'm',
         peerId: 'p',
-        progress: 0.0,
+        progress: 0,
         status: PhotoTransferStatus.failed,
         errorMessage: 'BLE write failed',
       );
@@ -219,7 +217,7 @@ void main() {
         progress: 0.5,
         status: PhotoTransferStatus.inProgress,
       );
-      final updated = orig.copyWith(progress: 1.0, status: PhotoTransferStatus.completed);
+      final updated = orig.copyWith(progress: 1, status: PhotoTransferStatus.completed);
       expect(updated.messageId, 'msg-1');
       expect(updated.peerId, 'peer-1');
       expect(updated.progress, 1.0);

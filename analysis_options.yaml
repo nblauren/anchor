@@ -1,4 +1,4 @@
-include: package:flutter_lints/flutter.yaml
+include: package:very_good_analysis/analysis_options.yaml
 
 analyzer:
   exclude:
@@ -10,8 +10,16 @@ analyzer:
 
 linter:
   rules:
-    - prefer_const_constructors
-    - prefer_const_declarations
-    - prefer_final_fields
-    - avoid_print
-    - prefer_single_quotes
+    prefer_const_constructors: true
+    prefer_const_declarations: true
+    prefer_final_fields: true
+    avoid_print: true
+    prefer_single_quotes: true
+    # Disabled: Adding 1,114 doc comments is a separate documentation task
+    public_member_api_docs: false
+    # Disabled: 80-char limit is too restrictive for Flutter widget trees
+    lines_longer_than_80_chars: false
+    # Disabled: comment_references flags valid prose references
+    comment_references: false
+    # Disabled: sort_constructors_first is stylistic preference
+    sort_constructors_first: false

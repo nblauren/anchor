@@ -1,11 +1,10 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:flutter_test/flutter_test.dart';
-
 import 'package:anchor/services/ble/binary_message_codec.dart';
 import 'package:anchor/services/ble/ble_models.dart';
 import 'package:anchor/services/mesh/mesh_packet.dart';
+import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   // Valid UUIDs for tests (MeshPacket._uuidToBytes requires hex-decodable IDs)
@@ -309,7 +308,7 @@ void main() {
         final jsonBytes = utf8.encode(jsonStr);
 
         expect(binary.length, lessThan(jsonBytes.length),
-            reason: 'Binary ${binary.length}B should be smaller than JSON ${jsonBytes.length}B');
+            reason: 'Binary ${binary.length}B should be smaller than JSON ${jsonBytes.length}B',);
       });
     });
 
@@ -580,7 +579,6 @@ void main() {
         final packet = MeshPacket(
           type: PacketType.gossipRequest,
           ttl: 1,
-          flags: 0,
           timestamp: DateTime.now(),
           senderId: MeshPacket.truncateIdSync(uuid1),
           recipientId: MeshPacket.truncateIdSync(uuid2),

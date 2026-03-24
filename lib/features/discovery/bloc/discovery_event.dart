@@ -1,8 +1,7 @@
 import 'dart:typed_data';
 
+import 'package:anchor/services/transport/transport_enums.dart';
 import 'package:equatable/equatable.dart';
-
-import '../../../services/transport/transport_enums.dart';
 
 abstract class DiscoveryEvent extends Equatable {
   const DiscoveryEvent();
@@ -184,4 +183,3 @@ class PeerTransportChangedEvent extends DiscoveryEvent {
   @override
   List<Object?> get props => [peerId, newTransport];
 }
-

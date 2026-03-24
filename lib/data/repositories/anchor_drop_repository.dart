@@ -1,7 +1,6 @@
+import 'package:anchor/data/local_database/database.dart';
 import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
-
-import '../local_database/database.dart';
 
 /// Repository for tracking sent and received ⚓ anchor drops
 class AnchorDropRepository {
@@ -33,7 +32,7 @@ class AnchorDropRepository {
   Future<void> markDelivered(String dropId) async {
     await (_db.update(_db.anchorDrops)..where((t) => t.id.equals(dropId)))
         .write(const AnchorDropsCompanion(
-            status: Value(AnchorDropStatus.delivered)));
+            status: Value(AnchorDropStatus.delivered),),);
   }
 
   /// Get all pending (undelivered) sent anchor drops for a specific peer,
@@ -48,7 +47,7 @@ class AnchorDropRepository {
               t.peerId.equals(peerId) &
               t.direction.equals(AnchorDropDirection.sent.name) &
               t.status.equals(AnchorDropStatus.pending.name) &
-              t.droppedAt.isBiggerOrEqualValue(cutoff)))
+              t.droppedAt.isBiggerOrEqualValue(cutoff),))
         .get();
   }
 
@@ -58,7 +57,7 @@ class AnchorDropRepository {
     await (_db.delete(_db.anchorDrops)
           ..where((t) =>
               t.status.equals(AnchorDropStatus.pending.name) &
-              t.droppedAt.isSmallerThanValue(cutoff)))
+              t.droppedAt.isSmallerThanValue(cutoff),))
         .go();
   }
 
@@ -119,7 +118,7 @@ class AnchorDropRepository {
   Future<List<AnchorDropEntry>> getReceivedDrops({int limit = 50}) async {
     return (_db.select(_db.anchorDrops)
           ..where(
-              (t) => t.direction.equals(AnchorDropDirection.received.name))
+              (t) => t.direction.equals(AnchorDropDirection.received.name),)
           ..orderBy([(t) => OrderingTerm.desc(t.droppedAt)])
           ..limit(limit))
         .get();

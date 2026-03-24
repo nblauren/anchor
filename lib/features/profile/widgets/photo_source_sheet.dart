@@ -1,13 +1,10 @@
+import 'package:anchor/core/theme/app_theme.dart';
 import 'package:flutter/material.dart';
-
-import '../../../core/theme/app_theme.dart';
 
 /// Bottom sheet for selecting photo source (camera or gallery)
 class PhotoSourceSheet extends StatelessWidget {
   const PhotoSourceSheet({
-    super.key,
-    required this.onCamera,
-    required this.onGallery,
+    required this.onCamera, required this.onGallery, super.key,
   });
 
   final VoidCallback onCamera;
@@ -81,7 +78,7 @@ class PhotoSourceSheet extends StatelessWidget {
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: const Icon(Icons.photo_library,
-                    color: AppTheme.primaryLight),
+                    color: AppTheme.primaryLight,),
               ),
               title: const Text('Choose from Gallery'),
               subtitle: const Text('Pick an existing photo'),

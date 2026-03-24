@@ -1,15 +1,14 @@
 import 'dart:async';
 
+import 'package:anchor/core/utils/logger.dart';
+import 'package:anchor/data/local_database/database.dart';
+import 'package:anchor/data/repositories/chat_repository.dart';
+import 'package:anchor/data/repositories/peer_repository.dart';
+import 'package:anchor/services/ble/ble.dart' as ble;
+import 'package:anchor/services/notification_service.dart';
+import 'package:anchor/services/transport/transport.dart';
 import 'package:equatable/equatable.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-
-import '../../../core/utils/logger.dart';
-import '../../../data/local_database/database.dart';
-import '../../../data/repositories/chat_repository.dart';
-import '../../../data/repositories/peer_repository.dart';
-import '../../../services/ble/ble.dart' as ble;
-import '../../../services/notification_service.dart';
-import '../../../services/transport/transport.dart';
 
 // ---------------------------------------------------------------------------
 // Events
@@ -187,22 +186,22 @@ class ReactionBloc extends Bloc<ReactionEvent, ReactionState> {
     if (previousReaction != null) {
       messageReactions.removeWhere((r) => r.senderId == _ownUserId);
       // Remove old reaction from DB and notify peer
-      _chatRepository.removeReaction(
+      unawaited(_chatRepository.removeReaction(
         messageId: event.messageId,
         senderId: _ownUserId,
         emoji: previousReaction.emoji,
       ).catchError((Object e) {
         Logger.error('ReactionBloc: Failed to remove old reaction', e, null,
-            'ReactionBloc');
-      });
-      _transportManager
+            'ReactionBloc',);
+      }),);
+      unawaited(_transportManager
           .sendReaction(
             peerId: event.peerId,
             messageId: event.messageId,
             emoji: previousReaction.emoji,
             action: 'remove',
           )
-          .catchError((Object e) => false);
+          .catchError((Object e) => false),);
     }
 
     final fakeEntry = ReactionEntry(
@@ -224,11 +223,11 @@ class ReactionBloc extends Bloc<ReactionEvent, ReactionState> {
       );
     } catch (e) {
       Logger.error(
-          'ReactionBloc: Failed to save reaction', e, null, 'ReactionBloc');
+          'ReactionBloc: Failed to save reaction', e, null, 'ReactionBloc',);
     }
 
     // Send via transport (fire-and-forget)
-    _transportManager
+    unawaited(_transportManager
         .sendReaction(
           peerId: event.peerId,
           messageId: event.messageId,
@@ -237,9 +236,9 @@ class ReactionBloc extends Bloc<ReactionEvent, ReactionState> {
         )
         .catchError((Object e) {
       Logger.error(
-          'ReactionBloc: BLE reaction send failed', e, null, 'ReactionBloc');
+          'ReactionBloc: BLE reaction send failed', e, null, 'ReactionBloc',);
       return false;
-    });
+    }),);
   }
 
   Future<void> _onRemoveReaction(
@@ -265,11 +264,11 @@ class ReactionBloc extends Bloc<ReactionEvent, ReactionState> {
       );
     } catch (e) {
       Logger.error(
-          'ReactionBloc: Failed to remove reaction', e, null, 'ReactionBloc');
+          'ReactionBloc: Failed to remove reaction', e, null, 'ReactionBloc',);
     }
 
     // Send via transport (fire-and-forget)
-    _transportManager
+    unawaited(_transportManager
         .sendReaction(
           peerId: event.peerId,
           messageId: event.messageId,
@@ -278,9 +277,9 @@ class ReactionBloc extends Bloc<ReactionEvent, ReactionState> {
         )
         .catchError((Object e) {
       Logger.error(
-          'ReactionBloc: BLE reaction send failed', e, null, 'ReactionBloc');
+          'ReactionBloc: BLE reaction send failed', e, null, 'ReactionBloc',);
       return false;
-    });
+    }),);
   }
 
   Future<void> _onBleReactionReceived(
@@ -316,7 +315,7 @@ class ReactionBloc extends Bloc<ReactionEvent, ReactionState> {
       }
     } catch (e) {
       Logger.error('ReactionBloc: Failed to persist received reaction', e, null,
-          'ReactionBloc');
+          'ReactionBloc',);
     }
 
     // Update state
@@ -335,14 +334,14 @@ class ReactionBloc extends Bloc<ReactionEvent, ReactionState> {
       if (!alreadyExists) {
         // Remove any existing reaction from this sender (one per message)
         msgReactions
-            .removeWhere((r) => r.senderId == reaction.fromPeerId);
-        msgReactions.add(ReactionEntry(
-          id: 'remote-$messageId-${reaction.fromPeerId}-${reaction.emoji}',
-          messageId: messageId,
-          senderId: reaction.fromPeerId,
-          emoji: reaction.emoji,
-          createdAt: reaction.timestamp,
-        ));
+            ..removeWhere((r) => r.senderId == reaction.fromPeerId)
+            ..add(ReactionEntry(
+              id: 'remote-$messageId-${reaction.fromPeerId}-${reaction.emoji}',
+              messageId: messageId,
+              senderId: reaction.fromPeerId,
+              emoji: reaction.emoji,
+              createdAt: reaction.timestamp,
+            ),);
       }
     } else {
       updatedReactions[messageId]?.removeWhere(
@@ -367,7 +366,7 @@ class ReactionBloc extends Bloc<ReactionEvent, ReactionState> {
       if (targetMessage != null && targetMessage.senderId == _ownUserId) {
         final senderName =
             activePeerName ?? reaction.fromPeerId.substring(0, 8);
-        final preview = targetMessage.textContent?.isNotEmpty == true
+        final preview = targetMessage.textContent?.isNotEmpty ?? false
             ? '"${targetMessage.textContent}"'
             : 'your message';
         await _notificationService.showReactionNotification(

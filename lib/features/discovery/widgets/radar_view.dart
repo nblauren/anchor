@@ -1,11 +1,10 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:anchor/core/theme/app_theme.dart';
+import 'package:anchor/features/discovery/bloc/discovery_state.dart';
+import 'package:anchor/features/discovery/widgets/radar_peer_sheet.dart';
 import 'package:flutter/material.dart';
-
-import '../../../core/theme/app_theme.dart';
-import '../bloc/discovery_state.dart';
-import 'radar_peer_sheet.dart';
 
 // ── Ring bucketing ────────────────────────────────────────────────────────────
 
@@ -76,8 +75,7 @@ const _ringLabels = ['Very close', 'Close', 'Moderate', 'Distant'];
 /// The widget self-refreshes every [refreshInterval] while visible.
 class RadarView extends StatefulWidget {
   const RadarView({
-    super.key,
-    required this.peers,
+    required this.peers, super.key,
     this.refreshInterval = const Duration(seconds: 3),
     this.highDensityThreshold = 50,
   });
@@ -187,7 +185,7 @@ class _RadarViewState extends State<RadarView>
               peer: p,
               ring: radarRingFor(p),
               angle: _stableAngle(p.peerId),
-            ))
+            ),)
         .toList();
 
     setState(() {
@@ -228,8 +226,8 @@ class _RadarViewState extends State<RadarView>
     final dist = (tap - center).distance;
 
     // Determine which ring was tapped
-    int tappedRing = -1;
-    for (int i = 0; i < 4; i++) {
+    var tappedRing = -1;
+    for (var i = 0; i < 4; i++) {
       final ringR = _ringRadiusFraction[i] * radius;
       if (dist <= ringR + 16) {
         // 16px hit slop
@@ -265,7 +263,7 @@ class _RadarViewState extends State<RadarView>
   }
 
   void _showRingSheet(int ring, List<DiscoveredPeer> peers) {
-    showModalBottomSheet(
+    showModalBottomSheet<void>(
       context: context,
       backgroundColor: AppTheme.darkSurface,
       shape: const RoundedRectangleBorder(
@@ -356,7 +354,7 @@ class _RadarViewState extends State<RadarView>
             Text(
               '${_ringLabels[i]} ($n)',
               style: const TextStyle(
-                  fontSize: 11, color: AppTheme.textSecondary),
+                  fontSize: 11, color: AppTheme.textSecondary,),
             ),
           ],
         );
@@ -394,7 +392,7 @@ class _RadarViewState extends State<RadarView>
       style: const TextStyle(
           color: AppTheme.textSecondary,
           fontSize: 13,
-          fontWeight: FontWeight.w500),
+          fontWeight: FontWeight.w500,),
     );
   }
 }
@@ -427,7 +425,7 @@ class _RadarPainter extends CustomPainter {
   // ── Background ──────────────────────────────────────────────────────────────
 
   void _drawBackground(
-      Canvas canvas, Size size, Offset center, double maxRadius) {
+      Canvas canvas, Size size, Offset center, double maxRadius,) {
     // Clip to circle
     canvas.clipPath(Path()..addOval(Rect.fromCircle(center: center, radius: maxRadius)));
 
@@ -447,7 +445,7 @@ class _RadarPainter extends CustomPainter {
       ..color = Colors.white.withAlpha(10)
       ..strokeWidth = 0.5
       ..style = PaintingStyle.stroke;
-    for (int i = 0; i < 8; i++) {
+    for (var i = 0; i < 8; i++) {
       final angle = i * math.pi / 4;
       canvas.drawLine(
         center,
@@ -460,10 +458,10 @@ class _RadarPainter extends CustomPainter {
   // ── Concentric rings ────────────────────────────────────────────────────────
 
   void _drawRings(Canvas canvas, Offset center, double maxRadius) {
-    for (int i = 0; i < 4; i++) {
+    for (var i = 0; i < 4; i++) {
       final r = _ringRadiusFraction[i] * maxRadius;
       final density = ringCounts[i];
-      final heatAlpha = (density * 8).clamp(0, 40).toInt();
+      final heatAlpha = (density * 8).clamp(0, 40);
 
       // Heat fill — warmer glow when more people in this ring
       if (density > 0) {
@@ -486,7 +484,7 @@ class _RadarPainter extends CustomPainter {
   }
 
   void _drawRingLabel(
-      Canvas canvas, Offset center, double r, String label, Color color) {
+      Canvas canvas, Offset center, double r, String label, Color color,) {
     final tp = TextPainter(
       text: TextSpan(
         text: label,

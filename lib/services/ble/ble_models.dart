@@ -102,7 +102,7 @@ class BroadcastPayload extends Equatable {
       position: json['position'] as int?,
       interests: json['interests'] as String?,
       thumbnailBytes: json['thumbnailBytes'] != null
-          ? Uint8List.fromList(List<int>.from(json['thumbnailBytes']))
+          ? Uint8List.fromList(List<int>.from(json['thumbnailBytes'] as Iterable))
           : null,
       publicKeyHex: json['pk'] as String?,
       signingPublicKeyHex: json['spk'] as String?,
@@ -152,7 +152,7 @@ class DiscoveredPeer extends Equatable {
   const DiscoveredPeer({
     required this.peerId,
     required this.name,
-    this.userId,
+    required this.timestamp, this.userId,
     this.age,
     this.bio,
     this.position,
@@ -160,7 +160,6 @@ class DiscoveredPeer extends Equatable {
     this.thumbnailBytes,
     this.photoThumbnails,
     this.rssi,
-    required this.timestamp,
     this.isRelayed = false,
     this.hopCount = 0,
     this.fullPhotoCount = 0,

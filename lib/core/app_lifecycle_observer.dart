@@ -1,7 +1,6 @@
+import 'package:anchor/core/utils/logger.dart';
+import 'package:anchor/services/ble/ble.dart';
 import 'package:flutter/widgets.dart';
-
-import '../services/ble/ble.dart';
-import 'utils/logger.dart';
 
 /// Observer that handles app lifecycle changes for BLE
 ///
@@ -29,25 +28,20 @@ class AppLifecycleObserver extends WidgetsBindingObserver {
         Logger.info('AppLifecycleObserver: App resumed', 'Lifecycle');
         bleConnectionBloc.add(const AppResumed());
         onResume?.call();
-        break;
 
       case AppLifecycleState.paused:
         Logger.info('AppLifecycleObserver: App paused', 'Lifecycle');
         bleConnectionBloc.add(const AppPaused());
         onPause?.call();
-        break;
 
       case AppLifecycleState.inactive:
         Logger.info('AppLifecycleObserver: App inactive', 'Lifecycle');
-        break;
 
       case AppLifecycleState.detached:
         Logger.info('AppLifecycleObserver: App detached', 'Lifecycle');
-        break;
 
       case AppLifecycleState.hidden:
         Logger.info('AppLifecycleObserver: App hidden', 'Lifecycle');
-        break;
     }
   }
 }
@@ -87,19 +81,14 @@ mixin AppLifecycleMixin<T extends StatefulWidget> on State<T>
     switch (state) {
       case AppLifecycleState.resumed:
         onAppResumed();
-        break;
       case AppLifecycleState.paused:
         onAppPaused();
-        break;
       case AppLifecycleState.inactive:
         onAppInactive();
-        break;
       case AppLifecycleState.detached:
         onAppDetached();
-        break;
       case AppLifecycleState.hidden:
         onAppHidden();
-        break;
     }
   }
 

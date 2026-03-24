@@ -71,7 +71,7 @@ void main() {
     test('TransportState equality works', () {
       const a = TransportState(activeTransport: TransportType.lan);
       const b = TransportState(activeTransport: TransportType.lan);
-      const c = TransportState(activeTransport: TransportType.ble);
+      const c = TransportState();
       expect(a, equals(b));
       expect(a, isNot(equals(c)));
     });

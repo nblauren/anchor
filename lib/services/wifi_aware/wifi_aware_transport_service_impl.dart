@@ -2,11 +2,10 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:anchor/core/utils/logger.dart';
+import 'package:anchor/services/ble/ble_models.dart' as ble;
+import 'package:anchor/services/wifi_aware/wifi_aware_transport_service.dart';
 import 'package:wifi_aware_p2p/wifi_aware_p2p.dart' as wa;
-
-import '../../core/utils/logger.dart';
-import '../ble/ble_models.dart' as ble;
-import 'wifi_aware_transport_service.dart';
 
 /// Production implementation of [WifiAwareTransportService] using the
 /// `wifi_aware_p2p` Flutter plugin.
@@ -114,7 +113,7 @@ class WifiAwareTransportServiceImpl implements WifiAwareTransportService {
       Logger.info('WifiAwareTransport: session started', 'WifiAware');
     } catch (e) {
       Logger.error(
-          'WifiAwareTransport: failed to start session', e, null, 'WifiAware');
+          'WifiAwareTransport: failed to start session', e, null, 'WifiAware',);
       _started = false;
       rethrow;
     }
@@ -203,7 +202,6 @@ class WifiAwareTransportServiceImpl implements WifiAwareTransportService {
       await session.publish(
         serviceName: _serviceName,
         serviceInfo: serviceInfo,
-        type: wa.PublishType.unsolicited,
       );
 
       // Also subscribe so we discover other peers
@@ -214,10 +212,10 @@ class WifiAwareTransportServiceImpl implements WifiAwareTransportService {
       );
 
       Logger.info(
-          'WifiAwareTransport: profile updated and published', 'WifiAware');
+          'WifiAwareTransport: profile updated and published', 'WifiAware',);
     } catch (e) {
       Logger.error(
-          'WifiAwareTransport: failed to update profile', e, null, 'WifiAware');
+          'WifiAwareTransport: failed to update profile', e, null, 'WifiAware',);
     }
   }
 
@@ -279,7 +277,7 @@ class WifiAwareTransportServiceImpl implements WifiAwareTransportService {
       await conn.send(Uint8List.fromList(utf8.encode(header)));
 
       // Small delay to let header arrive
-      await Future.delayed(const Duration(milliseconds: 50));
+      await Future<void>.delayed(const Duration(milliseconds: 50));
 
       // Stream the photo data
       _photoProgressController.add(ble.PhotoTransferProgress(
@@ -287,7 +285,7 @@ class WifiAwareTransportServiceImpl implements WifiAwareTransportService {
         peerId: peerId,
         progress: 0,
         status: ble.PhotoTransferStatus.inProgress,
-      ));
+      ),);
 
       // Listen to send progress
       StreamSubscription<double>? progressSub;
@@ -297,7 +295,7 @@ class WifiAwareTransportServiceImpl implements WifiAwareTransportService {
           peerId: peerId,
           progress: progress,
           status: ble.PhotoTransferStatus.inProgress,
-        ));
+        ),);
       });
 
       await conn.sendStream(photoData);
@@ -307,9 +305,9 @@ class WifiAwareTransportServiceImpl implements WifiAwareTransportService {
       _photoProgressController.add(ble.PhotoTransferProgress(
         messageId: messageId,
         peerId: peerId,
-        progress: 1.0,
+        progress: 1,
         status: ble.PhotoTransferStatus.completed,
-      ));
+      ),);
 
       _lastActivity[peerId] = DateTime.now();
       Logger.info(
@@ -330,7 +328,7 @@ class WifiAwareTransportServiceImpl implements WifiAwareTransportService {
         progress: 0,
         status: ble.PhotoTransferStatus.failed,
         errorMessage: e.toString(),
-      ));
+      ),);
       return false;
     }
   }
@@ -532,8 +530,6 @@ class WifiAwareTransportServiceImpl implements WifiAwareTransportService {
       bio: info['bio'],
       position: int.tryParse(info['position'] ?? ''),
       interests: info['interests'],
-      thumbnailBytes: null, // Will be fetched via DataConnection
-      rssi: null,
       timestamp: DateTime.now(),
       fullPhotoCount: int.tryParse(info['photoCount'] ?? '0') ?? 0,
     );
@@ -598,7 +594,7 @@ class WifiAwareTransportServiceImpl implements WifiAwareTransportService {
         _anchorDropReceivedController.add(ble.AnchorDropReceived(
           fromPeerId: fromPeerId,
           timestamp: timestamp,
-        ));
+        ),);
 
       case 'reaction':
         final msgId = json['message_id'] as String?;
@@ -611,7 +607,7 @@ class WifiAwareTransportServiceImpl implements WifiAwareTransportService {
             emoji: emoji,
             action: action,
             timestamp: timestamp,
-          ));
+          ),);
         }
 
       case 'photoPreview':
@@ -622,7 +618,7 @@ class WifiAwareTransportServiceImpl implements WifiAwareTransportService {
           thumbnailBytes: Uint8List(0), // No thumbnail in L2 message
           originalSize: json['originalSize'] as int? ?? 0,
           timestamp: timestamp,
-        ));
+        ),);
 
       case 'photoRequest':
         _photoRequestReceivedController.add(ble.ReceivedPhotoRequest(
@@ -630,7 +626,7 @@ class WifiAwareTransportServiceImpl implements WifiAwareTransportService {
           messageId: json['messageId'] as String? ?? '',
           photoId: json['photoId'] as String? ?? '',
           timestamp: timestamp,
-        ));
+        ),);
 
       case 'thumbnail_response':
         // Handled in _listenToConnection for DataConnection
@@ -651,7 +647,7 @@ class WifiAwareTransportServiceImpl implements WifiAwareTransportService {
               type: payload.type,
               content: payload.content,
               timestamp: timestamp,
-            ));
+            ),);
           } catch (e) {
             Logger.warning(
               'WifiAwareTransport: unrecognised message type: $type',
@@ -727,10 +723,9 @@ class WifiAwareTransportServiceImpl implements WifiAwareTransportService {
                 position: int.tryParse(info['position'] ?? ''),
                 interests: info['interests'],
                 thumbnailBytes: Uint8List.fromList(thumbBytes),
-                rssi: null,
                 timestamp: DateTime.now(),
                 fullPhotoCount: int.tryParse(info['photoCount'] ?? '0') ?? 0,
-              ));
+              ),);
             }
             return;
           }
@@ -765,7 +760,7 @@ class WifiAwareTransportServiceImpl implements WifiAwareTransportService {
                 peerId: conn.peerId,
                 progress: progress.clamp(0.0, 1.0),
                 status: ble.PhotoTransferStatus.inProgress,
-              ));
+              ),);
             }
 
             // Check if complete
@@ -777,14 +772,14 @@ class WifiAwareTransportServiceImpl implements WifiAwareTransportService {
                 photoBytes: Uint8List.fromList(photoBuffer),
                 timestamp: DateTime.now(),
                 photoId: pendingPhotoId,
-              ));
+              ),);
 
               _photoProgressController.add(ble.PhotoTransferProgress(
                 messageId: pendingPhotoMessageId!,
                 peerId: conn.peerId,
-                progress: 1.0,
+                progress: 1,
                 status: ble.PhotoTransferStatus.completed,
-              ));
+              ),);
 
               // Reset
               pendingPhotoMessageId = null;
@@ -795,7 +790,7 @@ class WifiAwareTransportServiceImpl implements WifiAwareTransportService {
           }
         }
       },
-      onError: (e) {
+      onError: (Object e) {
         Logger.error(
           'WifiAwareTransport: connection error from ${conn.peerId}',
           e,
@@ -835,7 +830,7 @@ class WifiAwareTransportServiceImpl implements WifiAwareTransportService {
 
   /// Encode a [BroadcastPayload] into a serviceInfo map for publishing.
   Map<String, String> _encodeProfileToServiceInfo(
-      ble.BroadcastPayload payload) {
+      ble.BroadcastPayload payload,) {
     return {
       'userId': payload.userId,
       'name': payload.name,

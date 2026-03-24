@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import '../data/local_database/database.dart';
+import 'package:anchor/data/local_database/database.dart';
 
 /// Lightweight event bus for inter-bloc communication in the chat feature.
 ///

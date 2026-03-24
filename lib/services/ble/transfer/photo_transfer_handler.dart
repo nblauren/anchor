@@ -3,14 +3,14 @@ import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 
-import '../../../core/utils/logger.dart';
-import '../ble_config.dart';
-import '../ble_models.dart';
-import '../connection/connection_manager.dart';
-import '../connection/peer_connection.dart';
-import '../gatt/gatt_write_queue.dart';
-import '../photo_chunker.dart';
-import '../../encryption/encryption.dart';
+import 'package:anchor/core/utils/logger.dart';
+import 'package:anchor/services/ble/ble_config.dart';
+import 'package:anchor/services/ble/ble_models.dart';
+import 'package:anchor/services/ble/connection/connection_manager.dart';
+import 'package:anchor/services/ble/connection/peer_connection.dart';
+import 'package:anchor/services/ble/gatt/gatt_write_queue.dart';
+import 'package:anchor/services/ble/photo_chunker.dart';
+import 'package:anchor/services/encryption/encryption.dart';
 
 /// Handles all BLE photo transfer: sending photos/previews/requests and
 /// receiving binary photo chunks, preview thumbnails, and photo requests.
@@ -126,13 +126,13 @@ class PhotoTransferHandler {
       final conn = await _ensureConnection(peerId);
       if (conn == null) {
         _emitProgress(messageId, peerId, 0, PhotoTransferStatus.failed,
-            errorMessage: 'Peer not reachable');
+            errorMessage: 'Peer not reachable',);
         return false;
       }
 
       // Optionally encrypt the photo bytes before chunking.
       // The nonce is sent in photo_start; the binary chunks carry ciphertext.
-      Uint8List transferData = photoData;
+      var transferData = photoData;
       String? nonceB64;
       final enc = _encryptionService;
       if (enc != null && enc.hasSession(peerId)) {
@@ -169,19 +169,18 @@ class PhotoTransferHandler {
         'total_chunks': totalChunks,
         'total_size': transferData.length,
         if (nonceB64 != null) ...{'v': 1, 'n': nonceB64},
-      }));
+      }),);
 
       final startSuccess = await _writeQueue.enqueue(
         peerId: peerId,
         peripheral: conn.peripheral,
         characteristic: conn.messagingChar!,
         data: Uint8List.fromList(startPayload),
-        priority: WritePriority.userMessage,
       );
 
       if (!startSuccess) {
         _emitProgress(messageId, peerId, 0, PhotoTransferStatus.failed,
-            errorMessage: 'Failed to send photo_start');
+            errorMessage: 'Failed to send photo_start',);
         return false;
       }
 
@@ -200,7 +199,7 @@ class PhotoTransferHandler {
         if (_cancelledTransfers.contains(messageId)) {
           _cancelledTransfers.remove(messageId);
           _emitProgress(
-              messageId, peerId, i / totalChunks, PhotoTransferStatus.cancelled);
+              messageId, peerId, i / totalChunks, PhotoTransferStatus.cancelled,);
           return false;
         }
 
@@ -208,12 +207,12 @@ class PhotoTransferHandler {
         final dataEnd = min(dataStart + rawChunkSize, transferData.length);
         final chunkData = transferData.sublist(dataStart, dataEnd);
 
-        final chunkPayload = Uint8List(v2Overhead + chunkData.length);
-        chunkPayload[0] = 0x02;
-        chunkPayload[1] = (i >> 8) & 0xFF;
-        chunkPayload[2] = i & 0xFF;
-        chunkPayload.setRange(3, 3 + senderTagLen, senderTag);
-        chunkPayload.setRange(v2Overhead, chunkPayload.length, chunkData);
+        final chunkPayload = Uint8List(v2Overhead + chunkData.length)
+          ..[0] = 0x02
+          ..[1] = (i >> 8) & 0xFF
+          ..[2] = i & 0xFF
+          ..setRange(3, 3 + senderTagLen, senderTag)
+          ..setRange(v2Overhead, v2Overhead + chunkData.length, chunkData);
 
         final chunkSuccess = await _writeQueue.enqueue(
           peerId: peerId,
@@ -226,7 +225,7 @@ class PhotoTransferHandler {
         if (!chunkSuccess) {
           _emitProgress(messageId, peerId, i / totalChunks,
               PhotoTransferStatus.failed,
-              errorMessage: 'Chunk $i write failed');
+              errorMessage: 'Chunk $i write failed',);
           return false;
         }
 
@@ -247,7 +246,7 @@ class PhotoTransferHandler {
       Logger.error('PhotoTransfer: Transfer failed', e, null, 'BLE');
       _connectionManager.disconnect(peerId);
       _emitProgress(messageId, peerId, 0, PhotoTransferStatus.failed,
-          errorMessage: e.toString());
+          errorMessage: e.toString(),);
       return false;
     }
   }
@@ -273,12 +272,12 @@ class PhotoTransferHandler {
       final conn = await _ensureConnection(peerId);
       if (conn == null) {
         Logger.info(
-            'PhotoTransfer: Peer not reachable for preview: $peerId', 'BLE');
+            'PhotoTransfer: Peer not reachable for preview: $peerId', 'BLE',);
         return false;
       }
 
       // Optionally encrypt the thumbnail before chunking.
-      Uint8List transferThumb = thumbnailBytes;
+      var transferThumb = thumbnailBytes;
       String? thumbNonceB64;
       final enc = _encryptionService;
       if (enc != null && enc.hasSession(peerId)) {
@@ -304,14 +303,13 @@ class PhotoTransferHandler {
         'original_size': originalSize,
         'thumbnail_chunks': totalChunks,
         if (thumbNonceB64 != null) ...{'v': 1, 'n': thumbNonceB64},
-      }));
+      }),);
 
       final startSuccess = await _writeQueue.enqueue(
         peerId: peerId,
         peripheral: conn.peripheral,
         characteristic: conn.messagingChar!,
         data: Uint8List.fromList(startPayload),
-        priority: WritePriority.userMessage,
       );
 
       if (!startSuccess) return false;
@@ -333,12 +331,12 @@ class PhotoTransferHandler {
         final dataEnd = min(dataStart + rawChunkSize, transferThumb.length);
         final chunkData = transferThumb.sublist(dataStart, dataEnd);
 
-        final chunkPayload = Uint8List(v2Overhead + chunkData.length);
-        chunkPayload[0] = 0x03;
-        chunkPayload[1] = (i >> 8) & 0xFF;
-        chunkPayload[2] = i & 0xFF;
-        chunkPayload.setRange(3, 3 + senderTagLen, senderTag);
-        chunkPayload.setRange(v2Overhead, chunkPayload.length, chunkData);
+        final chunkPayload = Uint8List(v2Overhead + chunkData.length)
+          ..[0] = 0x03
+          ..[1] = (i >> 8) & 0xFF
+          ..[2] = i & 0xFF
+          ..setRange(3, 3 + senderTagLen, senderTag)
+          ..setRange(v2Overhead, v2Overhead + chunkData.length, chunkData);
 
         final chunkSuccess = await _writeQueue.enqueue(
           peerId: peerId,
@@ -379,7 +377,7 @@ class PhotoTransferHandler {
       if (conn == null) {
         Logger.info(
             'PhotoTransfer: Peer not reachable for photo_request: $peerId',
-            'BLE');
+            'BLE',);
         return false;
       }
 
@@ -388,14 +386,13 @@ class PhotoTransferHandler {
         'sender_id': getOwnUserId?.call() ?? '',
         'message_id': messageId,
         'photo_id': photoId,
-      })));
+      }),),);
 
       final success = await _writeQueue.enqueue(
         peerId: peerId,
         peripheral: conn.peripheral,
         characteristic: conn.messagingChar!,
         data: requestPayload,
-        priority: WritePriority.userMessage,
       );
 
       if (success) {
@@ -424,7 +421,7 @@ class PhotoTransferHandler {
   /// [centralId] is the raw Central UUID from the GATT write — binary chunks
   /// (0x02) only carry this ID, so we record the mapping for chunk lookup.
   void handlePhotoStart(Map<String, dynamic> json, String fromPeerId,
-      {String? centralId}) {
+      {String? centralId,}) {
     final messageId = json['message_id'] as String? ?? '';
     final photoId = json['photo_id'] as String?;
     final totalChunks = json['total_chunks'] as int? ?? 0;
@@ -504,7 +501,7 @@ class PhotoTransferHandler {
     // Try direct lookup by Central UUID first, then by sender tag, then by
     // the Central → Peripheral mapping recorded in handlePhotoStart.
     var fromPeerId = centralId;
-    _IncomingPhotoTransfer? transfer = _incomingPhotoTransfers[centralId];
+    var transfer = _incomingPhotoTransfers[centralId];
 
     if (transfer == null) {
       final resolvedId = _centralToResolvedId[centralId];
@@ -585,7 +582,7 @@ class PhotoTransferHandler {
 
     _emitProgress(transfer.messageId, fromPeerId,
         transfer.receivedCount / transfer.totalChunks,
-        PhotoTransferStatus.inProgress);
+        PhotoTransferStatus.inProgress,);
 
     if (transfer.receivedCount >= transfer.totalChunks) {
       final rawBytes = transfer.receivedData.toBytes();
@@ -597,7 +594,7 @@ class PhotoTransferHandler {
       );
 
       // Decrypt if the sender included an E2EE nonce.
-      Uint8List photoBytes = rawBytes;
+      var photoBytes = rawBytes;
       final nonce = transfer.nonce;
       final enc = _encryptionService;
       if (nonce != null && enc != null) {
@@ -623,10 +620,10 @@ class PhotoTransferHandler {
         photoId: transfer.photoId,
         photoBytes: photoBytes,
         timestamp: DateTime.now(),
-      ));
+      ),);
 
       _emitProgress(
-          transfer.messageId, fromPeerId, 1.0, PhotoTransferStatus.completed);
+          transfer.messageId, fromPeerId, 1, PhotoTransferStatus.completed,);
 
       _cancelReceiveTimeout(fromPeerId);
       _incomingPhotoTransfers.remove(fromPeerId);
@@ -635,7 +632,7 @@ class PhotoTransferHandler {
 
   /// Handle legacy JSON photo_chunk.
   void handleReceivedPhotoChunk(
-      Map<String, dynamic> json, String fromPeerId) {
+      Map<String, dynamic> json, String fromPeerId,) {
     final dataField = json['data'];
     Uint8List chunkData;
     if (dataField is String) {
@@ -662,7 +659,7 @@ class PhotoTransferHandler {
 
     _emitProgress(chunk.messageId, fromPeerId,
         (chunk.chunkIndex + 1) / chunk.totalChunks,
-        PhotoTransferStatus.inProgress);
+        PhotoTransferStatus.inProgress,);
 
     final result = _photoReassembler.addChunk(chunk);
 
@@ -678,10 +675,10 @@ class PhotoTransferHandler {
         messageId: chunk.messageId,
         photoBytes: result.photoData!,
         timestamp: DateTime.now(),
-      ));
+      ),);
 
-      _emitProgress(chunk.messageId, fromPeerId, 1.0,
-          PhotoTransferStatus.completed);
+      _emitProgress(chunk.messageId, fromPeerId, 1,
+          PhotoTransferStatus.completed,);
     }
   }
 
@@ -689,7 +686,7 @@ class PhotoTransferHandler {
 
   /// Handle photo_preview JSON — stores metadata for incoming thumbnail chunks.
   void handlePhotoPreviewStart(
-      Map<String, dynamic> json, String fromPeerId, {String? centralId}) {
+      Map<String, dynamic> json, String fromPeerId, {String? centralId,}) {
     final messageId = json['message_id'] as String? ?? '';
     final photoId = json['photo_id'] as String? ?? '';
     final originalSize = json['original_size'] as int? ?? 0;
@@ -710,7 +707,7 @@ class PhotoTransferHandler {
         thumbnailBytes: Uint8List(0),
         originalSize: originalSize,
         timestamp: DateTime.now(),
-      ));
+      ),);
       return;
     }
 
@@ -760,7 +757,7 @@ class PhotoTransferHandler {
     }
 
     // Try direct lookup, then Central → Peripheral, then sender tag.
-    _IncomingThumbnailTransfer? transfer =
+    var transfer =
         _incomingThumbnailTransfers[centralId];
     var resolvedPeerId = centralId;
 
@@ -819,7 +816,7 @@ class PhotoTransferHandler {
       );
 
       // Decrypt if the sender included an E2EE nonce.
-      Uint8List thumbnailBytes = rawThumb;
+      var thumbnailBytes = rawThumb;
       final thumbNonce = transfer.nonce;
       final enc = _encryptionService;
       if (thumbNonce != null && enc != null) {
@@ -847,7 +844,7 @@ class PhotoTransferHandler {
         thumbnailBytes: thumbnailBytes,
         originalSize: transfer.originalSize,
         timestamp: DateTime.now(),
-      ));
+      ),);
 
       _incomingThumbnailTransfers.remove(resolvedPeerId);
     }
@@ -871,7 +868,7 @@ class PhotoTransferHandler {
       messageId: messageId,
       photoId: photoId,
       timestamp: DateTime.now(),
-    ));
+    ),);
   }
 
   // ==================== Cleanup ====================
@@ -925,7 +922,7 @@ class PhotoTransferHandler {
         _emitProgress(transfer.messageId, peerId,
             transfer.receivedCount / transfer.totalChunks,
             PhotoTransferStatus.failed,
-            errorMessage: 'Receive timeout — connection lost');
+            errorMessage: 'Receive timeout — connection lost',);
       }
     });
   }
@@ -962,7 +959,7 @@ class PhotoTransferHandler {
       progress: progress,
       status: status,
       errorMessage: errorMessage,
-    ));
+    ),);
   }
 }
 

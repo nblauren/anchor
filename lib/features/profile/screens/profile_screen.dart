@@ -1,11 +1,10 @@
+import 'package:anchor/features/profile/bloc/profile_bloc.dart';
+import 'package:anchor/features/profile/bloc/profile_event.dart';
+import 'package:anchor/features/profile/bloc/profile_state.dart';
+import 'package:anchor/features/profile/screens/profile_setup_screen.dart';
+import 'package:anchor/features/profile/widgets/profile_preview_widget.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-
-import '../bloc/profile_bloc.dart';
-import '../bloc/profile_event.dart';
-import '../bloc/profile_state.dart';
-import '../widgets/profile_preview_widget.dart';
-import 'profile_setup_screen.dart';
 
 /// Screen showing the user's own profile with edit capabilities
 class ProfileScreen extends StatelessWidget {
@@ -13,7 +12,7 @@ class ProfileScreen extends StatelessWidget {
 
   void _openEditProfile(BuildContext context) {
     Navigator.of(context).push(
-      MaterialPageRoute(
+      MaterialPageRoute<void>(
         builder: (_) => BlocProvider.value(
           value: context.read<ProfileBloc>(),
           child: ProfileSetupScreen(

@@ -4,13 +4,12 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:anchor/core/utils/logger.dart';
+import 'package:anchor/services/ble/binary_message_codec.dart';
+import 'package:anchor/services/ble/ble_models.dart' as ble;
+import 'package:anchor/services/lan/lan_transport_service.dart';
+import 'package:anchor/services/mesh/mesh_packet.dart';
 import 'package:uuid/uuid.dart';
-
-import '../../core/utils/logger.dart';
-import '../ble/binary_message_codec.dart';
-import '../ble/ble_models.dart' as ble;
-import '../mesh/mesh_packet.dart';
-import 'lan_transport_service.dart';
 
 // ==================== Internal Data Structures ====================
 
@@ -188,7 +187,6 @@ class LanTransportServiceImpl implements LanTransportService {
       _udpSocket = await RawDatagramSocket.bind(
         InternetAddress.anyIPv4,
         _udpPort,
-        reuseAddress: true,
         reusePort: true,
       );
       _udpSocket!.broadcastEnabled = true;
@@ -206,7 +204,7 @@ class LanTransportServiceImpl implements LanTransportService {
     }
 
     // Bind TCP server, incrementing port on conflict
-    int port = _tcpPortBase;
+    var port = _tcpPortBase;
     while (true) {
       try {
         _tcpServer = await ServerSocket.bind(
@@ -272,7 +270,7 @@ class LanTransportServiceImpl implements LanTransportService {
     _outgoingConnections.clear();
     _frameBuffers.clear();
 
-    _tcpServer?.close();
+    await _tcpServer?.close();
     _tcpServer = null;
 
     _udpSocket?.close();
@@ -388,11 +386,11 @@ class LanTransportServiceImpl implements LanTransportService {
     _photoProgressController.add(ble.PhotoTransferProgress(
       messageId: messageId,
       peerId: peerId,
-      progress: 0.0,
+      progress: 0,
       status: ble.PhotoTransferStatus.starting,
-    ));
+    ),);
 
-    for (int i = 0; i < totalChunks; i++) {
+    for (var i = 0; i < totalChunks; i++) {
       final start = i * _photoChunkSize;
       final end = min(start + _photoChunkSize, photoData.length);
       final chunk = photoData.sublist(start, end);
@@ -419,7 +417,7 @@ class LanTransportServiceImpl implements LanTransportService {
           progress: i / totalChunks,
           status: ble.PhotoTransferStatus.failed,
           errorMessage: 'Failed to send chunk $i',
-        ));
+        ),);
         return false;
       }
 
@@ -430,7 +428,7 @@ class LanTransportServiceImpl implements LanTransportService {
         status: i + 1 == totalChunks
             ? ble.PhotoTransferStatus.completed
             : ble.PhotoTransferStatus.inProgress,
-      ));
+      ),);
     }
 
     return true;
@@ -820,7 +818,7 @@ class LanTransportServiceImpl implements LanTransportService {
             content: payload['content'] as String? ?? '',
             timestamp: DateTime.now(),
             replyToId: payload['replyToId'] as String?,
-          ));
+          ),);
 
         case 'photo_preview':
           final thumbnailB64 = payload['thumbnail'] as String?;
@@ -832,7 +830,7 @@ class LanTransportServiceImpl implements LanTransportService {
             thumbnailBytes: base64Decode(thumbnailB64),
             originalSize: payload['originalSize'] as int? ?? 0,
             timestamp: DateTime.now(),
-          ));
+          ),);
 
         case 'photo_request':
           _photoRequestReceivedController.add(ble.ReceivedPhotoRequest(
@@ -840,7 +838,7 @@ class LanTransportServiceImpl implements LanTransportService {
             messageId: payload['messageId'] as String? ?? const Uuid().v4(),
             photoId: payload['photoId'] as String? ?? const Uuid().v4(),
             timestamp: DateTime.now(),
-          ));
+          ),);
 
         case 'photo_chunk':
           _handlePhotoChunk(fromPeerId, payload);
@@ -853,14 +851,14 @@ class LanTransportServiceImpl implements LanTransportService {
               fromPeerId: fromPeerId,
               step: step,
               payload: Uint8List.fromList(base64Decode(dataB64)),
-            ));
+            ),);
           }
 
         case 'drop_anchor':
           _anchorDropReceivedController.add(ble.AnchorDropReceived(
             fromPeerId: fromPeerId,
             timestamp: DateTime.now(),
-          ));
+          ),);
 
         case 'reaction':
           _reactionReceivedController.add(ble.ReactionReceived(
@@ -869,7 +867,7 @@ class LanTransportServiceImpl implements LanTransportService {
             emoji: payload['emoji'] as String? ?? '',
             action: payload['action'] as String? ?? 'add',
             timestamp: DateTime.now(),
-          ));
+          ),);
 
         case 'thumb_request':
           // Send our thumbnail back on the same socket
@@ -913,7 +911,7 @@ class LanTransportServiceImpl implements LanTransportService {
           timestamp: packet.timestamp,
           replyToId: chat.replyToId,
           isEncrypted: chat.isEncrypted,
-        ));
+        ),);
 
       case PacketType.handshake:
         final hs = BinaryMessageCodec.decodeHandshakePayload(packet);
@@ -922,14 +920,14 @@ class LanTransportServiceImpl implements LanTransportService {
             fromPeerId: fromPeerId,
             step: hs.step,
             payload: hs.payload,
-          ));
+          ),);
         }
 
       case PacketType.anchorDrop:
         _anchorDropReceivedController.add(ble.AnchorDropReceived(
           fromPeerId: fromPeerId,
           timestamp: packet.timestamp,
-        ));
+        ),);
 
       case PacketType.reaction:
         final reaction = BinaryMessageCodec.decodeReactionPayload(packet);
@@ -940,7 +938,7 @@ class LanTransportServiceImpl implements LanTransportService {
             emoji: reaction.emoji,
             action: reaction.action,
             timestamp: packet.timestamp,
-          ));
+          ),);
         }
 
       case PacketType.gossipSync:
@@ -949,7 +947,14 @@ class LanTransportServiceImpl implements LanTransportService {
         // LAN gossip support can be added later if needed.
         Logger.debug('LAN: gossip packet ignored (handled via BLE)', _tag);
 
-      default:
+      case PacketType.ack:
+      case PacketType.photoPreview:
+      case PacketType.photoRequest:
+      case PacketType.photoData:
+      case PacketType.wifiTransferReady:
+      case PacketType.readReceipt:
+      case PacketType.peerAnnounce:
+      case PacketType.neighborList:
         Logger.debug('LAN: unhandled binary packet type: ${packet.type.name}', _tag);
     }
   }
@@ -993,7 +998,7 @@ class LanTransportServiceImpl implements LanTransportService {
       status: pending.chunks.length == totalChunks
           ? ble.PhotoTransferStatus.completed
           : ble.PhotoTransferStatus.inProgress,
-    ));
+    ),);
 
     // Check if all chunks received
     if (pending.chunks.length == totalChunks) {
@@ -1010,7 +1015,7 @@ class LanTransportServiceImpl implements LanTransportService {
         photoBytes: Uint8List.fromList(assembled),
         timestamp: DateTime.now(),
         photoId: photoId.isNotEmpty ? photoId : null,
-      ));
+      ),);
 
       _pendingPhotos.remove(messageId);
     }
@@ -1116,8 +1121,9 @@ class LanTransportServiceImpl implements LanTransportService {
     try {
       final payload = utf8.encode(jsonEncode(envelope));
       final header = ByteData(4)..setUint32(0, payload.length);
-      socket.add(Uint8List.view(header.buffer));
-      socket.add(payload);
+      socket
+        ..add(Uint8List.view(header.buffer))
+        ..add(payload);
       await socket.flush();
       return true;
     } catch (e) {
@@ -1130,8 +1136,9 @@ class LanTransportServiceImpl implements LanTransportService {
   Future<bool> _sendBinaryFrame(Socket socket, Uint8List data) async {
     try {
       final header = ByteData(4)..setUint32(0, data.length);
-      socket.add(Uint8List.view(header.buffer));
-      socket.add(data);
+      socket
+        ..add(Uint8List.view(header.buffer))
+        ..add(data);
       await socket.flush();
       return true;
     } catch (e) {
@@ -1162,7 +1169,7 @@ class LanTransportServiceImpl implements LanTransportService {
 
   @override
   Future<bool> sendHandshakeMessage(
-      String peerId, int step, Uint8List payload) async {
+      String peerId, int step, Uint8List payload,) async {
     final socket = await _getOrConnectSocket(peerId);
     if (socket == null) return false;
 

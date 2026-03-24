@@ -1,6 +1,5 @@
+import 'package:anchor/core/utils/logger.dart';
 import 'package:audioplayers/audioplayers.dart';
-
-import '../core/utils/logger.dart';
 
 /// Lightweight service for playing in-app sound effects.
 ///
@@ -21,11 +20,8 @@ class AudioService {
       // Ambient: plays through the speaker but stops when the silent switch
       // is engaged or the screen locks with silent mode on.
       category: AVAudioSessionCategory.ambient,
-      options: const {},
     ),
     android: const AudioContextAndroid(
-      isSpeakerphoneOn: false,
-      stayAwake: false,
       contentType: AndroidContentType.sonification,
       // STREAM_NOTIFICATION — respects Do Not Disturb and volume settings.
       usageType: AndroidUsageType.notificationRingtone,

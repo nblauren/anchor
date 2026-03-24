@@ -1,15 +1,15 @@
 import 'dart:async';
 
+import 'package:anchor/core/utils/logger.dart';
+import 'package:anchor/data/local_database/database.dart';
+import 'package:anchor/data/repositories/chat_repository.dart';
+import 'package:anchor/services/chat_event_bus.dart';
+import 'package:anchor/services/message_send_service.dart';
+import 'package:anchor/services/notification_service.dart';
+import 'package:anchor/services/store_and_forward_service.dart';
+import 'package:anchor/services/transport/transport.dart';
 import 'package:equatable/equatable.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-
-import '../../../core/utils/logger.dart';
-import '../../../data/repositories/chat_repository.dart';
-import '../../../services/chat_event_bus.dart';
-import '../../../services/message_send_service.dart';
-import '../../../services/notification_service.dart';
-import '../../../services/store_and_forward_service.dart';
-import '../../../services/transport/transport.dart';
 
 // ---------------------------------------------------------------------------
 // Events
@@ -93,7 +93,6 @@ class ConversationListBloc
     required NotificationService notificationService,
     required ChatEventBus chatEventBus,
     required MessageSendService messageSendService,
-    required String ownUserId,
     StoreAndForwardService? storeAndForwardService,
     TransportRetryQueue? retryQueue,
   })  : _chatRepository = chatRepository,
@@ -141,10 +140,10 @@ class ConversationListBloc
   final NotificationService _notificationService;
 
   StreamSubscription<void>? _busSub;
-  StreamSubscription? _messageAddedSub;
-  StreamSubscription? _sendConvSub;
-  StreamSubscription? _storeForwardSub;
-  StreamSubscription? _retryQueueSub;
+  StreamSubscription<MessageEntry>? _messageAddedSub;
+  StreamSubscription<void>? _sendConvSub;
+  StreamSubscription<MessageDeliveryUpdate>? _storeForwardSub;
+  StreamSubscription<RetryDeliveryUpdate>? _retryQueueSub;
 
   Future<void> _onLoadConversations(
     LoadConversations event,
@@ -157,7 +156,7 @@ class ConversationListBloc
       emit(state.copyWith(
         status: ConversationListStatus.loaded,
         conversations: conversations,
-      ));
+      ),);
       final totalUnread =
           conversations.fold(0, (sum, c) => sum + c.unreadCount);
       await _notificationService.setBadgeCount(totalUnread);
@@ -166,7 +165,7 @@ class ConversationListBloc
       emit(state.copyWith(
         status: ConversationListStatus.error,
         errorMessage: 'Failed to load conversations',
-      ));
+      ),);
     }
   }
 
@@ -187,7 +186,7 @@ class ConversationListBloc
       emit(state.copyWith(
         status: ConversationListStatus.error,
         errorMessage: 'Failed to delete conversation',
-      ));
+      ),);
     }
   }
 

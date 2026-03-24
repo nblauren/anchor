@@ -25,7 +25,7 @@ class PhotoChunker {
         totalChunks: totalChunks,
         data: Uint8List.fromList(chunkData),
         totalSize: photoData.length,
-      ));
+      ),);
     }
 
     return chunks;
@@ -33,7 +33,7 @@ class PhotoChunker {
 
   /// Calculate progress from received chunks
   static double calculateProgress(int receivedChunks, int totalChunks) {
-    if (totalChunks == 0) return 0.0;
+    if (totalChunks == 0) return 0;
     return (receivedChunks / totalChunks).clamp(0.0, 1.0);
   }
 }
@@ -92,9 +92,7 @@ class PhotoReassembler {
         totalChunks: chunk.totalChunks,
         totalSize: chunk.totalSize,
       ),
-    );
-
-    pending.addChunk(chunk);
+    )..addChunk(chunk);
 
     if (pending.isComplete) {
       final photo = pending.reassemble();
@@ -102,7 +100,7 @@ class PhotoReassembler {
       return ReassemblyResult(
         messageId: chunk.messageId,
         isComplete: true,
-        progress: 1.0,
+        progress: 1,
         photoData: photo,
       );
     }
@@ -111,7 +109,6 @@ class PhotoReassembler {
       messageId: chunk.messageId,
       isComplete: false,
       progress: pending.progress,
-      photoData: null,
     );
   }
 

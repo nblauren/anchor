@@ -1,18 +1,17 @@
+import 'package:anchor/core/theme/app_theme.dart';
+import 'package:anchor/core/utils/profile_validator.dart';
+import 'package:anchor/features/profile/bloc/profile_bloc.dart';
+import 'package:anchor/features/profile/bloc/profile_event.dart';
+import 'package:anchor/features/profile/bloc/profile_state.dart';
+import 'package:anchor/features/profile/widgets/interests_chip_selector.dart';
+import 'package:anchor/features/profile/widgets/photo_grid_widget.dart';
+import 'package:anchor/features/profile/widgets/photo_source_sheet.dart';
+import 'package:anchor/features/profile/widgets/position_chip_selector.dart';
+import 'package:anchor/features/profile/widgets/profile_preview_widget.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-
-import '../../../core/theme/app_theme.dart';
-import '../../../core/utils/profile_validator.dart';
-import '../bloc/profile_bloc.dart';
-import '../bloc/profile_event.dart';
-import '../bloc/profile_state.dart';
-import '../widgets/interests_chip_selector.dart';
-import '../widgets/photo_grid_widget.dart';
-import '../widgets/photo_source_sheet.dart';
-import '../widgets/position_chip_selector.dart';
-import '../widgets/profile_preview_widget.dart';
 
 /// Initial profile setup screen for new users (or editing existing profile).
 ///
@@ -150,7 +149,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
         bio: bio,
         position: _selectedPosition,
         interests: _selectedInterestIds,
-      ));
+      ),);
     } else {
       bloc.add(UpdateProfile(
         name: _nameController.text.trim(),
@@ -161,7 +160,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
         position: _selectedPosition,
         clearPosition: _selectedPosition == null,
         interests: _selectedInterestIds,
-      ));
+      ),);
     }
   }
 
@@ -503,7 +502,6 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
       subtitle: 'Pick up to 10 interests.',
       onContinue: _nextPage,
       showSkip: true,
-      continueLabel: 'Continue',
       isSaving: state.status == ProfileStatus.saving,
       child: SingleChildScrollView(
         child: InterestsChipSelector(
@@ -710,7 +708,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            'Here\'s how others will see you',
+            "Here's how others will see you",
             style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                   color: AppTheme.textSecondary,
                 ),
@@ -737,7 +735,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                 child: ElevatedButton(
                   onPressed: _finishSetup,
                   child: Text(
-                      widget.isEditing ? 'Save Changes' : 'Start Discovering'),
+                      widget.isEditing ? 'Save Changes' : 'Start Discovering',),
                 ),
               ),
             ],

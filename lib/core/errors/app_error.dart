@@ -231,7 +231,7 @@ class ChatError extends AppError {
       case ChatErrorType.photoFailed:
         return 'Photo failed to send. Please try again.';
       case ChatErrorType.peerOffline:
-        return 'User is not nearby. Message will be delivered when they\'re in range.';
+        return "User is not nearby. Message will be delivered when they're in range.";
       case null:
         return 'A messaging error occurred. Please try again.';
     }

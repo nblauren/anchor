@@ -1,10 +1,9 @@
 import 'dart:io';
 
+import 'package:anchor/core/theme/app_theme.dart';
+import 'package:anchor/services/ble/ble.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-
-import '../../../core/theme/app_theme.dart';
-import '../../../services/ble/ble.dart';
 
 /// Redesigned onboarding: 3 screens (Welcome → Features → Bluetooth setup).
 ///
@@ -13,8 +12,7 @@ import '../../../services/ble/ble.dart';
 /// automatically when the Bluetooth page appears.
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({
-    super.key,
-    required this.onComplete,
+    required this.onComplete, super.key,
   });
 
   final VoidCallback onComplete;
@@ -209,7 +207,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             icon: Icons.phone_iphone,
             title: 'Keep the app open',
             subtitle:
-                'Anchor works best when open — you\'ll be notified of new people nearby',
+                "Anchor works best when open — you'll be notified of new people nearby",
           ),
         ],
       ),
@@ -236,7 +234,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             children: [
               // Animated Bluetooth icon
               TweenAnimationBuilder<double>(
-                tween: Tween(begin: 0.8, end: 1.0),
+                tween: Tween(begin: 0.8, end: 1),
                 duration: const Duration(milliseconds: 600),
                 curve: Curves.easeOutBack,
                 builder: (context, value, child) {
@@ -488,14 +486,17 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     switch (status) {
       case BleConnectionStatus.ready:
       case BleConnectionStatus.active:
-        return 'You\'re all set!';
+        return "You're all set!";
       case BleConnectionStatus.disabled:
         return 'Turn on Bluetooth';
       case BleConnectionStatus.unavailable:
         return 'Bluetooth not available';
       case BleConnectionStatus.error:
         return 'Something went wrong';
-      default:
+      case BleConnectionStatus.initial:
+      case BleConnectionStatus.checking:
+      case BleConnectionStatus.noPermission:
+      case BleConnectionStatus.starting:
         return 'Enable Bluetooth';
     }
   }
@@ -504,14 +505,17 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     switch (status) {
       case BleConnectionStatus.ready:
       case BleConnectionStatus.active:
-        return 'Bluetooth is ready. Let\'s set up your profile!';
+        return "Bluetooth is ready. Let's set up your profile!";
       case BleConnectionStatus.disabled:
         return 'Anchor needs Bluetooth to find people around you. Please turn it on to continue.';
       case BleConnectionStatus.unavailable:
-        return 'This device doesn\'t support the Bluetooth features Anchor needs.';
+        return "This device doesn't support the Bluetooth features Anchor needs.";
       case BleConnectionStatus.error:
         return 'There was a problem setting up Bluetooth. Please try again.';
-      default:
+      case BleConnectionStatus.initial:
+      case BleConnectionStatus.checking:
+      case BleConnectionStatus.noPermission:
+      case BleConnectionStatus.starting:
         return 'Anchor uses Bluetooth to discover and connect with people nearby. Your location is never stored or shared.';
     }
   }

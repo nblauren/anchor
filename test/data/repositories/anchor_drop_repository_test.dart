@@ -35,11 +35,11 @@ void main() {
 
     test('multiple drops produce multiple entries', () async {
       await repo.recordDrop(
-          peerId: 'p1', peerName: 'A', direction: AnchorDropDirection.sent);
+          peerId: 'p1', peerName: 'A', direction: AnchorDropDirection.sent,);
       await repo.recordDrop(
-          peerId: 'p2', peerName: 'B', direction: AnchorDropDirection.received);
+          peerId: 'p2', peerName: 'B', direction: AnchorDropDirection.received,);
       await repo.recordDrop(
-          peerId: 'p3', peerName: 'C', direction: AnchorDropDirection.sent);
+          peerId: 'p3', peerName: 'C', direction: AnchorDropDirection.sent,);
 
       final drops = await repo.getRecentDrops();
       expect(drops.length, 3);
@@ -76,7 +76,7 @@ void main() {
 
     test('returns false for a different peer', () async {
       await repo.recordDrop(
-          peerId: 'peer-1', peerName: 'Alice', direction: AnchorDropDirection.sent);
+          peerId: 'peer-1', peerName: 'Alice', direction: AnchorDropDirection.sent,);
 
       expect(await repo.hasDroppedToPeerToday('peer-2'), isFalse);
     });
@@ -87,38 +87,38 @@ void main() {
   group('getSentPeerIdsSince', () {
     test('returns peer IDs of sent drops within window', () async {
       await repo.recordDrop(
-          peerId: 'p1', peerName: 'A', direction: AnchorDropDirection.sent);
+          peerId: 'p1', peerName: 'A', direction: AnchorDropDirection.sent,);
       await repo.recordDrop(
-          peerId: 'p2', peerName: 'B', direction: AnchorDropDirection.sent);
+          peerId: 'p2', peerName: 'B', direction: AnchorDropDirection.sent,);
 
-      final ids = await repo.getSentPeerIdsSince(hours: 24);
+      final ids = await repo.getSentPeerIdsSince();
       expect(ids, containsAll(['p1', 'p2']));
     });
 
     test('excludes received drops', () async {
       await repo.recordDrop(
-          peerId: 'p-sent', peerName: 'S', direction: AnchorDropDirection.sent);
+          peerId: 'p-sent', peerName: 'S', direction: AnchorDropDirection.sent,);
       await repo.recordDrop(
-          peerId: 'p-recv', peerName: 'R', direction: AnchorDropDirection.received);
+          peerId: 'p-recv', peerName: 'R', direction: AnchorDropDirection.received,);
 
-      final ids = await repo.getSentPeerIdsSince(hours: 24);
+      final ids = await repo.getSentPeerIdsSince();
       expect(ids, contains('p-sent'));
       expect(ids, isNot(contains('p-recv')));
     });
 
     test('returns empty set when no drops recorded', () async {
-      final ids = await repo.getSentPeerIdsSince(hours: 24);
+      final ids = await repo.getSentPeerIdsSince();
       expect(ids, isEmpty);
     });
 
     test('deduplicates multiple drops to same peer', () async {
       // Dropped to same peer twice
       await repo.recordDrop(
-          peerId: 'p1', peerName: 'A', direction: AnchorDropDirection.sent);
+          peerId: 'p1', peerName: 'A', direction: AnchorDropDirection.sent,);
       await repo.recordDrop(
-          peerId: 'p1', peerName: 'A', direction: AnchorDropDirection.sent);
+          peerId: 'p1', peerName: 'A', direction: AnchorDropDirection.sent,);
 
-      final ids = await repo.getSentPeerIdsSince(hours: 24);
+      final ids = await repo.getSentPeerIdsSince();
       expect(ids.length, 1);
       expect(ids.contains('p1'), isTrue);
     });
@@ -133,19 +133,19 @@ void main() {
 
     test('increments with each sent drop', () async {
       await repo.recordDrop(
-          peerId: 'p1', peerName: 'A', direction: AnchorDropDirection.sent);
+          peerId: 'p1', peerName: 'A', direction: AnchorDropDirection.sent,);
       expect(await repo.getTodaySentCount(), 1);
 
       await repo.recordDrop(
-          peerId: 'p2', peerName: 'B', direction: AnchorDropDirection.sent);
+          peerId: 'p2', peerName: 'B', direction: AnchorDropDirection.sent,);
       expect(await repo.getTodaySentCount(), 2);
     });
 
     test('does not count received drops', () async {
       await repo.recordDrop(
-          peerId: 'p1', peerName: 'A', direction: AnchorDropDirection.received);
+          peerId: 'p1', peerName: 'A', direction: AnchorDropDirection.received,);
       await repo.recordDrop(
-          peerId: 'p2', peerName: 'B', direction: AnchorDropDirection.sent);
+          peerId: 'p2', peerName: 'B', direction: AnchorDropDirection.sent,);
 
       expect(await repo.getTodaySentCount(), 1);
     });
@@ -163,21 +163,21 @@ void main() {
             peerName: 'A',
             direction: AnchorDropDirection.sent,
             droppedAt: now.subtract(const Duration(minutes: 2)),
-          ));
+          ),);
       await db.into(db.anchorDrops).insert(AnchorDropsCompanion.insert(
             id: 'id-2',
             peerId: 'p2',
             peerName: 'B',
             direction: AnchorDropDirection.sent,
             droppedAt: now.subtract(const Duration(minutes: 1)),
-          ));
+          ),);
       await db.into(db.anchorDrops).insert(AnchorDropsCompanion.insert(
             id: 'id-3',
             peerId: 'p3',
             peerName: 'C',
             direction: AnchorDropDirection.sent,
             droppedAt: now,
-          ));
+          ),);
 
       final drops = await repo.getRecentDrops();
       // Most recent first
@@ -190,7 +190,7 @@ void main() {
         await repo.recordDrop(
             peerId: 'p$i',
             peerName: 'User $i',
-            direction: AnchorDropDirection.sent);
+            direction: AnchorDropDirection.sent,);
       }
 
       final limited = await repo.getRecentDrops(limit: 3);
@@ -203,9 +203,9 @@ void main() {
   group('getReceivedDrops', () {
     test('only returns received drops', () async {
       await repo.recordDrop(
-          peerId: 'p-sent', peerName: 'Sender', direction: AnchorDropDirection.sent);
+          peerId: 'p-sent', peerName: 'Sender', direction: AnchorDropDirection.sent,);
       await repo.recordDrop(
-          peerId: 'p-recv', peerName: 'Receiver', direction: AnchorDropDirection.received);
+          peerId: 'p-recv', peerName: 'Receiver', direction: AnchorDropDirection.received,);
 
       final received = await repo.getReceivedDrops();
       expect(received.length, 1);
@@ -215,7 +215,7 @@ void main() {
 
     test('returns empty when no received drops', () async {
       await repo.recordDrop(
-          peerId: 'p1', peerName: 'A', direction: AnchorDropDirection.sent);
+          peerId: 'p1', peerName: 'A', direction: AnchorDropDirection.sent,);
       expect(await repo.getReceivedDrops(), isEmpty);
     });
   });

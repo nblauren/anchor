@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import '../mesh/mesh_packet.dart';
-import 'ble_models.dart';
+import 'package:anchor/services/ble/ble_models.dart';
+import 'package:anchor/services/mesh/mesh_packet.dart';
 
 /// Binary wire codec for BLE and LAN message transport.
 ///
@@ -12,7 +12,7 @@ import 'ble_models.dart';
 /// ## Payload Sub-Formats (per PacketType)
 ///
 /// ### message (plaintext, encrypted flag NOT set)
-/// ```
+/// ```text
 /// [1B] messageType index (MessageType enum)
 /// [1B] flags: bit0=hasReplyTo, bit1=hasSenderName, bit2=hasSenderUserId
 /// [if hasSenderName: 1B nameLen + N bytes name]
@@ -22,7 +22,7 @@ import 'ble_models.dart';
 /// ```
 ///
 /// ### message (encrypted, PacketFlags.encrypted set)
-/// ```
+/// ```text
 /// [1B] messageType index
 /// [1B] flags: bit1=hasSenderName, bit2=hasSenderUserId
 /// [if hasSenderName: 1B nameLen + N bytes name]
@@ -32,7 +32,7 @@ import 'ble_models.dart';
 /// ```
 ///
 /// ### handshake
-/// ```
+/// ```text
 /// [1B] step (1, 2, or 3)
 /// [rest] raw handshake bytes
 /// ```
@@ -40,7 +40,7 @@ import 'ble_models.dart';
 /// ### anchorDrop — empty payload (all info in header)
 ///
 /// ### reaction
-/// ```
+/// ```text
 /// [1B] actionLen
 /// [N bytes] action string ("add" / "remove")
 /// [1B] targetMsgIdLen
@@ -94,7 +94,6 @@ class BinaryMessageCodec {
     final packet = MeshPacket(
       type: PacketType.message,
       ttl: meshEnabled ? ttl : 1,
-      flags: 0,
       timestamp: DateTime.now(),
       senderId: MeshPacket.truncateIdSync(senderId),
       recipientId: recipientId,
@@ -157,7 +156,6 @@ class BinaryMessageCodec {
     final packet = MeshPacket(
       type: PacketType.handshake,
       ttl: 1,
-      flags: 0,
       timestamp: DateTime.now(),
       senderId: MeshPacket.truncateIdSync(senderId),
       recipientId: MeshPacket.broadcastRecipientId,
@@ -194,7 +192,6 @@ class BinaryMessageCodec {
     final packet = MeshPacket(
       type: PacketType.anchorDrop,
       ttl: meshEnabled ? ttl : 1,
-      flags: 0,
       timestamp: DateTime.now(),
       senderId: MeshPacket.truncateIdSync(senderId),
       recipientId: recipientId,
@@ -231,7 +228,6 @@ class BinaryMessageCodec {
     final packet = MeshPacket(
       type: PacketType.reaction,
       ttl: 1,
-      flags: 0,
       timestamp: DateTime.now(),
       senderId: MeshPacket.truncateIdSync(senderId),
       recipientId: MeshPacket.broadcastRecipientId,
@@ -252,14 +248,12 @@ class BinaryMessageCodec {
   }) {
     // Payload: [4B messageCount big-endian] [rest: GCS bytes]
     final payload = Uint8List(4 + gcsBytes.length);
-    final bd = ByteData.sublistView(payload);
-    bd.setUint32(0, messageCount, Endian.big);
+    ByteData.sublistView(payload).setUint32(0, messageCount);
     payload.setRange(4, payload.length, gcsBytes);
 
     final packet = MeshPacket(
       type: PacketType.gossipSync,
       ttl: 1, // Never relay gossip — peer-to-peer only
-      flags: 0,
       timestamp: DateTime.now(),
       senderId: MeshPacket.truncateIdSync(senderId),
       recipientId: MeshPacket.broadcastRecipientId,
@@ -283,17 +277,16 @@ class BinaryMessageCodec {
   }) {
     // Payload: [4B originalN] [4B count] [4B × N indices, big-endian]
     final payload = Uint8List(8 + missingIndices.length * 4);
-    final bd = ByteData.sublistView(payload);
-    bd.setUint32(0, originalN, Endian.big);
-    bd.setUint32(4, missingIndices.length, Endian.big);
+    final bd = ByteData.sublistView(payload)
+      ..setUint32(0, originalN)
+      ..setUint32(4, missingIndices.length);
     for (var i = 0; i < missingIndices.length; i++) {
-      bd.setUint32(8 + i * 4, missingIndices[i], Endian.big);
+      bd.setUint32(8 + i * 4, missingIndices[i]);
     }
 
     final packet = MeshPacket(
       type: PacketType.gossipRequest,
       ttl: 1,
-      flags: 0,
       timestamp: DateTime.now(),
       senderId: MeshPacket.truncateIdSync(senderId),
       recipientId: MeshPacket.truncateIdSync(recipientId),
@@ -309,7 +302,7 @@ class BinaryMessageCodec {
     if (packet.type != PacketType.gossipSync) return null;
     if (packet.payload.length < 4) return null;
     final bd = ByteData.sublistView(packet.payload);
-    final messageCount = bd.getUint32(0, Endian.big);
+    final messageCount = bd.getUint32(0);
     final gcsBytes = Uint8List.fromList(packet.payload.sublist(4));
     return DecodedGossipSync(gcsBytes: gcsBytes, messageCount: messageCount);
   }
@@ -319,12 +312,12 @@ class BinaryMessageCodec {
     if (packet.type != PacketType.gossipRequest) return null;
     if (packet.payload.length < 8) return null;
     final bd = ByteData.sublistView(packet.payload);
-    final originalN = bd.getUint32(0, Endian.big);
-    final count = bd.getUint32(4, Endian.big);
+    final originalN = bd.getUint32(0);
+    final count = bd.getUint32(4);
     if (packet.payload.length < 8 + count * 4) return null;
     final indices = <int>[];
     for (var i = 0; i < count; i++) {
-      indices.add(bd.getUint32(8 + i * 4, Endian.big));
+      indices.add(bd.getUint32(8 + i * 4));
     }
     return DecodedGossipRequest(originalN: originalN, missingIndices: indices);
   }
@@ -465,10 +458,9 @@ class BinaryMessageCodec {
   static Uint8List _encodeChatPayload({
     required MessageType messageType,
     required String content,
-    String? senderName,
+    required bool encrypted, String? senderName,
     String? senderUserId,
     String? replyToId,
-    required bool encrypted,
   }) {
     final contentBytes = utf8.encode(content);
     final nameBytes = (senderName != null && senderName.isNotEmpty)
@@ -481,7 +473,7 @@ class BinaryMessageCodec {
         ? utf8.encode(replyToId)
         : null;
 
-    int flags = 0;
+    var flags = 0;
     if (replyBytes != null) flags |= 0x01;
     if (nameBytes != null) flags |= 0x02;
     if (userIdBytes != null) flags |= 0x04;
@@ -531,7 +523,7 @@ class BinaryMessageCodec {
         ? utf8.encode(senderUserId)
         : null;
 
-    int flags = 0;
+    var flags = 0;
     if (nameBytes != null) flags |= 0x02;
     if (userIdBytes != null) flags |= 0x04;
 
@@ -580,11 +572,10 @@ class DecodedBinaryMessage {
 class DecodedChatMessage {
   const DecodedChatMessage({
     required this.messageType,
-    this.senderName,
+    required this.isEncrypted, this.senderName,
     this.senderUserId,
     this.content,
     this.replyToId,
-    required this.isEncrypted,
     this.nonce,
     this.ciphertext,
   });

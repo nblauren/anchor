@@ -1,7 +1,8 @@
 import 'dart:async';
 
-import '../../core/utils/logger.dart';
-import 'transport_enums.dart';
+import 'package:anchor/core/utils/logger.dart';
+import 'package:anchor/services/transport/transport_enums.dart';
+import 'package:flutter/foundation.dart' show immutable;
 
 /// Per-peer, per-transport health metrics.
 class TransportHealth {
@@ -45,6 +46,7 @@ class TransportHealth {
 }
 
 /// Composite key for per-peer, per-transport tracking.
+@immutable
 class _HealthKey {
   const _HealthKey(this.peerId, this.transport);
   final String peerId;
@@ -103,7 +105,7 @@ class TransportHealthTracker {
       peerId: peerId,
       transport: transport,
       health: updated,
-    ));
+    ),);
 
     Logger.debug(
       'TransportHealth: ${transport.name} → '

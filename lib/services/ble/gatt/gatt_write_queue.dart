@@ -2,9 +2,8 @@ import 'dart:async';
 import 'dart:collection';
 import 'dart:typed_data';
 
+import 'package:anchor/core/utils/logger.dart';
 import 'package:bluetooth_low_energy/bluetooth_low_energy.dart';
-
-import '../../../core/utils/logger.dart';
 
 /// Priority levels for GATT write operations.
 ///
@@ -159,7 +158,7 @@ class GattWriteQueue {
       data: data,
       priority: priority,
       completer: completer,
-    ));
+    ),);
 
     _processNext();
     return completer.future;
@@ -233,7 +232,7 @@ class GattWriteQueue {
   }
 
   /// Process queued writes sequentially with inter-write delay.
-  void _processNext() async {
+  Future<void> _processNext() async {
     if (_processing || _disposed) return;
     _processing = true;
 
@@ -285,7 +284,7 @@ class GattWriteQueue {
 
     // Check if more items arrived while we were finishing
     if (totalQueued > 0 && !_disposed) {
-      _processNext();
+      unawaited(_processNext());
     }
   }
 

@@ -1,15 +1,16 @@
+import 'dart:async';
+
+import 'package:anchor/core/theme/app_theme.dart';
+import 'package:anchor/core/utils/logger.dart';
+import 'package:anchor/features/discovery/bloc/discovery_bloc.dart';
+import 'package:anchor/features/discovery/bloc/discovery_event.dart';
+import 'package:anchor/injection.dart';
+import 'package:anchor/services/ble/ble.dart';
+import 'package:anchor/services/database_service.dart';
+import 'package:anchor/services/transport/transport.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-
-import '../../../core/theme/app_theme.dart';
-import '../../../core/utils/logger.dart';
-import '../../../injection.dart';
-import '../../../services/ble/ble.dart';
-import '../../../services/database_service.dart';
-import '../../../services/transport/transport.dart';
-import '../../discovery/bloc/discovery_bloc.dart';
-import '../../discovery/bloc/discovery_event.dart';
 
 /// Debug menu for testing and diagnostics
 class DebugMenuScreen extends StatefulWidget {
@@ -255,7 +256,7 @@ class _DebugMenuScreenState extends State<DebugMenuScreen> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               const Text('Status',
-                  style: TextStyle(color: AppTheme.textSecondary)),
+                  style: TextStyle(color: AppTheme.textSecondary),),
               Row(
                 children: [
                   Container(
@@ -296,7 +297,7 @@ class _DebugMenuScreenState extends State<DebugMenuScreen> {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           const Text('Active Transport',
-              style: TextStyle(color: AppTheme.textSecondary)),
+              style: TextStyle(color: AppTheme.textSecondary),),
           Row(
             children: [
               Container(
@@ -346,7 +347,12 @@ class _DebugMenuScreenState extends State<DebugMenuScreen> {
       case BleConnectionStatus.ready:
       case BleConnectionStatus.starting:
         return AppTheme.warning;
-      default:
+      case BleConnectionStatus.initial:
+      case BleConnectionStatus.checking:
+      case BleConnectionStatus.unavailable:
+      case BleConnectionStatus.disabled:
+      case BleConnectionStatus.noPermission:
+      case BleConnectionStatus.error:
         return AppTheme.error;
     }
   }
@@ -490,7 +496,7 @@ Database Statistics:
     _appendLog(stats);
 
     if (mounted) {
-      showDialog(
+      unawaited(showDialog<void>(
         context: context,
         builder: (context) => AlertDialog(
           backgroundColor: AppTheme.darkCard,
@@ -503,7 +509,7 @@ Database Statistics:
             ),
           ],
         ),
-      );
+      ),);
     }
   }
 
@@ -519,7 +525,7 @@ Database Statistics:
     });
   }
 
-  void _sendTestBroadcast() async {
+  Future<void> _sendTestBroadcast() async {
     final message = _messageController.text.trim();
     if (message.isEmpty) {
       _showSnackBar('Please enter a message');
@@ -532,7 +538,6 @@ Database Statistics:
         BroadcastPayload(
           userId: 'test_user',
           name: 'Test Broadcast',
-          age: null,
           bio: message,
           thumbnailBytes: Uint8List(0),
         ),

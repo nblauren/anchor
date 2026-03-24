@@ -1,21 +1,21 @@
 import 'dart:async';
+
+import 'package:anchor/core/constants/app_constants.dart';
+import 'package:anchor/core/utils/logger.dart';
+import 'package:anchor/data/local_database/database.dart';
+import 'package:anchor/data/repositories/chat_repository.dart';
+import 'package:anchor/data/repositories/peer_repository.dart';
+import 'package:anchor/features/chat/bloc/chat_event.dart';
+import 'package:anchor/features/chat/bloc/chat_state.dart';
+import 'package:anchor/services/ble/ble.dart' as ble;
 import 'package:anchor/services/chat_event_bus.dart';
+import 'package:anchor/services/encryption/encryption.dart';
 import 'package:anchor/services/message_send_service.dart';
 import 'package:anchor/services/notification_service.dart';
-import 'package:uuid/uuid.dart';
+import 'package:anchor/services/store_and_forward_service.dart';
+import 'package:anchor/services/transport/transport.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-
-import '../../../core/constants/app_constants.dart';
-import '../../../core/utils/logger.dart';
-import '../../../data/local_database/database.dart';
-import '../../../data/repositories/chat_repository.dart';
-import '../../../data/repositories/peer_repository.dart';
-import '../../../services/ble/ble.dart' as ble;
-import '../../../services/encryption/encryption.dart';
-import '../../../services/store_and_forward_service.dart';
-import '../../../services/transport/transport.dart';
-import 'chat_event.dart';
-import 'chat_state.dart';
+import 'package:uuid/uuid.dart';
 
 class ChatBloc extends Bloc<ChatEvent, ChatState> {
   ChatBloc({
@@ -28,7 +28,6 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     required ChatEventBus chatEventBus,
     StoreAndForwardService? storeAndForwardService,
     EncryptionService? encryptionService,
-    TransportRetryQueue? retryQueue,
   })  : _chatRepository = chatRepository,
         _peerRepository = peerRepository,
         _transportManager = transportManager,
@@ -81,7 +80,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         add(MessageStatusUpdated(
           messageId: update.messageId,
           status: update.status,
-        ));
+        ),);
       }
     });
     _busMessageUpdatedSub = _chatEventBus.messageUpdated.listen((msg) {
@@ -103,7 +102,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
           add(MessageStatusUpdated(
             messageId: update.messageId,
             status: update.status,
-          ));
+          ),);
         }
       },
     );
@@ -120,7 +119,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   final ChatEventBus _chatEventBus;
   final StoreAndForwardService? _storeAndForwardService;
   final EncryptionService? _encryptionService;
-  StreamSubscription? _sendDeliverySubscription;
+  StreamSubscription<SendDeliveryUpdate>? _sendDeliverySubscription;
 
   // Transport manager subscriptions
   StreamSubscription<ble.ReceivedMessage>? _messageSubscription;
@@ -163,7 +162,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         messages: [],
         hasMoreMessages: true,
         isBlocked: isBlocked,
-      ));
+      ),);
 
       // Load messages
       add(const LoadMessages());
@@ -175,7 +174,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       emit(state.copyWith(
         status: ChatStatus.error,
         errorMessage: 'Failed to open conversation',
-      ));
+      ),);
     }
   }
 
@@ -207,14 +206,14 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       await Future.wait(newQuotedIds.map((id) async {
         final quoted = await _chatRepository.getMessageById(id);
         if (quoted != null) newQuoted[id] = quoted;
-      }));
+      }),);
 
       emit(state.copyWith(
         status: ChatStatus.loaded,
         messages: allMessages,
         hasMoreMessages: messages.length >= AppConstants.messagePageSize,
         quotedMessages: newQuoted,
-      ));
+      ),);
     } catch (e) {
       Logger.error('Failed to load messages', e, null, 'ChatBloc');
     }
@@ -261,7 +260,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         messages: [message, ...state.messages],
         quotedMessages: updatedQuoted,
         clearReplyingToMessage: true,
-      ));
+      ),);
 
       // Fire-and-forget: BLE send runs in background via MessageSendService
       _messageSendService.sendText(message, peerId, replyToId: replyToId);
@@ -270,7 +269,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       emit(state.copyWith(
         status: ChatStatus.error,
         errorMessage: 'Failed to send message',
-      ));
+      ),);
     }
   }
 
@@ -319,7 +318,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       emit(state.copyWith(
         status: ChatStatus.loaded,
         messages: [message, ...state.messages],
-      ));
+      ),);
 
       // 2. Fire-and-forget: compress + BLE preview send in background via MessageSendService
       _messageSendService.sendPhoto(
@@ -332,7 +331,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       emit(state.copyWith(
         status: ChatStatus.error,
         errorMessage: 'Failed to send photo',
-      ));
+      ),);
     }
   }
 
@@ -360,7 +359,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         emit(state.copyWith(
           messages: [event.message, ...state.messages],
           quotedMessages: updatedQuoted,
-        ));
+        ),);
 
         // Auto-mark as read since the chat is open.
         add(const MarkMessagesRead());
@@ -389,7 +388,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
             await _chatRepository.getConversationByPeerId(bleMsg.fromPeerId);
         if (conversation != null) {
           await _chatRepository.markSentMessagesRead(
-              conversation.id, _ownUserId);
+              conversation.id, _ownUserId,);
           if (state.currentConversation?.peerId == bleMsg.fromPeerId) {
             final updatedMessages = state.messages.map((msg) {
               if (msg.senderId == _ownUserId &&
@@ -496,7 +495,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     try {
       // Mark as pending in DB and state — don't block input
       await _chatRepository.updateMessageStatus(
-          event.messageId, MessageStatus.pending);
+          event.messageId, MessageStatus.pending,);
 
       final updatedMessages = state.messages.map((msg) {
         if (msg.id == event.messageId) {
@@ -530,7 +529,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       add(MessageStatusUpdated(
         messageId: event.messageId,
         status: MessageStatus.failed,
-      ));
+      ),);
     }
   }
 
@@ -566,14 +565,14 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     emit(state.copyWith(
       clearCurrentConversation: true,
       messages: [],
-    ));
+    ),);
   }
 
   void _onClearError(
     ClearChatError event,
     Emitter<ChatState> emit,
   ) {
-    emit(state.copyWith(errorMessage: null));
+    emit(state.copyWith());
   }
 
   Future<void> _onBlockChatPeer(

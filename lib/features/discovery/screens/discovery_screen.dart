@@ -1,25 +1,24 @@
+import 'package:anchor/core/constants/profile_constants.dart';
+import 'package:anchor/core/theme/app_theme.dart';
+import 'package:anchor/features/chat/bloc/chat_bloc.dart';
+import 'package:anchor/features/chat/bloc/chat_e2ee_bloc.dart';
+import 'package:anchor/features/chat/bloc/conversation_list_bloc.dart';
+import 'package:anchor/features/chat/bloc/photo_transfer_bloc.dart';
+import 'package:anchor/features/chat/bloc/reaction_bloc.dart';
+import 'package:anchor/features/discovery/bloc/anchor_drop_bloc.dart';
+import 'package:anchor/features/discovery/bloc/discovery_bloc.dart';
+import 'package:anchor/features/discovery/bloc/discovery_event.dart';
+import 'package:anchor/features/discovery/bloc/discovery_filter_cubit.dart';
+import 'package:anchor/features/discovery/bloc/discovery_state.dart';
+import 'package:anchor/features/discovery/screens/anchor_drops_screen.dart';
+import 'package:anchor/features/discovery/screens/peer_detail_screen.dart';
+import 'package:anchor/features/discovery/widgets/peer_grid_tile.dart';
+import 'package:anchor/features/discovery/widgets/radar_view.dart';
+import 'package:anchor/injection.dart';
+import 'package:anchor/services/database_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
-import '../../../core/constants/profile_constants.dart';
-import '../../../core/theme/app_theme.dart';
-import '../../../injection.dart';
-import '../../../services/database_service.dart';
-import '../../chat/bloc/chat_bloc.dart';
-import '../../chat/bloc/chat_e2ee_bloc.dart';
-import '../../chat/bloc/conversation_list_bloc.dart';
-import '../../chat/bloc/photo_transfer_bloc.dart';
-import '../../chat/bloc/reaction_bloc.dart';
-import '../bloc/anchor_drop_bloc.dart';
-import '../bloc/discovery_bloc.dart';
-import '../bloc/discovery_event.dart';
-import '../bloc/discovery_filter_cubit.dart';
-import '../bloc/discovery_state.dart';
-import '../widgets/peer_grid_tile.dart';
-import '../widgets/radar_view.dart';
-import 'anchor_drops_screen.dart';
-import 'peer_detail_screen.dart';
 
 enum _ViewMode { grid, radar }
 
@@ -75,7 +74,7 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
   Future<void> _onRefresh() async {
     context.read<DiscoveryBloc>().add(const RefreshPeers());
     // Wait a bit for visual feedback
-    await Future.delayed(const Duration(milliseconds: 500));
+    await Future<void>.delayed(const Duration(milliseconds: 500));
   }
 
 
@@ -87,7 +86,7 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
     final convListBloc = context.read<ConversationListBloc>();
 
     await Navigator.of(context).push(
-      MaterialPageRoute(
+      MaterialPageRoute<void>(
         builder: (_) => MultiBlocProvider(
           providers: [
             BlocProvider.value(value: discoveryBloc),
@@ -110,7 +109,7 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
   }
 
   void _showFilterSheet(BuildContext context, DiscoveryState state) {
-    showModalBottomSheet(
+    showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: AppTheme.darkSurface,
@@ -171,11 +170,11 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                   tooltip: 'Anchor Drops',
                   onPressed: () {
                     Navigator.of(context).push(
-                      MaterialPageRoute(
+                      MaterialPageRoute<void>(
                         builder: (_) => MultiBlocProvider(
                           providers: [
                             BlocProvider.value(
-                                value: context.read<DiscoveryBloc>()),
+                                value: context.read<DiscoveryBloc>(),),
                             BlocProvider.value(value: context.read<ChatBloc>()),
                             BlocProvider.value(value: context.read<PhotoTransferBloc>()),
                             BlocProvider.value(value: context.read<ChatE2eeBloc>()),
@@ -314,7 +313,6 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                       ),
                       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: crossAxisCount,
-                        childAspectRatio: 1,
                         crossAxisSpacing: 12,
                         mainAxisSpacing: 12,
                       ),
@@ -350,7 +348,7 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
   }
 
   Widget _buildActiveFilterStrip(
-      BuildContext context, DiscoveryFilterState filterState) {
+      BuildContext context, DiscoveryFilterState filterState,) {
     final cubit = context.read<DiscoveryFilterCubit>();
     return Container(
       color: AppTheme.primaryLight.withAlpha(20),
@@ -358,7 +356,7 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
       child: Row(
         children: [
           const Icon(Icons.tune_rounded,
-              size: 14, color: AppTheme.primaryLight),
+              size: 14, color: AppTheme.primaryLight,),
           const SizedBox(width: 6),
           Expanded(
             child: Wrap(
@@ -378,11 +376,11 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
             ),
           ),
           TextButton(
-            onPressed: () => cubit.clearAll(),
+            onPressed: cubit.clearAll,
             style: TextButton.styleFrom(
               foregroundColor: AppTheme.primaryLight,
               padding: EdgeInsets.zero,
-              minimumSize: const Size(0, 0),
+              minimumSize: Size.zero,
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
             child: const Text('Clear', style: TextStyle(fontSize: 12)),
@@ -467,7 +465,7 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'When other Anchor users are nearby,\nthey\'ll appear here.',
+                      "When other Anchor users are nearby,\nthey'll appear here.",
                       textAlign: TextAlign.center,
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                             color: AppTheme.textSecondary,
@@ -599,7 +597,7 @@ class _FilterChip extends StatelessWidget {
             style: const TextStyle(
                 color: AppTheme.primaryLight,
                 fontSize: 11,
-                fontWeight: FontWeight.w600),
+                fontWeight: FontWeight.w600,),
           ),
           const SizedBox(width: 4),
           GestureDetector(
@@ -706,7 +704,7 @@ class _FilterSheet extends StatelessWidget {
                           : Colors.white24,
                     ),
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(20)),
+                        borderRadius: BorderRadius.circular(20),),
                     backgroundColor: AppTheme.darkCard,
                   ),
                   ...ProfileConstants.positionMap.entries.map((e) {
@@ -728,7 +726,7 @@ class _FilterSheet extends StatelessWidget {
                             selected ? AppTheme.primaryLight : Colors.white24,
                       ),
                       shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(20)),
+                          borderRadius: BorderRadius.circular(20),),
                       backgroundColor: AppTheme.darkCard,
                     );
                   }),
@@ -777,7 +775,7 @@ class _FilterSheet extends StatelessWidget {
                       color: selected ? AppTheme.primaryLight : Colors.white24,
                     ),
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(20)),
+                        borderRadius: BorderRadius.circular(20),),
                   );
                 }).toList(),
               ),

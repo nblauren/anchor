@@ -1,8 +1,7 @@
 import 'dart:io';
 
+import 'package:anchor/core/utils/logger.dart';
 import 'package:nsfw_detector_flutter/nsfw_detector_flutter.dart';
-
-import '../core/utils/logger.dart';
 
 /// Result of an on-device sensitive-content analysis.
 class NsfwCheckResult {
@@ -28,6 +27,8 @@ class NsfwCheckResult {
 ///   - [StubNsfwDetectionService] (default) — always safe, compiles without
 ///     any ML dependency.  Use this until your model is ready.
 ///   - See in-code examples for `tflite_flutter` and `nsfw_detector_flutter`.
+// This is a legitimate interface pattern for dependency injection.
+// ignore: one_member_abstracts
 abstract class NsfwDetectionService {
   /// Analyse the image at [absolutePath] and return a [NsfwCheckResult].
   ///
@@ -72,12 +73,12 @@ class NsfwDetectorFlutterService implements NsfwDetectionService {
 
     if (result == null) {
       Logger.error('NSFW detection failed for $absolutePath', 'NSFW');
-      return const NsfwCheckResult(isSafe: true, confidence: 1.0);
+      return const NsfwCheckResult(isSafe: true);
     }
 
     return NsfwCheckResult(
-      isSafe: result.isNsfw ? false : true,
-      confidence: result.score.toDouble(),
+      isSafe: !result.isNsfw,
+      confidence: result.score,
     );
   }
 }

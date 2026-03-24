@@ -55,19 +55,19 @@ class GolombCodedSet {
 
     // Delta-encode
     final deltas = <int>[hashes[0]];
-    for (int i = 1; i < hashes.length; i++) {
+    for (var i = 1; i < hashes.length; i++) {
       deltas.add(hashes[i] - hashes[i - 1]);
     }
 
     // Golomb-Rice encode deltas
-    final writer = _BitWriter();
     // Write N as 4-byte big-endian header
-    writer.writeBytes([
-      (n >> 24) & 0xFF,
-      (n >> 16) & 0xFF,
-      (n >> 8) & 0xFF,
-      n & 0xFF,
-    ]);
+    final writer = _BitWriter()
+      ..writeBytes([
+        (n >> 24) & 0xFF,
+        (n >> 16) & 0xFF,
+        (n >> 8) & 0xFF,
+        n & 0xFF,
+      ]);
 
     for (final delta in deltas) {
       _golombRiceEncode(writer, delta, fpRate);
@@ -89,8 +89,8 @@ class GolombCodedSet {
     final reader = _BitReader(data, 32); // skip 4-byte header
 
     final hashes = <int>[];
-    int running = 0;
-    for (int i = 0; i < n; i++) {
+    var running = 0;
+    for (var i = 0; i < n; i++) {
       final delta = _golombRiceDecode(reader, fpRate);
       running += delta;
       hashes.add(running);
@@ -115,9 +115,9 @@ class GolombCodedSet {
   /// which is harmless).
   static List<int> setDifference(List<int> remoteHashes, List<int> localHashes) {
     final missing = <int>[];
-    int li = 0;
+    var li = 0;
 
-    for (int ri = 0; ri < remoteHashes.length; ri++) {
+    for (var ri = 0; ri < remoteHashes.length; ri++) {
       final rh = remoteHashes[ri];
       // Advance local pointer past hashes smaller than remote
       while (li < localHashes.length && localHashes[li] < rh) {
@@ -143,8 +143,8 @@ class GolombCodedSet {
   /// isn't critical here since we're just building a probabilistic set.
   static int _hash(String item, int modulus) {
     if (modulus <= 0) return 0;
-    int hash = 0x811c9dc5;
-    for (int i = 0; i < item.length; i++) {
+    var hash = 0x811c9dc5;
+    for (var i = 0; i < item.length; i++) {
       hash ^= item.codeUnitAt(i);
       hash = (hash * 0x01000193) & 0xFFFFFFFF;
     }
@@ -159,13 +159,13 @@ class GolombCodedSet {
     final log2P = _log2(p);
 
     // Unary encoding of quotient: q ones followed by a zero
-    for (int i = 0; i < q; i++) {
+    for (var i = 0; i < q; i++) {
       writer.writeBit(1);
     }
     writer.writeBit(0);
 
     // Binary encoding of remainder in log2P bits
-    for (int i = log2P - 1; i >= 0; i--) {
+    for (var i = log2P - 1; i >= 0; i--) {
       writer.writeBit((r >> i) & 1);
     }
   }
@@ -175,14 +175,14 @@ class GolombCodedSet {
     final log2P = _log2(p);
 
     // Read unary quotient
-    int q = 0;
+    var q = 0;
     while (reader.readBit() == 1) {
       q++;
     }
 
     // Read binary remainder
-    int r = 0;
-    for (int i = 0; i < log2P; i++) {
+    var r = 0;
+    for (var i = 0; i < log2P; i++) {
       r = (r << 1) | reader.readBit();
     }
 
@@ -192,8 +192,8 @@ class GolombCodedSet {
   /// Ceiling of log2 for Golomb-Rice remainder bit count.
   static int _log2(int value) {
     if (value <= 1) return 1;
-    int bits = 0;
-    int v = value - 1;
+    var bits = 0;
+    var v = value - 1;
     while (v > 0) {
       bits++;
       v >>= 1;
@@ -210,7 +210,7 @@ class _BitWriter {
 
   void writeBit(int bit) {
     if (bit != 0) {
-      _currentByte |= (1 << _bitIndex);
+      _currentByte |= 1 << _bitIndex;
     }
     _bitIndex--;
     if (_bitIndex < 0) {

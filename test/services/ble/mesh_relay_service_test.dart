@@ -112,7 +112,7 @@ void main() {
           characteristic: any(named: 'characteristic'),
           data: any(named: 'data'),
           priority: any(named: 'priority'),
-        )).thenReturn(null);
+        ),).thenReturn(null);
 
     relay = MeshRelayService(
       connectionManager: mockConn,
@@ -121,9 +121,13 @@ void main() {
     );
 
     // Provide own userId so loop detection works
+    // ignore: cascade_invocations
     relay.getOwnUserId = () => 'own-user';
+    // ignore: cascade_invocations
     relay.getVisiblePeerCount = () => 0;
+    // ignore: cascade_invocations
     relay.getAppUserIdForPeer = (_) => null;
+    // ignore: cascade_invocations
     relay.isDirectPeer = (_) => false;
   });
 
@@ -141,7 +145,7 @@ void main() {
             characteristic: any(named: 'characteristic'),
             data: any(named: 'data'),
             priority: any(named: 'priority'),
-          ));
+          ),);
     });
 
     test('drops message when TTL is negative', () {
@@ -155,7 +159,7 @@ void main() {
             characteristic: any(named: 'characteristic'),
             data: any(named: 'data'),
             priority: any(named: 'priority'),
-          ));
+          ),);
     });
 
     test('forwards message when TTL = 1 (decrements to 0 in payload)', () {
@@ -176,7 +180,7 @@ void main() {
             characteristic: any(named: 'characteristic'),
             data: any(named: 'data'),
             priority: any(named: 'priority'),
-          )).called(1);
+          ),).called(1);
     });
   });
 
@@ -186,7 +190,6 @@ void main() {
     test('drops message already containing own userId in relay_path', () {
       // own-user is already in the relay path — should not re-relay
       final json = buildRelayJson(
-        ttl: 3,
         relayPath: ['sender', 'own-user'],
       );
 
@@ -198,7 +201,7 @@ void main() {
             characteristic: any(named: 'characteristic'),
             data: any(named: 'data'),
             priority: any(named: 'priority'),
-          ));
+          ),);
     });
 
     test('relays message when relay_path does not contain own userId', () {
@@ -218,7 +221,7 @@ void main() {
             characteristic: any(named: 'characteristic'),
             data: any(named: 'data'),
             priority: any(named: 'priority'),
-          )).called(1);
+          ),).called(1);
     });
   });
 
@@ -231,7 +234,7 @@ void main() {
       when(() => mockConn.connectedPeerIds).thenReturn(['p1']);
       when(() => mockConn.canSendTo('p1')).thenReturn(true);
 
-      final json = buildRelayJson(ttl: 3);
+      final json = buildRelayJson();
 
       relay.maybeRelayMessage(json, 'from');
 
@@ -241,7 +244,7 @@ void main() {
             characteristic: any(named: 'characteristic'),
             data: any(named: 'data'),
             priority: any(named: 'priority'),
-          ));
+          ),);
     });
   });
 
@@ -267,7 +270,7 @@ void main() {
             characteristic: any(named: 'characteristic'),
             data: any(named: 'data'),
             priority: any(named: 'priority'),
-          )).called(1);
+          ),).called(1);
 
       verifyNever(() => mockQueue.enqueueFireAndForget(
             peerId: 'sender-peer',
@@ -275,7 +278,7 @@ void main() {
             characteristic: any(named: 'characteristic'),
             data: any(named: 'data'),
             priority: any(named: 'priority'),
-          ));
+          ),);
     });
   });
 
@@ -296,16 +299,17 @@ void main() {
     });
 
     test('stores neighbor list for findBestRelayPeer lookup', () {
-      relay.handleNeighborList({
-        'type': 'neighbor_list',
-        'sender_id': 'relay-node-user',
-        'peers': ['target-user'],
-        'ttl': 1,
-      });
+      relay
+        ..handleNeighborList({
+          'type': 'neighbor_list',
+          'sender_id': 'relay-node-user',
+          'peers': ['target-user'],
+          'ttl': 1,
+        })
 
-      // 'relay-node-peer' knows 'target-user'
-      relay.getAppUserIdForPeer = (peerId) =>
-          peerId == 'relay-node-peer' ? 'relay-node-user' : null;
+        // 'relay-node-peer' knows 'target-user'
+        ..getAppUserIdForPeer = (peerId) =>
+            peerId == 'relay-node-peer' ? 'relay-node-user' : null;
 
       when(() => mockConn.connectedPeerIds).thenReturn(['relay-node-peer']);
       when(() => mockConn.canSendTo('relay-node-peer')).thenReturn(true);
@@ -326,16 +330,17 @@ void main() {
     });
 
     test('updates existing entry for same sender', () {
-      relay.handleNeighborList({
-        'sender_id': 'node-A',
-        'peers': ['user-1', 'user-2'],
-        'ttl': 1,
-      });
-      relay.handleNeighborList({
-        'sender_id': 'node-A',
-        'peers': ['user-3'], // replaced
-        'ttl': 1,
-      });
+      relay
+        ..handleNeighborList({
+          'sender_id': 'node-A',
+          'peers': ['user-1', 'user-2'],
+          'ttl': 1,
+        })
+        ..handleNeighborList({
+          'sender_id': 'node-A',
+          'peers': ['user-3'], // replaced
+          'ttl': 1,
+        });
 
       expect(relay.routingTableSize, 1); // still 1 entry for node-A
 
@@ -360,13 +365,14 @@ void main() {
     });
 
     test('returns null when peer connected but does not know destination', () {
-      relay.handleNeighborList({
-        'sender_id': 'relay-user',
-        'peers': ['unrelated-user'],
-        'ttl': 1,
-      });
+      relay
+        ..handleNeighborList({
+          'sender_id': 'relay-user',
+          'peers': ['unrelated-user'],
+          'ttl': 1,
+        })
 
-      relay.getAppUserIdForPeer = (p) => p == 'relay-peer' ? 'relay-user' : null;
+        ..getAppUserIdForPeer = (p) => p == 'relay-peer' ? 'relay-user' : null;
       when(() => mockConn.connectedPeerIds).thenReturn(['relay-peer']);
       when(() => mockConn.canSendTo('relay-peer')).thenReturn(true);
 
@@ -374,18 +380,19 @@ void main() {
     });
 
     test('excludes specified peer from best relay selection', () {
-      relay.handleNeighborList({
-        'sender_id': 'relay-A-user',
-        'peers': ['target-user'],
-        'ttl': 1,
-      });
-      relay.handleNeighborList({
-        'sender_id': 'relay-B-user',
-        'peers': ['target-user'],
-        'ttl': 1,
-      });
+      relay
+        ..handleNeighborList({
+          'sender_id': 'relay-A-user',
+          'peers': ['target-user'],
+          'ttl': 1,
+        })
+        ..handleNeighborList({
+          'sender_id': 'relay-B-user',
+          'peers': ['target-user'],
+          'ttl': 1,
+        })
 
-      relay.getAppUserIdForPeer = (p) {
+        ..getAppUserIdForPeer = (p) {
         if (p == 'peer-A') return 'relay-A-user';
         if (p == 'peer-B') return 'relay-B-user';
         return null;
@@ -422,13 +429,14 @@ void main() {
     });
 
     test('deduplicates by message_id — fires callback only once', () {
-      int callCount = 0;
+      var callCount = 0;
       relay.onRelayedPeerDiscovered = (_) => callCount++;
 
       final announce = buildAnnounceJson(messageId: 'ann-dup');
 
-      relay.handlePeerAnnounce(announce, 'from-peer-1');
-      relay.handlePeerAnnounce(announce, 'from-peer-2'); // same message_id
+      relay
+        ..handlePeerAnnounce(announce, 'from-peer-1')
+        ..handlePeerAnnounce(announce, 'from-peer-2'); // same message_id
 
       expect(callCount, 1);
     });
@@ -513,7 +521,7 @@ void main() {
             characteristic: any(named: 'characteristic'),
             data: any(named: 'data'),
             priority: any(named: 'priority'),
-          ));
+          ),);
     });
 
     test('does nothing for relayed peers (only announce direct peers)', () {
@@ -537,7 +545,7 @@ void main() {
             characteristic: any(named: 'characteristic'),
             data: any(named: 'data'),
             priority: any(named: 'priority'),
-          ));
+          ),);
     });
   });
 
@@ -557,17 +565,18 @@ void main() {
     });
 
     test('clears seen announce IDs so same message can arrive again', () {
-      int callCount = 0;
+      var callCount = 0;
       relay.onRelayedPeerDiscovered = (_) => callCount++;
 
       final announce = buildAnnounceJson(messageId: 'ann-clear');
       relay.handlePeerAnnounce(announce, 'from');
       expect(callCount, 1);
 
-      relay.clear(); // reset seen IDs
+      relay
+        ..clear() // reset seen IDs
 
-      // Can now process the same announcement again
-      relay.handlePeerAnnounce(announce, 'from');
+        // Can now process the same announcement again
+        ..handlePeerAnnounce(announce, 'from');
       expect(callCount, 2);
     });
   });

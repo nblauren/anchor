@@ -1,14 +1,11 @@
+import 'package:anchor/core/theme/app_theme.dart';
+import 'package:anchor/features/discovery/bloc/discovery_state.dart';
 import 'package:flutter/material.dart';
-
-import '../../../core/theme/app_theme.dart';
-import '../bloc/discovery_state.dart';
 
 /// Grid tile displaying a discovered peer's thumbnail and basic info
 class PeerGridTile extends StatelessWidget {
   const PeerGridTile({
-    super.key,
-    required this.peer,
-    required this.onTap,
+    required this.peer, required this.onTap, super.key,
     this.unreadCount = 0,
     this.anchorDropped = false,
   });
@@ -236,7 +233,7 @@ class PeerGridTile extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       const Icon(Icons.photo_library_outlined,
-                          size: 10, color: Colors.white70),
+                          size: 10, color: Colors.white70,),
                       const SizedBox(width: 3),
                       Text(
                         '+${peer.fullPhotoCount - 1}',
@@ -280,7 +277,7 @@ class PeerGridTile extends StatelessWidget {
     final colorIndex = peer.name.hashCode.abs() % _placeholderColors.length;
     final color = _placeholderColors[colorIndex];
 
-    return Container(
+    return ColoredBox(
       color: color.withValues(alpha: 0.15),
       child: Stack(
         fit: StackFit.expand,
@@ -319,7 +316,7 @@ class PeerGridTile extends StatelessWidget {
     final colorIndex = peer.name.hashCode.abs() % _placeholderColors.length;
     final color = _placeholderColors[colorIndex];
 
-    return Container(
+    return ColoredBox(
       color: color.withValues(alpha: 0.3),
       child: Center(
         child: Text(

@@ -1,6 +1,6 @@
 import 'dart:typed_data';
 
-import '../ble/ble_models.dart' as ble;
+import 'package:anchor/services/ble/ble_models.dart' as ble;
 
 /// Abstract interface for Wi-Fi Aware peer-to-peer transport.
 ///

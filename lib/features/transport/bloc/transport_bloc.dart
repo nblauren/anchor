@@ -1,12 +1,11 @@
 import 'dart:async';
 
+import 'package:anchor/features/transport/bloc/transport_event.dart';
+import 'package:anchor/features/transport/bloc/transport_state.dart';
+import 'package:anchor/services/transport/transport_enums.dart';
+import 'package:anchor/services/transport/transport_health_tracker.dart';
+import 'package:anchor/services/transport/transport_manager.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-
-import '../../../services/transport/transport_enums.dart';
-import '../../../services/transport/transport_health_tracker.dart';
-import '../../../services/transport/transport_manager.dart';
-import 'transport_event.dart';
-import 'transport_state.dart';
 
 /// Bloc that exposes transport-layer state to the UI.
 ///
@@ -20,7 +19,7 @@ class TransportBloc extends Bloc<TransportEvent, TransportState> {
         _healthTracker = healthTracker,
         super(TransportState(
           activeTransport: transportManager.activeTransport,
-        )) {
+        ),) {
     on<ActiveTransportChanged>(_onActiveTransportChanged);
     on<PeerTransportUpdated>(_onPeerTransportUpdated);
     on<HealthUpdated>(_onHealthUpdated);
@@ -36,7 +35,7 @@ class TransportBloc extends Bloc<TransportEvent, TransportState> {
         peerId: event.peerId,
         oldTransport: event.oldTransport,
         newTransport: event.newTransport,
-      ));
+      ),);
     });
 
     _healthSub = _healthTracker.healthStream.listen((summary) {
@@ -75,7 +74,7 @@ class TransportBloc extends Bloc<TransportEvent, TransportState> {
     final updated =
         Map<String, Map<TransportType, TransportHealth>>.from(state.peerHealth);
     final peerMap = Map<TransportType, TransportHealth>.from(
-        updated[summary.peerId] ?? {});
+        updated[summary.peerId] ?? {},);
     peerMap[summary.transport] = summary.health;
     updated[summary.peerId] = peerMap;
     emit(state.copyWith(peerHealth: updated));

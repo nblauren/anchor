@@ -1,25 +1,23 @@
 import 'dart:typed_data';
 
+import 'package:anchor/core/theme/app_theme.dart';
+import 'package:anchor/features/chat/bloc/chat_bloc.dart';
+import 'package:anchor/features/chat/bloc/chat_e2ee_bloc.dart';
+import 'package:anchor/features/chat/bloc/conversation_list_bloc.dart';
+import 'package:anchor/features/chat/bloc/photo_transfer_bloc.dart';
+import 'package:anchor/features/chat/bloc/reaction_bloc.dart';
+import 'package:anchor/features/chat/screens/chat_screen.dart';
+import 'package:anchor/features/discovery/bloc/anchor_drop_bloc.dart';
+import 'package:anchor/features/discovery/bloc/discovery_bloc.dart';
+import 'package:anchor/features/discovery/bloc/discovery_event.dart';
+import 'package:anchor/features/discovery/bloc/discovery_state.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-
-import '../../../core/theme/app_theme.dart';
-import '../../chat/bloc/chat_bloc.dart';
-import '../../chat/bloc/chat_e2ee_bloc.dart';
-import '../../chat/bloc/conversation_list_bloc.dart';
-import '../../chat/bloc/photo_transfer_bloc.dart';
-import '../../chat/bloc/reaction_bloc.dart';
-import '../../chat/screens/chat_screen.dart';
-import '../bloc/anchor_drop_bloc.dart';
-import '../bloc/discovery_bloc.dart';
-import '../bloc/discovery_event.dart';
-import '../bloc/discovery_state.dart';
 
 /// Screen displaying detailed view of a discovered peer
 class PeerDetailScreen extends StatefulWidget {
   const PeerDetailScreen({
-    super.key,
-    required this.peer,
+    required this.peer, super.key,
   });
 
   final DiscoveredPeer peer;
@@ -73,14 +71,14 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
   }
 
   void _showBlockConfirmation() {
-    showDialog(
+    showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: AppTheme.darkCard,
         title: const Text('Block User'),
         content: Text(
           'Are you sure you want to block ${_peer.name}? '
-          'You won\'t see them in discovery and they won\'t be able to message you.',
+          "You won't see them in discovery and they won't be able to message you.",
         ),
         actions: [
           TextButton(
@@ -129,7 +127,7 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
     final reactionBloc = context.read<ReactionBloc>();
 
     await Navigator.of(context).push(
-      MaterialPageRoute(
+      MaterialPageRoute<void>(
         builder: (_) => MultiBlocProvider(
           providers: [
             BlocProvider.value(value: chatBloc),
@@ -249,9 +247,9 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      _peer.bio?.isNotEmpty == true ? _peer.bio! : 'No bio yet',
+                      _peer.bio?.isNotEmpty ?? false ? _peer.bio! : 'No bio yet',
                       style: TextStyle(
-                        color: _peer.bio?.isNotEmpty == true
+                        color: _peer.bio?.isNotEmpty ?? false
                             ? AppTheme.textPrimary
                             : AppTheme.textHint,
                         fontSize: 16,
@@ -272,7 +270,7 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
                       Row(
                         children: [
                           const Icon(Icons.swap_vert_rounded,
-                              size: 18, color: AppTheme.textSecondary),
+                              size: 18, color: AppTheme.textSecondary,),
                           const SizedBox(width: 8),
                           Text(
                             'Position',
@@ -286,12 +284,12 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
                       const SizedBox(height: 6),
                       Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 6),
+                            horizontal: 12, vertical: 6,),
                         decoration: BoxDecoration(
                           color: AppTheme.primaryLight.withAlpha(26),
                           borderRadius: BorderRadius.circular(20),
                           border: Border.all(
-                              color: AppTheme.primaryLight.withAlpha(77)),
+                              color: AppTheme.primaryLight.withAlpha(77),),
                         ),
                         child: Text(
                           _peer.positionLabel!,
@@ -310,7 +308,7 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
                       Row(
                         children: [
                           const Icon(Icons.interests_outlined,
-                              size: 18, color: AppTheme.textSecondary),
+                              size: 18, color: AppTheme.textSecondary,),
                           const SizedBox(width: 8),
                           Text(
                             'Interests',
@@ -328,7 +326,7 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
                         children: _peer.interestLabels.map((label) {
                           return Container(
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 10, vertical: 5),
+                                horizontal: 10, vertical: 5,),
                             decoration: BoxDecoration(
                               color: AppTheme.darkCard,
                               borderRadius: BorderRadius.circular(16),
@@ -348,7 +346,7 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
                     ],
 
                     SizedBox(
-                        height: MediaQuery.of(context).padding.bottom + 32),
+                        height: MediaQuery.of(context).padding.bottom + 32,),
                   ],
                 ),
               ),
@@ -433,7 +431,7 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
               ],
             ),
             // Bio preview
-            if (_peer.bio?.isNotEmpty == true) ...[
+            if (_peer.bio?.isNotEmpty ?? false) ...[
               const SizedBox(height: 8),
               Text(
                 _peer.bio!,
@@ -505,7 +503,7 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
           children: [
             Image.memory(thumb,
                 fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => _buildRelayedPhotoPlaceholder()),
+                errorBuilder: (_, __, ___) => _buildRelayedPhotoPlaceholder(),),
             Positioned(
               top: 0,
               left: 0,
@@ -621,7 +619,7 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
     final colorIndex = _peer.name.hashCode.abs() % _placeholderColors.length;
     final color = _placeholderColors[colorIndex];
 
-    return Container(
+    return ColoredBox(
       color: color.withValues(alpha: 0.15),
       child: Stack(
         fit: StackFit.expand,
@@ -687,7 +685,7 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
   Widget _buildPhotoLoadingPlaceholder() {
     final colorIndex = _peer.name.hashCode.abs() % _placeholderColors.length;
     final color = _placeholderColors[colorIndex];
-    return Container(
+    return ColoredBox(
       color: color.withValues(alpha: 0.12),
       child: const Center(
         child: Column(
@@ -713,7 +711,7 @@ class _PeerDetailScreenState extends State<PeerDetailScreen> {
     final colorIndex = _peer.name.hashCode.abs() % _placeholderColors.length;
     final color = _placeholderColors[colorIndex];
 
-    return Container(
+    return ColoredBox(
       color: color.withValues(alpha: 0.3),
       child: Stack(
         fit: StackFit.expand,
@@ -852,7 +850,6 @@ class _ActionIconButton extends StatelessWidget {
               shadows: const [
                 Shadow(
                   blurRadius: 4,
-                  color: Colors.black,
                 ),
               ],
             ),

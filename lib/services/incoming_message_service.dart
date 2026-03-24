@@ -1,13 +1,13 @@
 import 'dart:async';
 
-import '../core/utils/logger.dart';
-import '../data/local_database/database.dart';
-import '../data/repositories/chat_repository.dart';
-import '../data/repositories/peer_repository.dart';
-import 'ble/ble.dart' as ble;
-import 'chat_event_bus.dart';
-import 'notification_service.dart';
-import 'transport/transport.dart';
+import 'package:anchor/core/utils/logger.dart';
+import 'package:anchor/data/local_database/database.dart';
+import 'package:anchor/data/repositories/chat_repository.dart';
+import 'package:anchor/data/repositories/peer_repository.dart';
+import 'package:anchor/services/ble/ble.dart' as ble;
+import 'package:anchor/services/chat_event_bus.dart';
+import 'package:anchor/services/notification_service.dart';
+import 'package:anchor/services/transport/transport.dart';
 
 /// Persistent service that saves incoming messages to the database regardless
 /// of whether a chat screen is open.
@@ -36,7 +36,7 @@ class IncomingMessageService {
   final NotificationService _notificationService;
   final ChatEventBus _chatEventBus;
 
-  StreamSubscription? _messageSubscription;
+  StreamSubscription<ble.ReceivedMessage>? _messageSubscription;
 
   void start() {
     _messageSubscription?.cancel();
@@ -94,11 +94,12 @@ class IncomingMessageService {
 
       // Notify ChatEventBus so any open ChatBloc / ConversationListBloc
       // can update in real time.
-      _chatEventBus.notifyMessageAdded(message);
-      _chatEventBus.notifyConversationsChanged();
+      _chatEventBus
+        ..notifyMessageAdded(message)
+        ..notifyConversationsChanged();
     } catch (e) {
       Logger.error(
-          'IncomingMessageService: failed to persist message', e, null, 'Chat');
+          'IncomingMessageService: failed to persist message', e, null, 'Chat',);
     }
   }
 

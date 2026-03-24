@@ -1,9 +1,8 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:anchor/services/encryption/noise_handshake.dart';
 import 'package:cryptography/cryptography.dart';
-
-import 'noise_handshake.dart';
 
 // ---------------------------------------------------------------------------
 // Noise_XX Handshake State Machine
@@ -71,7 +70,7 @@ class NoiseXXHandshakeProcessor {
   }) async {
     // Protocol name is exactly 32 bytes (== HASHLEN), so use directly.
     var h = Uint8List.fromList(utf8.encode(_kXXProtocolName));
-    var ck = Uint8List.fromList(h);
+    final ck = Uint8List.fromList(h);
 
     // MixHash(prologue) — empty prologue if none provided.
     h = await NoiseHandshakeProcessor.encryptAndHash(null, 0, h, prologue ?? Uint8List(0))
@@ -123,7 +122,7 @@ class NoiseXXHandshakeProcessor {
   })> readMessage1(Uint8List h, Uint8List ck, Uint8List message1) async {
     if (message1.length < 32) {
       throw const NoiseHandshakeException(
-          'XX Message 1 too short (expected ≥32 bytes)');
+          'XX Message 1 too short (expected ≥32 bytes)',);
     }
     final initiatorEph = message1.sublist(0, 32);
 
@@ -171,7 +170,7 @@ class NoiseXXHandshakeProcessor {
     final eph = await NoiseHandshakeProcessor.generateEphemeral();
 
     // MixHash(e.publicKey)
-    var eah = await NoiseHandshakeProcessor.encryptAndHash(
+    final eah = await NoiseHandshakeProcessor.encryptAndHash(
       null, 0, h, eph.publicKey,
     );
     var newH = eah.h;
@@ -206,14 +205,14 @@ class NoiseXXHandshakeProcessor {
 
     // Assemble: e_pub || encS || encEmpty
     final payload = Uint8List(
-        eph.publicKey.length + encS.ciphertext.length + encEmpty.ciphertext.length)
+        eph.publicKey.length + encS.ciphertext.length + encEmpty.ciphertext.length,)
       ..setRange(0, eph.publicKey.length, eph.publicKey)
       ..setRange(eph.publicKey.length,
-          eph.publicKey.length + encS.ciphertext.length, encS.ciphertext)
+          eph.publicKey.length + encS.ciphertext.length, encS.ciphertext,)
       ..setRange(
           eph.publicKey.length + encS.ciphertext.length,
           eph.publicKey.length + encS.ciphertext.length + encEmpty.ciphertext.length,
-          encEmpty.ciphertext);
+          encEmpty.ciphertext,);
 
     return (
       payload: payload,
@@ -245,7 +244,7 @@ class NoiseXXHandshakeProcessor {
     // Message 2 = 32 (e_pub) + 48 (encrypted s) + 16 (empty tag) = 96 bytes
     if (message2.length < 96) {
       throw const NoiseHandshakeException(
-          'XX Message 2 too short (expected ≥96 bytes)');
+          'XX Message 2 too short (expected ≥96 bytes)',);
     }
 
     final responderEph = message2.sublist(0, 32);
@@ -253,7 +252,7 @@ class NoiseXXHandshakeProcessor {
     final encEmpty = message2.sublist(80); // 16 bytes (tag only)
 
     // MixHash(e.publicKey)
-    var eah = await NoiseHandshakeProcessor.encryptAndHash(
+    final eah = await NoiseHandshakeProcessor.encryptAndHash(
       null, 0, h, responderEph,
     );
     var newH = eah.h;
@@ -364,7 +363,7 @@ class NoiseXXHandshakeProcessor {
 
   // These delegate to the XK processor's static methods. Since they're private
   // in NoiseHandshakeProcessor, we re-implement the thin wrappers here.
-  // TODO: Consider extracting shared crypto helpers to a common base.
+  // TODO(anchor): Consider extracting shared crypto helpers to a common base.
 
   static Future<Uint8List> _dh(
     Uint8List privateKeyBytes,

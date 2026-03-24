@@ -1,8 +1,8 @@
 import 'dart:async';
 
-import '../../core/utils/logger.dart';
-import '../../data/local_database/database.dart';
-import '../transport/transport_enums.dart';
+import 'package:anchor/core/utils/logger.dart';
+import 'package:anchor/data/local_database/database.dart';
+import 'package:anchor/services/transport/transport_enums.dart';
 
 /// Single source of truth for all peer identity resolution.
 ///
@@ -120,7 +120,7 @@ class PeerRegistry {
       final existing = _byUserId[userId];
       if (existing != null) {
         final result = _updateExistingPeer(
-            existing, transportId, transport, publicKeyHex);
+            existing, transportId, transport, publicKeyHex,);
         if (signingPublicKeyHex != null) {
           _updateSigningKey(userId, signingPublicKeyHex);
         }
@@ -190,7 +190,6 @@ class PeerRegistry {
     // Brand new orphan peer (no userId yet)
     final orphanId = transportId; // temporary canonical
     final identity = PeerIdentity(
-      userId: null,
       canonicalId: orphanId,
       transportIds: {transport: transportId},
       publicKeyHex: publicKeyHex,
@@ -419,7 +418,7 @@ class PeerRegistry {
         oldCanonicalId: oldTransportId,
         newCanonicalId: transportId,
         userId: userId,
-      ));
+      ),);
     }
 
     // Add new transport ID
@@ -479,9 +478,7 @@ class PeerRegistry {
 /// Immutable peer identity record.
 class PeerIdentity {
   const PeerIdentity({
-    this.userId,
-    required this.canonicalId,
-    required this.transportIds,
+    required this.canonicalId, required this.transportIds, this.userId,
     this.publicKeyHex,
     this.signingPublicKeyHex,
     this.lastSeen,
@@ -545,8 +542,7 @@ class RegistrationResult {
   const RegistrationResult({
     required this.type,
     required this.canonicalId,
-    this.oldCanonicalId,
-    required this.identity,
+    required this.identity, this.oldCanonicalId,
   });
 
   final RegistrationType type;

@@ -1,7 +1,6 @@
+import 'package:anchor/services/transport/transport_enums.dart';
+import 'package:anchor/services/transport/transport_health_tracker.dart';
 import 'package:equatable/equatable.dart';
-
-import '../../../services/transport/transport_enums.dart';
-import '../../../services/transport/transport_health_tracker.dart';
 
 abstract class TransportEvent extends Equatable {
   const TransportEvent();

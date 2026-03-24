@@ -1,10 +1,10 @@
 import 'dart:async';
 
-import '../../core/constants/app_constants.dart';
-import '../../core/utils/logger.dart';
-import '../ble/ble_models.dart' as ble;
-import 'transport_enums.dart';
-import 'transport_manager.dart';
+import 'package:anchor/core/constants/app_constants.dart';
+import 'package:anchor/core/utils/logger.dart';
+import 'package:anchor/services/ble/ble_models.dart' as ble;
+import 'package:anchor/services/transport/transport_enums.dart';
+import 'package:anchor/services/transport/transport_manager.dart';
 
 /// Type of pending send (determines how to re-send).
 enum PendingSendType { text, photo, reaction, readReceipt, dropAnchor }
@@ -86,7 +86,7 @@ class TransportRetryQueue {
 
   /// Number of items currently queued.
   int get length {
-    int count = 0;
+    var count = 0;
     for (final list in _pending.values) {
       count += list.length;
     }
@@ -147,7 +147,7 @@ class TransportRetryQueue {
         _deliveryController.add(RetryDeliveryUpdate(
           messageId: item.messageId,
           delivered: false,
-        ));
+        ),);
         continue;
       }
 
@@ -159,7 +159,7 @@ class TransportRetryQueue {
           _deliveryController.add(RetryDeliveryUpdate(
             messageId: item.messageId,
             delivered: true,
-          ));
+          ),);
           Logger.info(
             'RetryQueue: delivered ${item.messageId.substring(0, 8)}… '
             'on attempt ${item.attempts}',
@@ -190,7 +190,7 @@ class TransportRetryQueue {
           _deliveryController.add(RetryDeliveryUpdate(
             messageId: item.messageId,
             delivered: false,
-          ));
+          ),);
           return true;
         }
         return false;
@@ -218,7 +218,7 @@ class TransportRetryQueue {
       _deliveryController.add(RetryDeliveryUpdate(
         messageId: oldest.messageId,
         delivered: false,
-      ));
+      ),);
     }
   }
 

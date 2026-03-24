@@ -45,7 +45,6 @@ class AppTheme {
         error: error,
         onPrimary: textPrimary,
         onSecondary: textPrimary,
-        onSurface: textPrimary,
         onError: textPrimary,
       ),
       appBarTheme: const AppBarTheme(

@@ -1,6 +1,6 @@
 import 'dart:typed_data';
 
-import 'nearby_models.dart';
+import 'package:anchor/services/nearby/nearby_models.dart';
 
 /// Abstract interface for high-speed (Wi-Fi Direct) file transfer.
 ///

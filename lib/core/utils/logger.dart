@@ -20,7 +20,7 @@ class Logger {
   }
 
   static void error(String message,
-      [Object? error, StackTrace? stackTrace, String? tag]) {
+      [Object? error, StackTrace? stackTrace, String? tag,]) {
     _log('ERROR', message, tag);
     if (error != null) {
       developer.log(

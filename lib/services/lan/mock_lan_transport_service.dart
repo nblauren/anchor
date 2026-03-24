@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'dart:typed_data';
 
-import '../../core/utils/logger.dart';
-import '../ble/ble_models.dart' as ble;
-import 'lan_transport_service.dart';
+import 'package:anchor/core/utils/logger.dart';
+import 'package:anchor/services/ble/ble_models.dart' as ble;
+import 'package:anchor/services/lan/lan_transport_service.dart';
 
 /// Mock implementation of [LanTransportService] for testing and simulator
 /// environments where a real network interface may not be available.
@@ -157,7 +157,7 @@ class MockLanTransportService implements LanTransportService {
 
   @override
   Future<bool> sendHandshakeMessage(
-          String peerId, int step, Uint8List payload) async =>
+          String peerId, int step, Uint8List payload,) async =>
       false;
 
   @override

@@ -1,14 +1,13 @@
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:anchor/core/constants/app_constants.dart';
+import 'package:anchor/core/errors/app_error.dart';
+import 'package:anchor/core/utils/logger.dart';
 import 'package:image_compression_flutter/image_compression_flutter.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
-
-import '../core/constants/app_constants.dart';
-import '../core/errors/app_error.dart';
-import '../core/utils/logger.dart';
 
 /// Resolve a photo path stored in the database to a valid absolute path.
 ///
@@ -20,7 +19,7 @@ Future<String?> resolvePhotoPath(String? storedPath) async {
   if (storedPath == null || storedPath.isEmpty) return null;
 
   // Try as-is first (handles current-session absolute paths)
-  if (storedPath.startsWith('/') && await File(storedPath).exists()) {
+  if (storedPath.startsWith('/') && File(storedPath).existsSync()) {
     return storedPath;
   }
 
@@ -29,7 +28,7 @@ Future<String?> resolvePhotoPath(String? storedPath) async {
   // Relative path (new format) — resolve against current docs dir
   if (!storedPath.startsWith('/')) {
     final resolved = '${docsDir.path}/$storedPath';
-    return await File(resolved).exists() ? resolved : null;
+    return File(resolved).existsSync() ? resolved : null;
   }
 
   // Old absolute path whose sandbox UUID may have changed — re-root it
@@ -38,7 +37,7 @@ Future<String?> resolvePhotoPath(String? storedPath) async {
   if (idx != -1) {
     final relative = storedPath.substring(idx + marker.length);
     final resolved = '${docsDir.path}/$relative';
-    return await File(resolved).exists() ? resolved : null;
+    return File(resolved).existsSync() ? resolved : null;
   }
 
   return null;
@@ -74,7 +73,7 @@ class ImageService {
   /// Pick an image from gallery
   Future<File?> pickFromGallery() async {
     try {
-      final XFile? image = await _picker.pickImage(
+      final image = await _picker.pickImage(
         source: ImageSource.gallery,
         maxWidth: AppConstants.maxImageWidth.toDouble(),
         maxHeight: AppConstants.maxImageHeight.toDouble(),
@@ -92,7 +91,7 @@ class ImageService {
   /// Pick an image from camera
   Future<File?> pickFromCamera() async {
     try {
-      final XFile? image = await _picker.pickImage(
+      final image = await _picker.pickImage(
         source: ImageSource.camera,
         maxWidth: AppConstants.maxImageWidth.toDouble(),
         maxHeight: AppConstants.maxImageHeight.toDouble(),
@@ -116,10 +115,10 @@ class ImageService {
       final imagesDir = Directory('${directory.path}/profile_images');
       final thumbsDir = Directory('${directory.path}/thumbnails');
 
-      if (!await imagesDir.exists()) {
+      if (!imagesDir.existsSync()) {
         await imagesDir.create(recursive: true);
       }
-      if (!await thumbsDir.exists()) {
+      if (!thumbsDir.existsSync()) {
         await thumbsDir.create(recursive: true);
       }
 
@@ -161,13 +160,12 @@ class ImageService {
 
     const config = Configuration(
       outputType: ImageOutputType.jpg,
-      quality: AppConstants.imageQuality,
     );
 
     final output = await compressor.compress(ImageFileConfiguration(
       input: input,
       config: config,
-    ));
+    ),);
 
     return output.rawBytes;
   }
@@ -192,7 +190,7 @@ class ImageService {
       final output = await compressor.compress(ImageFileConfiguration(
         input: input,
         config: config,
-      ));
+      ),);
 
       if (output.sizeInBytes <= _thumbnailMaxBytes) {
         Logger.info(
@@ -219,7 +217,7 @@ class ImageService {
     final output = await compressor.compress(ImageFileConfiguration(
       input: input,
       config: config,
-    ));
+    ),);
 
     Logger.warning(
       'Thumbnail still large: ${output.sizeInBytes}B (target: ${_thumbnailMaxBytes}B)',
@@ -232,7 +230,7 @@ class ImageService {
   /// Generate thumbnail bytes from an existing photo path
   Future<Uint8List> generateThumbnailFromPath(String photoPath) async {
     final file = File(photoPath);
-    if (!await file.exists()) {
+    if (!file.existsSync()) {
       throw ImageError('Photo file not found: $photoPath');
     }
     return _generateThumbnail(file);
@@ -262,7 +260,7 @@ class ImageService {
   Future<void> deleteImageByPath(String photoPath) async {
     try {
       final photoFile = File(photoPath);
-      if (await photoFile.exists()) {
+      if (photoFile.existsSync()) {
         await photoFile.delete();
         Logger.info('Deleted photo: $photoPath', 'Image');
       }
@@ -278,7 +276,7 @@ class ImageService {
 
     try {
       final file = File(thumbnailPath);
-      if (await file.exists()) {
+      if (file.existsSync()) {
         return await file.readAsBytes();
       }
       return null;
@@ -294,12 +292,12 @@ class ImageService {
       final directory = await getApplicationDocumentsDirectory();
       final chatImagesDir = Directory('${directory.path}/chat_images');
 
-      if (!await chatImagesDir.exists()) {
+      if (!chatImagesDir.existsSync()) {
         await chatImagesDir.create(recursive: true);
       }
 
       final file = File(imagePath);
-      if (!await file.exists()) {
+      if (!file.existsSync()) {
         throw ImageError('Image file not found: $imagePath');
       }
 
@@ -320,7 +318,7 @@ class ImageService {
       final output = await compressor.compress(ImageFileConfiguration(
         input: input,
         config: config,
-      ));
+      ),);
 
       final outputPath = '${chatImagesDir.path}/$fileId.jpg';
       await File(outputPath).writeAsBytes(output.rawBytes);
@@ -346,7 +344,7 @@ class ImageService {
   Future<Uint8List> compressForBleTransfer(String imagePath) async {
     try {
       final file = File(imagePath);
-      if (!await file.exists()) {
+      if (!file.existsSync()) {
         throw ImageError('Image file not found: $imagePath');
       }
 
@@ -377,7 +375,7 @@ class ImageService {
         final output = await compressor.compress(ImageFileConfiguration(
           input: input,
           config: config,
-        ));
+        ),);
 
         if (output.sizeInBytes <= _bleTransferMaxBytes) {
           Logger.info(
@@ -405,7 +403,7 @@ class ImageService {
       final output = await compressor.compress(ImageFileConfiguration(
         input: input,
         config: config,
-      ));
+      ),);
 
       Logger.warning(
         'BLE photo still large after max compression: ${output.sizeInBytes}B '
@@ -417,7 +415,7 @@ class ImageService {
     } catch (e) {
       Logger.error('Failed to compress photo for BLE', e, null, 'Image');
       // Fallback: return original bytes
-      return await File(imagePath).readAsBytes();
+      return File(imagePath).readAsBytes();
     }
   }
 
@@ -427,7 +425,7 @@ class ImageService {
       final directory = await getApplicationDocumentsDirectory();
       final receivedDir = Directory('${directory.path}/received_photos');
 
-      if (!await receivedDir.exists()) {
+      if (!receivedDir.existsSync()) {
         await receivedDir.create(recursive: true);
       }
 
@@ -457,7 +455,7 @@ class ImageService {
       final directory = await getApplicationDocumentsDirectory();
       final thumbDir = Directory('${directory.path}/chat_thumbnails');
 
-      if (!await thumbDir.exists()) {
+      if (!thumbDir.existsSync()) {
         await thumbDir.create(recursive: true);
       }
 
@@ -492,7 +490,7 @@ class ImageService {
       final imagesDir = Directory('${directory.path}/profile_images');
       final thumbsDir = Directory('${directory.path}/thumbnails');
 
-      if (await imagesDir.exists()) {
+      if (imagesDir.existsSync()) {
         await for (final entity in imagesDir.list()) {
           if (entity is File && !validPaths.contains(entity.path)) {
             await entity.delete();
@@ -501,12 +499,12 @@ class ImageService {
         }
       }
 
-      if (await thumbsDir.exists()) {
+      if (thumbsDir.existsSync()) {
         await for (final entity in thumbsDir.list()) {
           if (entity is File && !validPaths.contains(entity.path)) {
             await entity.delete();
             Logger.info(
-                'Cleaned up orphaned thumbnail: ${entity.path}', 'Image');
+                'Cleaned up orphaned thumbnail: ${entity.path}', 'Image',);
           }
         }
       }

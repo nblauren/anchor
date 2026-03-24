@@ -1,11 +1,10 @@
 import 'dart:io';
 
+import 'package:anchor/core/constants/app_constants.dart';
 import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
-
-import '../../core/constants/app_constants.dart';
+import 'package:path_provider/path_provider.dart';
 
 part 'database.g.dart';
 
@@ -246,7 +245,7 @@ class NoiseSessions extends Table {
   MessageReactions,
   NoiseSessions,
   PeerAliases,
-])
+],)
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
 

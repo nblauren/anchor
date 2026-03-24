@@ -1,8 +1,9 @@
+import 'dart:async';
+
+import 'package:anchor/core/utils/logger.dart';
+import 'package:anchor/services/audio_service.dart';
 import 'package:app_badge_plus/app_badge_plus.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-
-import '../core/utils/logger.dart';
-import 'audio_service.dart';
 
 /// Service for handling local notifications
 class NotificationService {
@@ -25,20 +26,18 @@ class NotificationService {
     if (_isInitialized) return;
 
     // Android initialization settings
-    const AndroidInitializationSettings initializationSettingsAndroid =
+    const initializationSettingsAndroid =
         AndroidInitializationSettings(
-            '@mipmap/ic_launcher'); // or your own icon
+            '@mipmap/ic_launcher',); // or your own icon
 
     // iOS & macOS initialization settings
-    const DarwinInitializationSettings initializationSettingsDarwin =
+    const initializationSettingsDarwin =
         DarwinInitializationSettings(
-      requestAlertPermission: true,
-      requestBadgePermission: true,
-      requestSoundPermission: true,
+      
     );
 
     // Combined settings
-    const InitializationSettings initializationSettings =
+    const initializationSettings =
         InitializationSettings(
       android: initializationSettingsAndroid,
       iOS: initializationSettingsDarwin,
@@ -46,13 +45,13 @@ class NotificationService {
     );
 
     // Initialize plugin
-    final bool? initialized = await _notificationsPlugin.initialize(
+    final initialized = await _notificationsPlugin.initialize(
       settings: initializationSettings,
     );
 
     if (initialized != true) {
       Logger.warning(
-          'NotificationService: Initialization failed', 'Notifications');
+          'NotificationService: Initialization failed', 'Notifications',);
       return;
     }
 
@@ -61,25 +60,23 @@ class NotificationService {
 
     _isInitialized = true;
     Logger.info(
-        'NotificationService: Initialized successfully', 'Notifications');
+        'NotificationService: Initialized successfully', 'Notifications',);
   }
 
   Future<void> _createNotificationChannels() async {
-    const AndroidNotificationChannel messagesChannel =
+    const messagesChannel =
         AndroidNotificationChannel(
       _androidChannelIdMessages, // id
       'New Messages', // name
       description: 'Notifications for incoming messages',
       importance: Importance.max,
-      playSound: true,
     );
 
-    const AndroidNotificationChannel peersChannel = AndroidNotificationChannel(
+    const peersChannel = AndroidNotificationChannel(
       _androidChannelIdPeers,
       'Peer Discovery',
       description: 'Notifications when new peers are found',
       importance: Importance.high,
-      playSound: true,
     );
 
     await _notificationsPlugin
@@ -92,13 +89,12 @@ class NotificationService {
             AndroidFlutterLocalNotificationsPlugin>()
         ?.createNotificationChannel(peersChannel);
 
-    const AndroidNotificationChannel anchorDropsChannel =
+    const anchorDropsChannel =
         AndroidNotificationChannel(
       _androidChannelIdAnchorDrops,
       'Anchor Drops',
       description: 'When someone drops anchor on you',
       importance: Importance.high,
-      playSound: true,
     );
 
     await _notificationsPlugin
@@ -106,13 +102,11 @@ class NotificationService {
             AndroidFlutterLocalNotificationsPlugin>()
         ?.createNotificationChannel(anchorDropsChannel);
 
-    const AndroidNotificationChannel reactionsChannel =
+    const reactionsChannel =
         AndroidNotificationChannel(
       _androidChannelIdReactions,
       'Reactions',
       description: 'When someone reacts to your message',
-      importance: Importance.defaultImportance,
-      playSound: true,
     );
 
     await _notificationsPlugin
@@ -123,14 +117,14 @@ class NotificationService {
 
   /// Request notification permissions (mainly useful on iOS)
   Future<bool> requestPermissions() async {
-    final AndroidFlutterLocalNotificationsPlugin? androidImpl =
+    final androidImpl =
         _notificationsPlugin.resolvePlatformSpecificImplementation<
             AndroidFlutterLocalNotificationsPlugin>();
 
-    final bool? androidGranted =
+    final androidGranted =
         await androidImpl?.requestNotificationsPermission();
 
-    final bool? iosGranted = await _notificationsPlugin
+    final iosGranted = await _notificationsPlugin
         .resolvePlatformSpecificImplementation<
             IOSFlutterLocalNotificationsPlugin>()
         ?.requestPermissions(
@@ -142,7 +136,7 @@ class NotificationService {
     final granted = (androidGranted ?? true) && (iosGranted ?? true);
     Logger.info(
         'NotificationService: Permissions ${granted ? "granted" : "denied/partially"}',
-        'Notifications');
+        'Notifications',);
     return granted;
   }
 
@@ -157,27 +151,26 @@ class NotificationService {
       await initialize();
     }
 
-    final int id = NotificationIds.forMessage(fromPeerId);
+    final id = NotificationIds.forMessage(fromPeerId);
 
-    const AndroidNotificationDetails androidDetails =
+    const androidDetails =
         AndroidNotificationDetails(
       _androidChannelIdMessages,
       'New Messages',
       channelDescription: 'Notifications for incoming messages',
       importance: Importance.max,
       priority: Priority.high,
-      showWhen: true,
       // largeIcon: photoPath != null ? FilePathAndroidBitmap(photoPath) : null,
       // styleInformation: photoPath != null ? BigPictureStyleInformation(...) : null,
     );
 
-    const DarwinNotificationDetails iosDetails = DarwinNotificationDetails(
+    const iosDetails = DarwinNotificationDetails(
       presentAlert: true,
       presentBadge: true,
       presentSound: true,
     );
 
-    const NotificationDetails details = NotificationDetails(
+    const details = NotificationDetails(
       android: androidDetails,
       iOS: iosDetails,
       macOS: iosDetails,
@@ -191,10 +184,10 @@ class NotificationService {
       payload: 'message:$fromPeerId',
     );
 
-    _audioService?.playPop();
+    unawaited(_audioService?.playPop());
 
     Logger.info(
-        'Notification shown - $fromName: $messagePreview', 'Notifications');
+        'Notification shown - $fromName: $messagePreview', 'Notifications',);
   }
 
   /// Show a notification when someone drops anchor on us
@@ -206,25 +199,24 @@ class NotificationService {
       await initialize();
     }
 
-    final int id = NotificationIds.forAnchorDrop(fromPeerId);
+    final id = NotificationIds.forAnchorDrop(fromPeerId);
 
-    const AndroidNotificationDetails androidDetails =
+    const androidDetails =
         AndroidNotificationDetails(
       _androidChannelIdAnchorDrops,
       'Anchor Drops',
       channelDescription: 'When someone drops anchor on you',
       importance: Importance.high,
       priority: Priority.high,
-      showWhen: true,
     );
 
-    const DarwinNotificationDetails iosDetails = DarwinNotificationDetails(
+    const iosDetails = DarwinNotificationDetails(
       presentAlert: true,
       presentBadge: false,
       presentSound: true,
     );
 
-    const NotificationDetails details = NotificationDetails(
+    const details = NotificationDetails(
       android: androidDetails,
       iOS: iosDetails,
       macOS: iosDetails,
@@ -238,7 +230,7 @@ class NotificationService {
       payload: 'anchor_drop:$fromPeerId',
     );
 
-    _audioService?.playPop();
+    unawaited(_audioService?.playPop());
 
     Logger.info('Anchor drop notification shown - $fromName', 'Notifications');
   }
@@ -252,9 +244,9 @@ class NotificationService {
       await initialize();
     }
 
-    final int id = NotificationIds.forPeer(peerId);
+    final id = NotificationIds.forPeer(peerId);
 
-    const AndroidNotificationDetails androidDetails =
+    const androidDetails =
         AndroidNotificationDetails(
       _androidChannelIdPeers,
       'Peer Discovery',
@@ -263,7 +255,7 @@ class NotificationService {
       priority: Priority.high,
     );
 
-    const NotificationDetails details =
+    const details =
         NotificationDetails(android: androidDetails);
 
     await _notificationsPlugin.show(
@@ -286,23 +278,20 @@ class NotificationService {
   }) async {
     if (!_isInitialized) await initialize();
 
-    const AndroidNotificationDetails androidDetails =
+    const androidDetails =
         AndroidNotificationDetails(
       _androidChannelIdReactions,
       'Reactions',
       channelDescription: 'When someone reacts to your message',
-      importance: Importance.defaultImportance,
-      priority: Priority.defaultPriority,
-      showWhen: true,
     );
 
-    const DarwinNotificationDetails iosDetails = DarwinNotificationDetails(
+    const iosDetails = DarwinNotificationDetails(
       presentAlert: true,
       presentBadge: false,
       presentSound: false, // sound played separately via AudioService
     );
 
-    const NotificationDetails details = NotificationDetails(
+    const details = NotificationDetails(
       android: androidDetails,
       iOS: iosDetails,
       macOS: iosDetails,
@@ -316,36 +305,36 @@ class NotificationService {
       payload: 'reaction:$fromPeerId',
     );
 
-    _audioService?.playReaction();
+    unawaited(_audioService?.playReaction());
 
     Logger.info(
-        'Reaction notification shown - $fromName $emoji', 'Notifications');
+        'Reaction notification shown - $fromName $emoji', 'Notifications',);
   }
 
   /// Cancel all notifications
   Future<void> cancelAll() async {
     await _notificationsPlugin.cancelAll();
     Logger.info(
-        'NotificationService: Cancelled all notifications', 'Notifications');
+        'NotificationService: Cancelled all notifications', 'Notifications',);
   }
 
   /// Cancel notification by ID
   Future<void> cancel(int id) async {
     await _notificationsPlugin.cancel(id: id);
     Logger.info(
-        'NotificationService: Cancelled notification $id', 'Notifications');
+        'NotificationService: Cancelled notification $id', 'Notifications',);
   }
 
   /// Set badge count (iOS mainly)
   Future<void> setBadgeCount(int count) async {
     try {
-      AppBadgePlus.updateBadge(count);
+      await AppBadgePlus.updateBadge(count);
       Logger.info(
-          'NotificationService: Badge count set to $count', 'Notifications');
+          'NotificationService: Badge count set to $count', 'Notifications',);
     } catch (e) {
       Logger.debug(
           'NotificationService: Badge update not supported on this launcher: $e',
-          'Notifications');
+          'Notifications',);
     }
   }
 

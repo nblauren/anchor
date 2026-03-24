@@ -2,11 +2,10 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:anchor/core/utils/logger.dart';
+import 'package:anchor/services/nearby/high_speed_transfer_service.dart';
+import 'package:anchor/services/nearby/nearby_models.dart';
 import 'package:flutter_nearby_connections_plus/flutter_nearby_connections_plus.dart';
-
-import '../../core/utils/logger.dart';
-import 'high_speed_transfer_service.dart';
-import 'nearby_models.dart';
 
 /// Production implementation of [HighSpeedTransferService] using
 /// flutter_nearby_connections_plus.
@@ -49,8 +48,8 @@ class NearbyTransferServiceImpl implements HighSpeedTransferService {
       StreamController<NearbyPayloadReceived>.broadcast();
 
   // Native subscriptions
-  StreamSubscription? _deviceSubscription;
-  StreamSubscription? _dataSubscription;
+  StreamSubscription<dynamic>? _deviceSubscription;
+  StreamSubscription<dynamic>? _dataSubscription;
 
   // Device tracking
   final Map<String, Device> _connectedDevices = {};
@@ -89,8 +88,8 @@ class NearbyTransferServiceImpl implements HighSpeedTransferService {
     // Cancel old stream subscriptions but REUSE the NearbyService instance if
     // it already exists — creating multiple instances leaks native resources on
     // Android because each init() call creates fresh ServiceBindManager objects.
-    _deviceSubscription?.cancel();
-    _dataSubscription?.cancel();
+    await _deviceSubscription?.cancel();
+    await _dataSubscription?.cancel();
     _nearbyService ??= NearbyService();
 
     try {
@@ -98,7 +97,7 @@ class NearbyTransferServiceImpl implements HighSpeedTransferService {
         serviceType: _serviceType,
         deviceName: _ownUserId,
         strategy: Strategy.P2P_STAR, // star allows 1 advertiser + N browsers
-        callback: (isRunning) {
+        callback: (bool isRunning) {
           Logger.info('Nearby running: $isRunning', _tag);
         },
       );
@@ -134,12 +133,12 @@ class NearbyTransferServiceImpl implements HighSpeedTransferService {
             }
           }
         }
-      });
+      },);
 
       _dataSubscription =
           _nearbyService!.dataReceivedSubscription(callback: (data) {
         _handleReceivedData(data);
-      });
+      },);
 
       _initialized = true;
       Logger.info('NearbyTransferService ready ($_ownUserId)', _tag);
@@ -202,7 +201,7 @@ class NearbyTransferServiceImpl implements HighSpeedTransferService {
       if (!connected) {
         Logger.warning('sendPayload: connection timeout', _tag);
         _emitProgress(transferId, peerId, NearbyTransferStatus.failed, 0,
-            error: 'Connection timeout');
+            error: 'Connection timeout',);
         await _stopNearby();
         return false;
       }
@@ -215,7 +214,7 @@ class NearbyTransferServiceImpl implements HighSpeedTransferService {
       if (deviceId == null) {
         Logger.error('sendPayload: device lost after connect', null, null, _tag);
         _emitProgress(transferId, peerId, NearbyTransferStatus.failed, 0,
-            error: 'Device lost');
+            error: 'Device lost',);
         await _stopNearby();
         return false;
       }
@@ -251,12 +250,12 @@ class NearbyTransferServiceImpl implements HighSpeedTransferService {
 
         final progress = (i + 1) / totalChunks;
         _emitProgress(
-            transferId, peerId, NearbyTransferStatus.transferring, progress);
+            transferId, peerId, NearbyTransferStatus.transferring, progress,);
 
         // Yield between every chunk to let the native message channel deliver
         // data to the receiver.  Without this, the sender can outpace the
         // platform channel and messages pile up or get dropped.
-        await Future.delayed(const Duration(milliseconds: 50));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
       }
 
       // Footer
@@ -266,7 +265,7 @@ class NearbyTransferServiceImpl implements HighSpeedTransferService {
       });
 
       Logger.info('sendPayload: transfer complete', _tag);
-      _emitProgress(transferId, peerId, NearbyTransferStatus.completed, 1.0);
+      _emitProgress(transferId, peerId, NearbyTransferStatus.completed, 1);
       _outgoing.remove(transferId);
 
       // Wait for the receiver to acknowledge the transfer before tearing
@@ -278,13 +277,13 @@ class NearbyTransferServiceImpl implements HighSpeedTransferService {
           'sendPayload: No ACK from receiver — disconnecting anyway',
           _tag,
         );
-      });
+      },);
       await _stopNearby();
       return true;
     } catch (e) {
       Logger.error('sendPayload failed', e, null, _tag);
       _emitProgress(transferId, peerId, NearbyTransferStatus.failed, 0,
-          error: e.toString());
+          error: e.toString(),);
       _outgoing.remove(transferId);
       await _stopNearby();
       return false;
@@ -343,7 +342,7 @@ class NearbyTransferServiceImpl implements HighSpeedTransferService {
         onTimeout: () {
           Logger.warning('receivePayload: timeout for $transferId', _tag);
           _emitProgress(transferId, peerId, NearbyTransferStatus.failed, 0,
-              error: 'Transfer timeout');
+              error: 'Transfer timeout',);
           return false;
         },
       );
@@ -354,7 +353,7 @@ class NearbyTransferServiceImpl implements HighSpeedTransferService {
     } catch (e) {
       Logger.error('receivePayload failed', e, null, _tag);
       _emitProgress(transferId, peerId, NearbyTransferStatus.failed, 0,
-          error: e.toString());
+          error: e.toString(),);
       _incoming.remove(transferId);
       await _stopNearby();
       return false;
@@ -373,7 +372,7 @@ class NearbyTransferServiceImpl implements HighSpeedTransferService {
       peerId: '',
       status: NearbyTransferStatus.cancelled,
       progress: 0,
-    ));
+    ),);
     await _stopNearby();
   }
 
@@ -388,8 +387,8 @@ class NearbyTransferServiceImpl implements HighSpeedTransferService {
   @override
   Future<void> dispose() async {
     await _stopNearby();
-    _deviceSubscription?.cancel();
-    _dataSubscription?.cancel();
+    await _deviceSubscription?.cancel();
+    await _dataSubscription?.cancel();
     await _progressController.close();
     await _payloadController.close();
     _nearbyService = null;
@@ -413,7 +412,7 @@ class NearbyTransferServiceImpl implements HighSpeedTransferService {
       status: status,
       progress: progress,
       errorMessage: error,
-    ));
+    ),);
   }
 
   Future<void> _sendJson(String deviceId, Map<String, dynamic> json) async {
@@ -446,7 +445,7 @@ class NearbyTransferServiceImpl implements HighSpeedTransferService {
     try {
       return await _connectionCompleter!.future.timeout(timeout, onTimeout: () {
         return false;
-      });
+      },);
     } catch (_) {
       return false;
     } finally {
@@ -593,8 +592,7 @@ class NearbyTransferServiceImpl implements HighSpeedTransferService {
           incoming.senderId = json['sender_id'] as String? ?? '';
           incoming.chunks = List<String?>.filled(incoming.totalChunks, null);
           _emitProgress(transferId, incoming.peerId,
-              NearbyTransferStatus.transferring, 0);
-          break;
+              NearbyTransferStatus.transferring, 0,);
 
         case 'transfer_chunk':
           if (incoming?.chunks == null) return;
@@ -607,7 +605,6 @@ class NearbyTransferServiceImpl implements HighSpeedTransferService {
             NearbyTransferStatus.transferring,
             incoming.receivedChunks / incoming.totalChunks,
           );
-          break;
 
         case 'transfer_complete':
           if (incoming?.chunks == null) return;
@@ -623,9 +620,9 @@ class NearbyTransferServiceImpl implements HighSpeedTransferService {
               fromPeerId: incoming.senderId ?? incoming.peerId,
               data: Uint8List.fromList(bytes),
               timestamp: DateTime.now(),
-            ));
+            ),);
             _emitProgress(transferId, incoming.peerId,
-                NearbyTransferStatus.completed, 1.0);
+                NearbyTransferStatus.completed, 1,);
             if (!incoming.completer.isCompleted) {
               incoming.completer.complete(true);
             }
@@ -635,12 +632,11 @@ class NearbyTransferServiceImpl implements HighSpeedTransferService {
             Logger.error('Decode failed for $transferId', e, null, _tag);
             _emitProgress(transferId, incoming.peerId,
                 NearbyTransferStatus.failed, 0,
-                error: 'Decode error');
+                error: 'Decode error',);
             if (!incoming.completer.isCompleted) {
               incoming.completer.complete(false);
             }
           }
-          break;
 
         case 'transfer_ack':
           // Sender receives this from the receiver confirming data was received.
@@ -649,7 +645,6 @@ class NearbyTransferServiceImpl implements HighSpeedTransferService {
             ackCompleter.complete();
             Logger.info('Received transfer ACK for $transferId', _tag);
           }
-          break;
       }
     } catch (e) {
       Logger.error('_handleReceivedData error', e, null, _tag);

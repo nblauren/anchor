@@ -75,15 +75,10 @@ class PendingHandshake {
     required this.peerId,
     required this.role,
     required this.state,
-    this.pattern = NoisePattern.xk,
-    required this.localEphemeralPrivate,
-    required this.localEphemeralPublic,
+    required this.localEphemeralPrivate, required this.localEphemeralPublic, required this.h, required this.ck, required this.startedAt, this.pattern = NoisePattern.xk,
     this.remoteEphemeralPublic,
-    required this.h,
-    required this.ck,
     this.k,
     this.n = 0,
-    required this.startedAt,
   });
 
   final String peerId;

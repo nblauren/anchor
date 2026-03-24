@@ -31,9 +31,10 @@ void main() {
     });
 
     test('buildGossipPayload encodes GCS as base64', () {
-      service.addMessageId('msg-1');
-      service.addMessageId('msg-2');
-      service.addMessageId('msg-3');
+      service
+        ..addMessageId('msg-1')
+        ..addMessageId('msg-2')
+        ..addMessageId('msg-3');
 
       final payload = service.buildGossipPayload();
       expect(payload, isNotNull);
@@ -46,13 +47,13 @@ void main() {
 
     test('handleGossipSync detects missing messages', () {
       // Local service has msg-1 through msg-5
-      for (int i = 1; i <= 5; i++) {
+      for (var i = 1; i <= 5; i++) {
         service.addMessageId('msg-$i');
       }
 
       // Remote peer has msg-1 through msg-10 (we're missing 6-10)
       final remoteService = GossipSyncService();
-      for (int i = 1; i <= 10; i++) {
+      for (var i = 1; i <= 10; i++) {
         remoteService.addMessageId('msg-$i');
       }
       final remotePayload = remoteService.buildGossipPayload()!;
@@ -60,13 +61,14 @@ void main() {
       List<String>? missingIds;
       String? fromPeer;
       int? receivedOriginalN;
-      service.onMissingMessages = (peerId, ids, originalN) {
-        fromPeer = peerId;
-        missingIds = ids;
-        receivedOriginalN = originalN;
-      };
+      service
+        ..onMissingMessages = (peerId, ids, originalN) {
+          fromPeer = peerId;
+          missingIds = ids;
+          receivedOriginalN = originalN;
+        }
 
-      service.handleGossipSync('peer-A', remotePayload);
+        ..handleGossipSync('peer-A', remotePayload);
 
       // Should detect some missing messages
       expect(fromPeer, 'peer-A');
@@ -80,29 +82,31 @@ void main() {
 
     test('handleGossipSync with identical sets finds nothing missing', () {
       // Both have the same messages
-      for (int i = 1; i <= 10; i++) {
+      for (var i = 1; i <= 10; i++) {
         service.addMessageId('msg-$i');
       }
 
       final payload = service.buildGossipPayload()!;
 
-      bool called = false;
-      service.onMissingMessages = (_, __, ___) {
-        called = true;
-      };
+      var called = false;
+      service
+        ..onMissingMessages = (_, __, ___) {
+          called = true;
+        }
 
-      service.handleGossipSync('peer-A', payload);
+        ..handleGossipSync('peer-A', payload);
       expect(called, isFalse);
     });
 
     test('handleGossipSync ignores invalid payload', () {
-      bool called = false;
-      service.onMissingMessages = (_, __, ___) {
-        called = true;
-      };
+      var called = false;
+      service
+        ..onMissingMessages = (_, __, ___) {
+          called = true;
+        }
 
-      // Missing gcs field
-      service.handleGossipSync('peer-A', {'type': 'gossip_sync'});
+        // Missing gcs field
+        ..handleGossipSync('peer-A', {'type': 'gossip_sync'});
       expect(called, isFalse);
 
       // Invalid n
@@ -115,9 +119,10 @@ void main() {
     });
 
     test('addPeer and removePeer manage connected peers', () {
-      service.addPeer('peer-1');
-      service.addPeer('peer-2');
-      service.addMessageId('msg-1');
+      service
+        ..addPeer('peer-1')
+        ..addPeer('peer-2')
+        ..addMessageId('msg-1');
 
       final sentTo = <String>[];
       service.onSendGossip = (peerId, _) {
@@ -133,11 +138,12 @@ void main() {
     });
 
     test('dispose clears all state', () {
-      service.addMessageId('msg-1');
-      service.addPeer('peer-1');
-      service.start();
+      service
+        ..addMessageId('msg-1')
+        ..addPeer('peer-1')
+        ..start()
 
-      service.dispose();
+        ..dispose();
 
       expect(service.buildGossipPayload(), isNull);
     });
@@ -146,9 +152,7 @@ void main() {
       // Create service with very short max age
       final shortService = GossipSyncService(
         maxMessageAge: Duration.zero,
-      );
-
-      shortService.addMessageId('old-msg');
+      )..addMessageId('old-msg');
       // With Duration.zero, message is immediately "old"
       final payload = shortService.buildGossipPayload();
       expect(payload, isNull);
@@ -163,12 +167,13 @@ void main() {
         final msgBytes2 = Uint8List.fromList([4, 5, 6]);
         final msgBytes3 = Uint8List.fromList([7, 8, 9]);
 
-        service.addMessageId('msg-1');
-        service.cacheMessage('msg-1', msgBytes1);
-        service.addMessageId('msg-2');
-        service.cacheMessage('msg-2', msgBytes2);
-        service.addMessageId('msg-3');
-        service.cacheMessage('msg-3', msgBytes3);
+        service
+          ..addMessageId('msg-1')
+          ..cacheMessage('msg-1', msgBytes1)
+          ..addMessageId('msg-2')
+          ..cacheMessage('msg-2', msgBytes2)
+          ..addMessageId('msg-3')
+          ..cacheMessage('msg-3', msgBytes3);
 
         // Compute what hash indices the peer would request
         // The peer built a GCS with originalN = 3 (our message count)
@@ -179,12 +184,13 @@ void main() {
 
         // Track resent messages
         final resent = <(String, Uint8List)>[];
-        service.onResendMessage = (peerId, bytes) {
-          resent.add((peerId, bytes));
-        };
+        service
+          ..onResendMessage = (peerId, bytes) {
+            resent.add((peerId, bytes));
+          }
 
-        // Request msg-1 and msg-2 by hash
-        service.handleGossipRequest('peer-B', [hash1, hash2], 3);
+          // Request msg-1 and msg-2 by hash
+          ..handleGossipRequest('peer-B', [hash1, hash2], 3);
 
         // Should have resent exactly the messages matching those hashes
         expect(resent.length, greaterThanOrEqualTo(2));
@@ -195,28 +201,32 @@ void main() {
       });
 
       test('handleGossipRequest does nothing for empty request', () {
-        service.addMessageId('msg-1');
-        service.cacheMessage('msg-1', Uint8List.fromList([1, 2, 3]));
+        service
+          ..addMessageId('msg-1')
+          ..cacheMessage('msg-1', Uint8List.fromList([1, 2, 3]));
 
         final resent = <(String, Uint8List)>[];
-        service.onResendMessage = (peerId, bytes) {
-          resent.add((peerId, bytes));
-        };
+        service
+          ..onResendMessage = (peerId, bytes) {
+            resent.add((peerId, bytes));
+          }
 
-        service.handleGossipRequest('peer-B', [], 5);
+          ..handleGossipRequest('peer-B', [], 5);
         expect(resent, isEmpty);
       });
 
       test('handleGossipRequest does nothing for originalN = 0', () {
-        service.addMessageId('msg-1');
-        service.cacheMessage('msg-1', Uint8List.fromList([1, 2, 3]));
+        service
+          ..addMessageId('msg-1')
+          ..cacheMessage('msg-1', Uint8List.fromList([1, 2, 3]));
 
         final resent = <(String, Uint8List)>[];
-        service.onResendMessage = (peerId, bytes) {
-          resent.add((peerId, bytes));
-        };
+        service
+          ..onResendMessage = (peerId, bytes) {
+            resent.add((peerId, bytes));
+          }
 
-        service.handleGossipRequest('peer-B', [42], 0);
+          ..handleGossipRequest('peer-B', [42], 0);
         expect(resent, isEmpty);
       });
 
@@ -229,21 +239,21 @@ void main() {
         final hash1 = GolombCodedSet.hashItem('msg-1', modulus);
 
         final resent = <(String, Uint8List)>[];
-        service.onResendMessage = (peerId, bytes) {
-          resent.add((peerId, bytes));
-        };
+        service
+          ..onResendMessage = (peerId, bytes) {
+            resent.add((peerId, bytes));
+          }
 
-        service.handleGossipRequest('peer-B', [hash1], 1);
+          ..handleGossipRequest('peer-B', [hash1], 1);
         expect(resent, isEmpty);
       });
 
       test('cached bytes are pruned when messages expire', () {
         final shortService = GossipSyncService(
           maxMessageAge: Duration.zero,
-        );
-
-        shortService.addMessageId('msg-1');
-        shortService.cacheMessage('msg-1', Uint8List.fromList([1, 2, 3]));
+        )
+          ..addMessageId('msg-1')
+          ..cacheMessage('msg-1', Uint8List.fromList([1, 2, 3]));
 
         // Building payload triggers pruning — messages are immediately old
         final payload = shortService.buildGossipPayload();
@@ -251,29 +261,32 @@ void main() {
 
         // Now try to fulfill a request — msg-1 should be pruned
         final resent = <(String, Uint8List)>[];
-        shortService.onResendMessage = (peerId, bytes) {
-          resent.add((peerId, bytes));
-        };
+        shortService
+          ..onResendMessage = (peerId, bytes) {
+            resent.add((peerId, bytes));
+          }
 
-        // Use any hash — shouldn't matter since the message is pruned
-        shortService.handleGossipRequest('peer-B', [42], 1);
+          // Use any hash — shouldn't matter since the message is pruned
+          ..handleGossipRequest('peer-B', [42], 1);
         expect(resent, isEmpty);
 
         shortService.dispose();
       });
 
       test('dispose clears cached bytes', () {
-        service.addMessageId('msg-1');
-        service.cacheMessage('msg-1', Uint8List.fromList([1, 2, 3]));
+        service
+          ..addMessageId('msg-1')
+          ..cacheMessage('msg-1', Uint8List.fromList([1, 2, 3]))
 
-        service.dispose();
+          ..dispose();
 
         // After dispose, handleGossipRequest should find nothing
         final resent = <(String, Uint8List)>[];
-        service.onResendMessage = (peerId, bytes) {
-          resent.add((peerId, bytes));
-        };
-        service.handleGossipRequest('peer-B', [42], 1);
+        service
+          ..onResendMessage = (peerId, bytes) {
+            resent.add((peerId, bytes));
+          }
+          ..handleGossipRequest('peer-B', [42], 1);
         expect(resent, isEmpty);
       });
     });

@@ -1,19 +1,16 @@
 import 'dart:io';
 
+import 'package:anchor/core/theme/app_theme.dart';
+import 'package:anchor/features/profile/bloc/profile_state.dart';
+import 'package:anchor/services/image_service.dart' show resolvePhotoPath;
 import 'package:flutter/material.dart';
-
-import '../../../core/theme/app_theme.dart';
-import '../../../services/image_service.dart' show resolvePhotoPath;
-import '../bloc/profile_state.dart';
 
 /// Preview widget showing how the profile will appear to others
 class ProfilePreviewWidget extends StatefulWidget {
   const ProfilePreviewWidget({
-    super.key,
-    required this.name,
+    required this.name, required this.photos, super.key,
     this.age,
     this.bio,
-    required this.photos,
   });
 
   final String? name;
@@ -31,7 +28,7 @@ class _ProfilePreviewWidgetState extends State<ProfilePreviewWidget> {
 
   ProfilePhoto? get _primaryPhoto => widget.photos.isNotEmpty
       ? widget.photos.firstWhere((p) => p.isPrimary,
-          orElse: () => widget.photos.first)
+          orElse: () => widget.photos.first,)
       : null;
 
   @override
@@ -72,7 +69,7 @@ class _ProfilePreviewWidgetState extends State<ProfilePreviewWidget> {
             child: Row(
               children: [
                 const Icon(Icons.visibility,
-                    color: AppTheme.textSecondary, size: 20),
+                    color: AppTheme.textSecondary, size: 20,),
                 const SizedBox(width: 8),
                 Text(
                   'Profile Preview',
@@ -219,9 +216,9 @@ class _ProfilePreviewWidgetState extends State<ProfilePreviewWidget> {
   }
 
   Widget _buildPlaceholder() {
-    return Container(
+    return const ColoredBox(
       color: AppTheme.darkSurface,
-      child: const Center(
+      child: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
@@ -239,7 +236,7 @@ class _ProfilePreviewWidgetState extends State<ProfilePreviewWidget> {
 
   String _formatNameAge() {
     final displayName =
-        widget.name?.isNotEmpty == true ? widget.name : 'Your Name';
+        widget.name?.isNotEmpty ?? false ? widget.name : 'Your Name';
     if (widget.age != null) {
       return '$displayName, ${widget.age}';
     }

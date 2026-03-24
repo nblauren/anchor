@@ -1,20 +1,19 @@
+import 'package:anchor/core/theme/app_theme.dart';
+import 'package:anchor/data/local_database/database.dart';
+import 'package:anchor/data/repositories/anchor_drop_repository.dart';
+import 'package:anchor/features/chat/bloc/chat_bloc.dart';
+import 'package:anchor/features/chat/bloc/chat_e2ee_bloc.dart';
+import 'package:anchor/features/chat/bloc/photo_transfer_bloc.dart';
+import 'package:anchor/features/chat/bloc/reaction_bloc.dart';
+import 'package:anchor/features/discovery/bloc/discovery_bloc.dart';
+import 'package:anchor/features/discovery/bloc/discovery_state.dart';
+import 'package:anchor/features/discovery/screens/peer_detail_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
-import '../../../core/theme/app_theme.dart';
-import '../../../data/local_database/database.dart';
-import '../../../data/repositories/anchor_drop_repository.dart';
-import '../../chat/bloc/chat_bloc.dart';
-import '../../chat/bloc/chat_e2ee_bloc.dart';
-import '../../chat/bloc/photo_transfer_bloc.dart';
-import '../../chat/bloc/reaction_bloc.dart';
-import '../bloc/discovery_bloc.dart';
-import '../bloc/discovery_state.dart';
-import 'peer_detail_screen.dart';
-
 /// Screen showing peers who have dropped anchor on the current user.
 class AnchorDropsScreen extends StatefulWidget {
-  const AnchorDropsScreen({super.key, required this.anchorDropRepository});
+  const AnchorDropsScreen({required this.anchorDropRepository, super.key});
 
   final AnchorDropRepository anchorDropRepository;
 
@@ -58,7 +57,7 @@ class _AnchorDropsScreenState extends State<AnchorDropsScreen> {
 
     if (peer != null) {
       Navigator.of(context).push(
-        MaterialPageRoute(
+        MaterialPageRoute<void>(
           builder: (_) => MultiBlocProvider(
             providers: [
               BlocProvider.value(value: context.read<DiscoveryBloc>()),
@@ -121,7 +120,7 @@ class _AnchorDropsScreenState extends State<AnchorDropsScreen> {
           ),
           const SizedBox(height: 8),
           const Text(
-            'When someone drops anchor on you,\nthey\'ll appear here.',
+            "When someone drops anchor on you,\nthey'll appear here.",
             textAlign: TextAlign.center,
             style: TextStyle(
               color: AppTheme.textHint,
@@ -162,7 +161,7 @@ class _AnchorDropsScreenState extends State<AnchorDropsScreen> {
               trailing: isOnline
                   ? Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 4),
+                          horizontal: 10, vertical: 4,),
                       decoration: BoxDecoration(
                         color: AppTheme.online.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(12),

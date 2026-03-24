@@ -1,7 +1,6 @@
+import 'package:anchor/features/discovery/bloc/discovery_state.dart';
 import 'package:equatable/equatable.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-
-import 'discovery_state.dart';
 
 // ---------------------------------------------------------------------------
 // State
@@ -29,7 +28,7 @@ class DiscoveryFilterState extends Equatable {
         return false;
       }
       if (filterInterestIds.isNotEmpty && p.interestIds.isNotEmpty) {
-        if (!p.interestIds.any((id) => filterInterestIds.contains(id))) {
+        if (!p.interestIds.any(filterInterestIds.contains)) {
           return false;
         }
       }

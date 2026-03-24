@@ -1,6 +1,5 @@
+import 'package:anchor/core/theme/app_theme.dart';
 import 'package:flutter/material.dart';
-
-import '../theme/app_theme.dart';
 
 /// Full-screen loading indicator
 class LoadingWidget extends StatelessWidget {
@@ -125,7 +124,6 @@ class SkeletonCard extends StatelessWidget {
           ),
           // Text placeholders
           const Expanded(
-            flex: 1,
             child: Padding(
               padding: EdgeInsets.all(12),
               child: Column(
@@ -173,7 +171,7 @@ class SkeletonListTile extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                SkeletonLoader(width: 120, height: 16),
+                SkeletonLoader(width: 120),
                 SizedBox(height: 8),
                 SkeletonLoader(
                   width: double.infinity,
@@ -238,9 +236,7 @@ class SkeletonList extends StatelessWidget {
 /// Loading overlay that can be stacked on content
 class LoadingOverlay extends StatelessWidget {
   const LoadingOverlay({
-    super.key,
-    required this.isLoading,
-    required this.child,
+    required this.isLoading, required this.child, super.key,
     this.message,
   });
 
@@ -254,7 +250,7 @@ class LoadingOverlay extends StatelessWidget {
       children: [
         child,
         if (isLoading)
-          Container(
+          ColoredBox(
             color: AppTheme.darkBackground.withValues(alpha: 0.7),
             child: LoadingWidget(message: message),
           ),

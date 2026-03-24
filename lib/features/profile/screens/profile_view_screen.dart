@@ -1,20 +1,19 @@
+import 'package:anchor/core/theme/app_theme.dart';
+import 'package:anchor/core/utils/profile_validator.dart';
+import 'package:anchor/features/discovery/bloc/discovery_bloc.dart';
+import 'package:anchor/features/profile/bloc/profile_bloc.dart';
+import 'package:anchor/features/profile/bloc/profile_event.dart';
+import 'package:anchor/features/profile/bloc/profile_state.dart';
+import 'package:anchor/features/profile/widgets/interests_chip_selector.dart';
+import 'package:anchor/features/profile/widgets/photo_grid_widget.dart';
+import 'package:anchor/features/profile/widgets/photo_source_sheet.dart';
+import 'package:anchor/features/profile/widgets/position_chip_selector.dart';
+import 'package:anchor/features/profile/widgets/profile_preview_widget.dart';
+import 'package:anchor/features/settings/settings.dart';
+import 'package:anchor/services/ble/ble.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-
-import '../../../core/theme/app_theme.dart';
-import '../../../core/utils/profile_validator.dart';
-import '../../../features/settings/settings.dart';
-import '../../../services/ble/ble.dart';
-import '../../discovery/bloc/discovery_bloc.dart';
-import '../bloc/profile_bloc.dart';
-import '../bloc/profile_event.dart';
-import '../bloc/profile_state.dart';
-import '../widgets/interests_chip_selector.dart';
-import '../widgets/photo_grid_widget.dart';
-import '../widgets/photo_source_sheet.dart';
-import '../widgets/position_chip_selector.dart';
-import '../widgets/profile_preview_widget.dart';
 
 /// Screen for viewing and editing the user's own profile
 class ProfileViewScreen extends StatefulWidget {
@@ -41,7 +40,7 @@ class _ProfileViewScreenState extends State<ProfileViewScreen> {
   }
 
   void _showEditDialog(ProfileState state) {
-    showModalBottomSheet(
+    showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: AppTheme.darkCard,
@@ -62,7 +61,7 @@ class _ProfileViewScreenState extends State<ProfileViewScreen> {
             position: position,
             clearPosition: position == null,
             interests: interests,
-          ));
+          ),);
           Navigator.pop(context);
         },
       ),
@@ -70,7 +69,7 @@ class _ProfileViewScreenState extends State<ProfileViewScreen> {
   }
 
   void _showPreviewDialog(ProfileState state) {
-    showDialog(
+    showDialog<void>(
       context: context,
       builder: (context) => Dialog(
         backgroundColor: Colors.transparent,
@@ -87,7 +86,7 @@ class _ProfileViewScreenState extends State<ProfileViewScreen> {
   void _openSettings(BuildContext context) {
     Navigator.push(
       context,
-      MaterialPageRoute(
+      MaterialPageRoute<void>(
         builder: (_) => MultiBlocProvider(
           providers: [
             BlocProvider.value(value: context.read<ProfileBloc>()),
@@ -289,7 +288,7 @@ class _ProfileViewScreenState extends State<ProfileViewScreen> {
             context,
             icon: Icons.edit_outlined,
             label: 'Bio',
-            value: state.bio?.isNotEmpty == true ? state.bio! : 'Not set',
+            value: state.bio?.isNotEmpty ?? false ? state.bio! : 'Not set',
             maxLines: 3,
           ),
         ],
@@ -342,11 +341,10 @@ class _ProfileViewScreenState extends State<ProfileViewScreen> {
 class _EditProfileSheet extends StatefulWidget {
   const _EditProfileSheet({
     required this.name,
-    this.age,
+    required this.onSave, this.age,
     this.bio,
     this.position,
     this.interestIds = const [],
-    required this.onSave,
   });
 
   final String name;
@@ -354,7 +352,7 @@ class _EditProfileSheet extends StatefulWidget {
   final String? bio;
   final int? position;
   final List<int> interestIds;
-  final Function(
+  final void Function(
     String name,
     int? age,
     String? bio,

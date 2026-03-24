@@ -1,11 +1,11 @@
 import 'dart:async';
 import 'dart:math';
+
+import 'package:anchor/core/utils/logger.dart';
+import 'package:anchor/services/ble/ble_models.dart';
+import 'package:anchor/services/ble/ble_service_interface.dart';
 import 'package:flutter/services.dart';
 import 'package:uuid/uuid.dart';
-
-import '../../core/utils/logger.dart';
-import 'ble_models.dart';
-import 'ble_service_interface.dart';
 
 /// Mock BLE service for testing UI without real Bluetooth
 class MockBleService implements BleServiceInterface {
@@ -101,7 +101,7 @@ class MockBleService implements BleServiceInterface {
   @override
   Future<void> initialize() async {
     Logger.info('MockBleService: Initializing...', 'BLE');
-    await Future.delayed(const Duration(milliseconds: 500));
+    await Future<void>.delayed(const Duration(milliseconds: 500));
     _setStatus(BleStatus.ready);
     Logger.info('MockBleService: Initialized', 'BLE');
   }
@@ -113,7 +113,7 @@ class MockBleService implements BleServiceInterface {
     await broadcastProfile(const BroadcastPayload(
       userId: 'mock-user',
       name: 'Mock User',
-    ));
+    ),);
   }
 
   @override
@@ -159,7 +159,7 @@ class MockBleService implements BleServiceInterface {
 
   @override
   Future<bool> requestPermissions() async {
-    await Future.delayed(const Duration(milliseconds: 300));
+    await Future<void>.delayed(const Duration(milliseconds: 300));
     return true;
   }
 
@@ -325,7 +325,7 @@ class MockBleService implements BleServiceInterface {
     );
 
     // Simulate network delay
-    await Future.delayed(Duration(milliseconds: 200 + _random.nextInt(300)));
+    await Future<void>.delayed(Duration(milliseconds: 200 + _random.nextInt(300)));
 
     // 95% success rate
     if (_random.nextDouble() > 0.05) {
@@ -378,7 +378,7 @@ class MockBleService implements BleServiceInterface {
       'BLE',
     );
 
-    await Future.delayed(Duration(milliseconds: 150 + _random.nextInt(200)));
+    await Future<void>.delayed(Duration(milliseconds: 150 + _random.nextInt(200)));
 
     if (!_visiblePeers.containsKey(peerId)) {
       Logger.warning('MockBleService: Peer not reachable for drop anchor', 'BLE');
@@ -415,7 +415,7 @@ class MockBleService implements BleServiceInterface {
       'MockBleService: Sending reaction $emoji ($action) to ${peerId.substring(0, 8)}',
       'BLE',
     );
-    await Future.delayed(Duration(milliseconds: 100 + _random.nextInt(100)));
+    await Future<void>.delayed(Duration(milliseconds: 100 + _random.nextInt(100)));
     return _visiblePeers.containsKey(peerId);
   }
 
@@ -473,7 +473,7 @@ class MockBleService implements BleServiceInterface {
         messageId: _uuid.v4(),
         photoId: photoId,
         timestamp: DateTime.now(),
-      ));
+      ),);
       Logger.info('MockBleService: Simulated photo_request for $photoId', 'BLE');
     });
     return true;
@@ -511,7 +511,7 @@ class MockBleService implements BleServiceInterface {
       peerId: '',
       progress: 0,
       status: PhotoTransferStatus.cancelled,
-    ));
+    ),);
   }
 
   void _simulatePhotoTransfer(String peerId, Uint8List photoData, String messageId) {
@@ -521,7 +521,7 @@ class MockBleService implements BleServiceInterface {
       peerId: peerId,
       progress: 0,
       status: PhotoTransferStatus.starting,
-    ));
+    ),);
 
     // Simulate progress over ~3 seconds
     var progress = 0.0;
@@ -533,9 +533,9 @@ class MockBleService implements BleServiceInterface {
         _photoProgressController.add(PhotoTransferProgress(
           messageId: messageId,
           peerId: peerId,
-          progress: 1.0,
+          progress: 1,
           status: PhotoTransferStatus.completed,
-        ));
+        ),);
         Logger.info('MockBleService: Photo transfer completed', 'BLE');
       } else {
         _photoProgressController.add(PhotoTransferProgress(
@@ -543,7 +543,7 @@ class MockBleService implements BleServiceInterface {
           peerId: peerId,
           progress: progress,
           status: PhotoTransferStatus.inProgress,
-        ));
+        ),);
       }
     });
   }
@@ -572,12 +572,12 @@ class MockBleService implements BleServiceInterface {
   List<String> get visiblePeerIds => _visiblePeers.keys.toList();
 
   @override
-  Future<void> setBatterySaverMode(bool enabled) async {}
+  Future<void> setBatterySaverMode({required bool enabled}) async {}
 
   bool _meshRelayEnabled = true;
 
   @override
-  Future<void> setMeshRelayMode(bool enabled) async {
+  Future<void> setMeshRelayMode({required bool enabled}) async {
     _meshRelayEnabled = enabled;
   }
 
@@ -601,7 +601,7 @@ class MockBleService implements BleServiceInterface {
 
   @override
   Future<void> sendHandshakeMessage(
-      String peerId, int step, Uint8List payload) async {}
+      String peerId, int step, Uint8List payload,) async {}
 
   @override
   Stream<NoiseHandshakeReceived> get noiseHandshakeStream =>

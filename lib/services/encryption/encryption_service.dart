@@ -3,18 +3,17 @@ import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:anchor/core/utils/logger.dart';
+import 'package:anchor/data/local_database/database.dart';
+import 'package:anchor/services/encryption/encryption_models.dart';
+import 'package:anchor/services/encryption/noise_handshake.dart';
+import 'package:anchor/services/encryption/noise_xx_handshake.dart';
+import 'package:anchor/services/encryption/rate_limiter.dart';
+import 'package:anchor/services/encryption/traffic_padding.dart';
+import 'package:anchor/services/mesh/mesh_packet.dart';
 import 'package:cryptography/cryptography.dart';
 import 'package:drift/drift.dart' show InsertMode, Value;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-
-import '../../core/utils/logger.dart';
-import '../../data/local_database/database.dart';
-import 'encryption_models.dart';
-import 'noise_handshake.dart';
-import 'noise_xx_handshake.dart';
-import 'rate_limiter.dart';
-import 'traffic_padding.dart';
-import '../mesh/mesh_packet.dart';
 
 // ---------------------------------------------------------------------------
 // EncryptionService
@@ -141,7 +140,7 @@ class EncryptionService {
     Logger.info(
         'EncryptionService initialised — pubkey: ${_publicKeyHex().substring(0, 12)}…, '
         '${_sessions.length} restored session(s)',
-        'E2EE');
+        'E2EE',);
   }
 
   Future<void> dispose() async {
@@ -236,7 +235,7 @@ class EncryptionService {
     if (publicKeyHex.length != 64) {
       Logger.warning(
           'Ignoring invalid peer public key for $peerId (wrong length)',
-          'E2EE');
+          'E2EE',);
       return;
     }
 
@@ -244,7 +243,7 @@ class EncryptionService {
     if (ed25519PublicKeyHex != null && ed25519PublicKeyHex.length != 64) {
       Logger.warning(
           'Ignoring invalid Ed25519 key for $peerId (wrong length)',
-          'E2EE');
+          'E2EE',);
       ed25519PublicKeyHex = null;
     }
 
@@ -259,7 +258,7 @@ class EncryptionService {
                 ..where((t) => t.peerId.equals(peerId)))
               .write(DiscoveredPeersCompanion(
             ed25519PublicKeyHex: Value(ed25519PublicKeyHex),
-          ));
+          ),);
           Logger.info(
             'Updated Ed25519 signing key for $peerId (X25519 unchanged)',
             'E2EE',
@@ -273,7 +272,7 @@ class EncryptionService {
       // Key rotated — invalidate existing session and pending handshake.
       Logger.info(
           'Peer $peerId rotated their public key — invalidating session',
-          'E2EE');
+          'E2EE',);
       _sessions.remove(peerId);
       _cancelPendingHandshake(peerId);
     }
@@ -301,11 +300,11 @@ class EncryptionService {
         .write(DiscoveredPeersCompanion(
       publicKeyHex: Value(publicKeyHex),
       ed25519PublicKeyHex: Value(ed25519PublicKeyHex),
-    ));
+    ),);
 
     Logger.info(
         'Stored public key for peer $peerId (${publicKeyHex.substring(0, 8)}…) — handshake can now proceed',
-        'E2EE');
+        'E2EE',);
     _peerKeyStoredController.add(peerId);
   }
 
@@ -413,7 +412,7 @@ class EncryptionService {
     // Rate-limit outbound handshake initiations to prevent abuse.
     if (!_handshakeRateLimiter.tryAcquire(peerId)) {
       return const HandshakeResult(
-          error: 'Handshake rate-limited — try again later');
+          error: 'Handshake rate-limited — try again later',);
     }
 
     final peerKeyHex = await _getPeerPublicKeyHex(peerId);
@@ -447,7 +446,6 @@ class EncryptionService {
       peerId: peerId,
       role: NoiseRole.initiator,
       state: HandshakeState.awaitingMessage2,
-      pattern: NoisePattern.xk,
       localEphemeralPrivate: msg1Result.localEphPriv,
       localEphemeralPublic: msg1Result.localEphPub,
       h: msg1Result.h,
@@ -469,7 +467,7 @@ class EncryptionService {
     _outboundHandshakeController.add(outbound);
     Logger.info(
         'Noise_XK handshake initiated with $peerId (msg1, ${msg1Result.payload.length} bytes)',
-        'E2EE');
+        'E2EE',);
     return HandshakeResult(messageToSend: outbound);
   }
 
@@ -507,7 +505,7 @@ class EncryptionService {
     _outboundHandshakeController.add(outbound);
     Logger.info(
         'Noise_XX handshake initiated with $peerId (msg1, ${msg1Result.payload.length} bytes)',
-        'E2EE');
+        'E2EE',);
     return HandshakeResult(messageToSend: outbound);
   }
 
@@ -533,7 +531,7 @@ class EncryptionService {
           'E2EE',
         );
         return const HandshakeResult(
-            error: 'Handshake rate-limited — too many attempts');
+            error: 'Handshake rate-limited — too many attempts',);
       }
     }
 
@@ -574,7 +572,7 @@ class EncryptionService {
       // Already have a session — initiator may have reconnected.
       // Accept the re-handshake (gives forward secrecy for the new session).
       Logger.info('Peer $peerId re-initiating handshake — dropping old session',
-          'E2EE');
+          'E2EE',);
       _sessions.remove(peerId);
     }
 
@@ -634,7 +632,7 @@ class EncryptionService {
       _outboundHandshakeController.add(outbound);
       Logger.info(
           'Noise_XK msg1 OK — sending msg2 to $peerId (${msg2Result.payload.length} bytes)',
-          'E2EE');
+          'E2EE',);
       return HandshakeResult(messageToSend: outbound);
     } on NoiseHandshakeException catch (e) {
       _cancelPendingHandshake(peerId);
@@ -651,11 +649,11 @@ class EncryptionService {
     final pending = _pending[peerId];
     if (pending == null || pending.role != NoiseRole.initiator) {
       return const HandshakeResult(
-          error: 'Unexpected message 2 — not waiting as initiator');
+          error: 'Unexpected message 2 — not waiting as initiator',);
     }
     if (pending.state != HandshakeState.awaitingMessage2) {
       return HandshakeResult(
-          error: 'Wrong handshake state for msg2: ${pending.state}');
+          error: 'Wrong handshake state for msg2: ${pending.state}',);
     }
 
     try {
@@ -697,7 +695,7 @@ class EncryptionService {
       _outboundHandshakeController.add(outbound);
       Logger.info(
           'Noise_XK complete (initiator) — session established with $peerId',
-          'E2EE');
+          'E2EE',);
       return HandshakeResult(messageToSend: outbound, sessionEstablished: true);
     } on NoiseHandshakeException catch (e) {
       _cancelPendingHandshake(peerId);
@@ -714,11 +712,11 @@ class EncryptionService {
     final pending = _pending[peerId];
     if (pending == null || pending.role != NoiseRole.responder) {
       return const HandshakeResult(
-          error: 'Unexpected message 3 — not waiting as responder');
+          error: 'Unexpected message 3 — not waiting as responder',);
     }
     if (pending.state != HandshakeState.awaitingMessage3) {
       return HandshakeResult(
-          error: 'Wrong handshake state for msg3: ${pending.state}');
+          error: 'Wrong handshake state for msg3: ${pending.state}',);
     }
 
     try {
@@ -737,7 +735,7 @@ class EncryptionService {
           _bytesToHex(readResult.initiatorStaticPublic);
       Logger.debug(
           'Authenticated initiator static key for $peerId: ${authenticatedPeerPub.substring(0, 12)}…',
-          'E2EE');
+          'E2EE',);
 
       // Split — responder: initiatorSend = our recv, initiatorRecv = our send
       final keys = await NoiseHandshakeProcessor.split(readResult.ck);
@@ -749,7 +747,7 @@ class EncryptionService {
 
       Logger.info(
           'Noise_XK complete (responder) — session established with $peerId',
-          'E2EE');
+          'E2EE',);
       return const HandshakeResult(sessionEstablished: true);
     } on NoiseHandshakeException catch (e) {
       _cancelPendingHandshake(peerId);
@@ -767,7 +765,7 @@ class EncryptionService {
   ) async {
     if (_sessions.containsKey(peerId)) {
       Logger.info('Peer $peerId re-initiating XX handshake — dropping old session',
-          'E2EE');
+          'E2EE',);
       _sessions.remove(peerId);
     }
 
@@ -819,7 +817,7 @@ class EncryptionService {
       _outboundHandshakeController.add(outbound);
       Logger.info(
           'Noise_XX msg1 OK — sending msg2 to $peerId (${msg2Result.payload.length} bytes)',
-          'E2EE');
+          'E2EE',);
       return HandshakeResult(messageToSend: outbound);
     } on NoiseHandshakeException catch (e) {
       _cancelPendingHandshake(peerId);
@@ -837,11 +835,11 @@ class EncryptionService {
     if (pending == null || pending.role != NoiseRole.initiator ||
         pending.pattern != NoisePattern.xx) {
       return const HandshakeResult(
-          error: 'Unexpected XX message 2 — not waiting as XX initiator');
+          error: 'Unexpected XX message 2 — not waiting as XX initiator',);
     }
     if (pending.state != HandshakeState.awaitingMessage2) {
       return HandshakeResult(
-          error: 'Wrong handshake state for XX msg2: ${pending.state}');
+          error: 'Wrong handshake state for XX msg2: ${pending.state}',);
     }
 
     try {
@@ -857,7 +855,7 @@ class EncryptionService {
       final responderPkHex = _bytesToHex(readResult.responderStaticPublic);
       Logger.debug(
           'XX: learned responder static key for $peerId: ${responderPkHex.substring(0, 12)}…',
-          'E2EE');
+          'E2EE',);
       await storePeerPublicKey(peerId, responderPkHex);
 
       // Write Message 3: -> s, se
@@ -888,7 +886,7 @@ class EncryptionService {
       _outboundHandshakeController.add(outbound);
       Logger.info(
           'Noise_XX complete (initiator) — session established with $peerId',
-          'E2EE');
+          'E2EE',);
       return HandshakeResult(messageToSend: outbound, sessionEstablished: true);
     } on NoiseHandshakeException catch (e) {
       _cancelPendingHandshake(peerId);
@@ -906,11 +904,11 @@ class EncryptionService {
     if (pending == null || pending.role != NoiseRole.responder ||
         pending.pattern != NoisePattern.xx) {
       return const HandshakeResult(
-          error: 'Unexpected XX message 3 — not waiting as XX responder');
+          error: 'Unexpected XX message 3 — not waiting as XX responder',);
     }
     if (pending.state != HandshakeState.awaitingMessage3) {
       return HandshakeResult(
-          error: 'Wrong handshake state for XX msg3: ${pending.state}');
+          error: 'Wrong handshake state for XX msg3: ${pending.state}',);
     }
 
     try {
@@ -927,7 +925,7 @@ class EncryptionService {
       final initiatorPkHex = _bytesToHex(readResult.initiatorStaticPublic);
       Logger.debug(
           'XX: learned initiator static key for $peerId: ${initiatorPkHex.substring(0, 12)}…',
-          'E2EE');
+          'E2EE',);
       await storePeerPublicKey(peerId, initiatorPkHex);
 
       // Split — responder swaps keys.
@@ -940,7 +938,7 @@ class EncryptionService {
 
       Logger.info(
           'Noise_XX complete (responder) — session established with $peerId',
-          'E2EE');
+          'E2EE',);
       return const HandshakeResult(sessionEstablished: true);
     } on NoiseHandshakeException catch (e) {
       _cancelPendingHandshake(peerId);
@@ -985,7 +983,7 @@ class EncryptionService {
       final ciphertext = Uint8List(box.cipherText.length + box.mac.bytes.length)
         ..setRange(0, box.cipherText.length, box.cipherText)
         ..setRange(box.cipherText.length,
-            box.cipherText.length + box.mac.bytes.length, box.mac.bytes);
+            box.cipherText.length + box.mac.bytes.length, box.mac.bytes,);
 
       session.messageCount++;
 
@@ -1001,7 +999,7 @@ class EncryptionService {
       }
 
       return EncryptedPayload(
-          nonce: Uint8List.fromList(nonce), ciphertext: ciphertext);
+          nonce: Uint8List.fromList(nonce), ciphertext: ciphertext,);
     } catch (e) {
       Logger.error('Crypto operation failed for $peerId: $e', e, null, 'E2EE');
       return null;
@@ -1043,7 +1041,7 @@ class EncryptionService {
       final plaintext = TrafficPadding.unpad(Uint8List.fromList(paddedPlaintext));
       if (plaintext == null) {
         Logger.warning(
-            'Invalid padding from peer $peerId — message dropped', 'E2EE');
+            'Invalid padding from peer $peerId — message dropped', 'E2EE',);
         return null;
       }
       return plaintext;
@@ -1051,7 +1049,7 @@ class EncryptionService {
       // SECURITY: authentication tag mismatch — ciphertext was tampered or
       // wrong session key.  Drop the message silently (no error leakage).
       Logger.warning(
-          'Auth tag mismatch from peer $peerId — message dropped', 'E2EE');
+          'Auth tag mismatch from peer $peerId — message dropped', 'E2EE',);
       return null;
     } catch (e) {
       Logger.error('Crypto operation failed for $peerId: $e', e, null, 'E2EE');
@@ -1106,8 +1104,8 @@ class EncryptionService {
 
   Future<void> _loadOrGenerateKeyPair() async {
     // ── X25519 (DH key agreement) ──
-    String? privHex = await _secureStorage.read(key: _kPrivateKeyStorageKey);
-    String? pubHex = await _secureStorage.read(key: _kPublicKeyStorageKey);
+    var privHex = await _secureStorage.read(key: _kPrivateKeyStorageKey);
+    var pubHex = await _secureStorage.read(key: _kPublicKeyStorageKey);
 
     if (privHex == null || pubHex == null) {
       Logger.info('Generating new X25519 long-term key pair', 'E2EE');
@@ -1127,9 +1125,9 @@ class EncryptionService {
     _localPublicKey = _hexToBytes(pubHex);
 
     // ── Ed25519 (digital signatures) ──
-    String? edPrivHex =
+    var edPrivHex =
         await _secureStorage.read(key: _kEd25519PrivateKeyStorageKey);
-    String? edPubHex =
+    var edPubHex =
         await _secureStorage.read(key: _kEd25519PublicKeyStorageKey);
 
     if (edPrivHex == null || edPubHex == null) {
@@ -1142,9 +1140,9 @@ class EncryptionService {
       edPrivHex = _bytesToHex(Uint8List.fromList(privBytes));
 
       await _secureStorage.write(
-          key: _kEd25519PrivateKeyStorageKey, value: edPrivHex);
+          key: _kEd25519PrivateKeyStorageKey, value: edPrivHex,);
       await _secureStorage.write(
-          key: _kEd25519PublicKeyStorageKey, value: edPubHex);
+          key: _kEd25519PublicKeyStorageKey, value: edPubHex,);
       Logger.info('New Ed25519 key pair stored in secure storage', 'E2EE');
     }
 
@@ -1310,7 +1308,7 @@ class EncryptionService {
 
   Uint8List _randomNonce(int length) {
     return Uint8List.fromList(
-        List.generate(length, (_) => _random.nextInt(256)));
+        List.generate(length, (_) => _random.nextInt(256)),);
   }
 
   static String _bytesToHex(Uint8List bytes) =>

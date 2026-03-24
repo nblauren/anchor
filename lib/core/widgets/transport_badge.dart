@@ -1,6 +1,5 @@
+import 'package:anchor/services/transport/transport_enums.dart';
 import 'package:flutter/material.dart';
-
-import '../../services/transport/transport_enums.dart';
 
 /// Small badge showing the active transport type for a peer.
 ///
@@ -8,8 +7,7 @@ import '../../services/transport/transport_enums.dart';
 /// Wi-Fi Direct = purple Wi-Fi icon, BLE = orange Bluetooth icon.
 class TransportBadge extends StatelessWidget {
   const TransportBadge({
-    super.key,
-    required this.transport,
+    required this.transport, super.key,
     this.showLabel = true,
     this.iconSize = 11,
     this.fontSize = 12,

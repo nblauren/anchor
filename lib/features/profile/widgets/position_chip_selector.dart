@@ -1,7 +1,6 @@
+import 'package:anchor/core/constants/profile_constants.dart';
+import 'package:anchor/core/theme/app_theme.dart';
 import 'package:flutter/material.dart';
-
-import '../../../core/constants/profile_constants.dart';
-import '../../../core/theme/app_theme.dart';
 
 /// Single-select chip grid for position preference.
 ///
@@ -10,9 +9,7 @@ import '../../../core/theme/app_theme.dart';
 /// Emits [int?] via [onChanged].
 class PositionChipSelector extends StatelessWidget {
   const PositionChipSelector({
-    super.key,
-    required this.value,
-    required this.onChanged,
+    required this.value, required this.onChanged, super.key,
   });
 
   /// Currently selected position ID, or null if unset.

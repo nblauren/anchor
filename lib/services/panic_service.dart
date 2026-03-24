@@ -1,13 +1,12 @@
 import 'dart:io';
 
+import 'package:anchor/core/utils/logger.dart';
+import 'package:anchor/services/database_service.dart';
+import 'package:anchor/services/encryption/encryption_service.dart';
+import 'package:anchor/services/transport/transport_manager.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
-import '../core/utils/logger.dart';
-import 'database_service.dart';
-import 'encryption/encryption_service.dart';
-import 'transport/transport_manager.dart';
 
 /// Emergency identity wipe — destroys all user data, encryption keys,
 /// cached images, and preferences in a single operation.
@@ -127,7 +126,7 @@ class PanicService {
     }
 
     for (final dir in dirs) {
-      if (await dir.exists()) {
+      if (dir.existsSync()) {
         await dir.delete(recursive: true);
         await dir.create(); // Recreate empty directory
       }

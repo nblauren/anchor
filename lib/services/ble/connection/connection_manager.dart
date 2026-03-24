@@ -2,11 +2,10 @@ import 'dart:async';
 import 'dart:collection';
 import 'dart:io' show Platform;
 
+import 'package:anchor/core/utils/logger.dart';
+import 'package:anchor/services/ble/ble_config.dart';
+import 'package:anchor/services/ble/connection/peer_connection.dart';
 import 'package:bluetooth_low_energy/bluetooth_low_energy.dart';
-
-import '../../../core/utils/logger.dart';
-import '../ble_config.dart';
-import 'peer_connection.dart';
 
 /// Manages BLE GATT connections with pooling, lifecycle tracking, and reconnection.
 ///
@@ -23,7 +22,6 @@ import 'peer_connection.dart';
 class ConnectionManager {
   ConnectionManager({
     required CentralManager central,
-    required BleConfig config,
   })  : _central = central;
 
   final CentralManager _central;
@@ -89,7 +87,7 @@ class ConnectionManager {
 
   // ==================== Connection State Subscription ====================
 
-  StreamSubscription? _connectionStateSubscription;
+  StreamSubscription<PeripheralConnectionStateChangedEventArgs>? _connectionStateSubscription;
 
   /// Start listening to central manager connection state changes.
   /// Call once after CentralManager is initialized.
@@ -242,8 +240,9 @@ class ConnectionManager {
   void touchPeer(String peerId) {
     final conn = _connections[peerId];
     if (conn != null) {
-      conn.touch();
-      conn.resetFailures();
+      conn
+        ..touch()
+        ..resetFailures();
       clearDeadStatus(peerId);
     }
   }
@@ -295,7 +294,7 @@ class ConnectionManager {
   }
 
   Future<PeerConnection?> _connectImpl(
-      String peerId, Peripheral peripheral) async {
+      String peerId, Peripheral peripheral,) async {
     // Evict LRU if pool is full
     if (activeConnectionCount >= _maxConnections) {
       _evictLru(excludePeerId: peerId);
@@ -310,12 +309,12 @@ class ConnectionManager {
           await _central.requestMTU(peripheral, mtu: 517);
         } catch (e) {
           Logger.warning(
-              'ConnectionManager: MTU request failed for $peerId', 'BLE');
+              'ConnectionManager: MTU request failed for $peerId', 'BLE',);
         }
       }
 
       // Query safe write length
-      int maxWriteLen = 182; // conservative default
+      var maxWriteLen = 182; // conservative default
       try {
         maxWriteLen = await _central.getMaximumWriteLength(
           peripheral,
@@ -324,7 +323,7 @@ class ConnectionManager {
       } catch (e) {
         Logger.warning(
             'ConnectionManager: getMaximumWriteLength failed for $peerId',
-            'BLE');
+            'BLE',);
       }
 
       // Discover GATT services
@@ -336,7 +335,7 @@ class ConnectionManager {
       if (anchorService == null) {
         Logger.info(
             'ConnectionManager: No Anchor service on $peerId — disconnecting',
-            'BLE');
+            'BLE',);
         await _central.disconnect(peripheral);
         return null;
       }
@@ -409,7 +408,7 @@ class ConnectionManager {
   /// Create a stub connection to track failure count for peers we've never
   /// fully connected to.
   PeerConnection _getOrCreateStubConnection(
-      String peerId, Peripheral peripheral) {
+      String peerId, Peripheral peripheral,) {
     return _connections.putIfAbsent(
       peerId,
       () => PeerConnection(peerId: peerId, peripheral: peripheral)
@@ -454,7 +453,7 @@ class ConnectionManager {
 
   /// Handle peripheral disconnection from the CentralManager.
   void _onConnectionStateChanged(
-      PeripheralConnectionStateChangedEventArgs args) {
+      PeripheralConnectionStateChangedEventArgs args,) {
     final peerId = args.peripheral.uuid.toString();
     if (args.state == ConnectionState.disconnected) {
       final conn = _connections[peerId];

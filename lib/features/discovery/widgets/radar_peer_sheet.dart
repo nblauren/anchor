@@ -1,17 +1,12 @@
+import 'package:anchor/core/theme/app_theme.dart';
+import 'package:anchor/features/discovery/bloc/discovery_state.dart';
 import 'package:flutter/material.dart';
-
-import '../../../core/theme/app_theme.dart';
-import '../bloc/discovery_state.dart';
 
 /// Bottom sheet listing discovered peers within a specific radar ring zone.
 /// Shown when the user taps a ring or dot cluster on the [RadarView].
 class RadarPeerSheet extends StatelessWidget {
   const RadarPeerSheet({
-    super.key,
-    required this.ringLabel,
-    required this.ringColor,
-    required this.peers,
-    required this.onPeerTap,
+    required this.ringLabel, required this.ringColor, required this.peers, required this.onPeerTap, super.key,
   });
 
   final String ringLabel;
@@ -66,7 +61,7 @@ class RadarPeerSheet extends StatelessWidget {
                       const Spacer(),
                       Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 4),
+                            horizontal: 10, vertical: 4,),
                         decoration: BoxDecoration(
                           color: ringColor.withAlpha(38),
                           borderRadius: BorderRadius.circular(12),
@@ -177,28 +172,28 @@ class _PeerListTile extends StatelessWidget {
                     children: [
                       if (peer.isRelayed) ...[
                         Icon(Icons.hub_outlined,
-                            size: 11, color: ringColor.withAlpha(180)),
+                            size: 11, color: ringColor.withAlpha(180),),
                         const SizedBox(width: 3),
                         Text(
                           '${peer.hopCount} hop${peer.hopCount == 1 ? '' : 's'}',
                           style: const TextStyle(
-                              fontSize: 11, color: AppTheme.textHint),
+                              fontSize: 11, color: AppTheme.textHint,),
                         ),
                       ] else if (peer.rssi != null) ...[
                         Icon(Icons.signal_cellular_alt,
-                            size: 11, color: ringColor.withAlpha(180)),
+                            size: 11, color: ringColor.withAlpha(180),),
                         const SizedBox(width: 3),
                         Text(
                           '${peer.rssi} dBm · ${peer.signalStrengthText ?? ''}',
                           style: const TextStyle(
-                              fontSize: 11, color: AppTheme.textHint),
+                              fontSize: 11, color: AppTheme.textHint,),
                         ),
                       ],
                       const Spacer(),
                       Text(
                         peer.lastSeenText,
                         style: const TextStyle(
-                            fontSize: 11, color: AppTheme.textHint),
+                            fontSize: 11, color: AppTheme.textHint,),
                       ),
                     ],
                   ),
