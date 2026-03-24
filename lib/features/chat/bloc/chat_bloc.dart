@@ -3,8 +3,8 @@ import 'dart:async';
 import 'package:anchor/core/constants/app_constants.dart';
 import 'package:anchor/core/utils/logger.dart';
 import 'package:anchor/data/local_database/database.dart';
-import 'package:anchor/data/repositories/chat_repository.dart';
-import 'package:anchor/data/repositories/peer_repository.dart';
+import 'package:anchor/data/repositories/chat_repository_interface.dart';
+import 'package:anchor/data/repositories/peer_repository_interface.dart';
 import 'package:anchor/features/chat/bloc/chat_event.dart';
 import 'package:anchor/features/chat/bloc/chat_state.dart';
 import 'package:anchor/services/ble/ble.dart' as ble;
@@ -19,8 +19,8 @@ import 'package:uuid/uuid.dart';
 
 class ChatBloc extends Bloc<ChatEvent, ChatState> {
   ChatBloc({
-    required ChatRepository chatRepository,
-    required PeerRepository peerRepository,
+    required ChatRepositoryInterface chatRepository,
+    required PeerRepositoryInterface peerRepository,
     required TransportManager transportManager,
     required NotificationService notificationService,
     required String ownUserId,
@@ -109,8 +109,8 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     // Note: pendingPhotoStream is now consumed by PhotoTransferBloc.
   }
 
-  final ChatRepository _chatRepository;
-  final PeerRepository _peerRepository;
+  final ChatRepositoryInterface _chatRepository;
+  final PeerRepositoryInterface _peerRepository;
   final TransportManager _transportManager;
   // ignore: unused_field
   final NotificationService _notificationService; // kept for DI compat
@@ -169,7 +169,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
 
       // Note: E2EE handshake is now initiated by ChatE2eeBloc via
       // InitiateE2eeHandshake event dispatched from the UI layer.
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Failed to open conversation', e, null, 'ChatBloc');
       emit(state.copyWith(
         status: ChatStatus.error,
@@ -214,7 +214,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         hasMoreMessages: messages.length >= AppConstants.messagePageSize,
         quotedMessages: newQuoted,
       ),);
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Failed to load messages', e, null, 'ChatBloc');
     }
   }
@@ -264,7 +264,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
 
       // Fire-and-forget: BLE send runs in background via MessageSendService
       _messageSendService.sendText(message, peerId, replyToId: replyToId);
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Failed to send message', e, null, 'ChatBloc');
       emit(state.copyWith(
         status: ChatStatus.error,
@@ -326,7 +326,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         message: message,
         peerId: peerId,
       );
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Failed to send photo', e, null, 'ChatBloc');
       emit(state.copyWith(
         status: ChatStatus.error,
@@ -364,7 +364,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         // Auto-mark as read since the chat is open.
         add(const MarkMessagesRead());
       }
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Failed to handle received message', e, null, 'ChatBloc');
     }
   }
@@ -426,7 +426,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
           if (!isClosed) add(const MarkMessagesRead());
         });
       }
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Failed to handle BLE message', e, null, 'ChatBloc');
     }
   }
@@ -474,7 +474,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       }).toList();
 
       emit(state.copyWith(messages: updatedMessages));
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Failed to update message status', e, null, 'ChatBloc');
     }
   }
@@ -524,7 +524,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       } else if (message.contentType == MessageContentType.photo) {
         _messageSendService.retryPhoto(message, peerId);
       }
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Failed to retry message', e, null, 'ChatBloc');
       add(MessageStatusUpdated(
         messageId: event.messageId,
@@ -543,7 +543,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       // Mark any newly arrived messages as read (e.g. received while chat is open)
       await _chatRepository.markConversationRead(state.currentConversation!.id);
       _sendReadReceipt(state.currentConversation!.peerId);
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Failed to mark messages as read', e, null, 'ChatBloc');
     }
   }
@@ -585,7 +585,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       await _peerRepository.blockPeer(state.currentConversation!.peerId);
       emit(state.copyWith(isBlocked: true));
       Logger.info('Peer blocked from chat', 'ChatBloc');
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Failed to block peer', e, null, 'ChatBloc');
       emit(state.copyWith(errorMessage: 'Failed to block user'));
     }
@@ -601,7 +601,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       await _peerRepository.unblockPeer(state.currentConversation!.peerId);
       emit(state.copyWith(isBlocked: false));
       Logger.info('Peer unblocked from chat', 'ChatBloc');
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Failed to unblock peer', e, null, 'ChatBloc');
       emit(state.copyWith(errorMessage: 'Failed to unblock user'));
     }

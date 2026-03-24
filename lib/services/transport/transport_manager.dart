@@ -202,7 +202,7 @@ class TransportManager {
           await _lanService.start();
           lanAvailable = true;
         }
-      } catch (e) {
+      } on Exception catch (e) {
         Logger.warning('TransportManager: LAN init failed: $e', 'Transport');
       }
 
@@ -278,7 +278,7 @@ class TransportManager {
           wifiAwareAvailable = true;
         }
       }
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.warning(
         'TransportManager: Wi-Fi Aware init failed: $e',
         'Transport',
@@ -336,7 +336,7 @@ class TransportManager {
     if (_lanSubscribed) {
       try {
         await _lanService.start();
-      } catch (e) {
+      } on Exception catch (e) {
         Logger.warning('TransportManager: LAN start failed: $e', 'Transport');
       }
     }
@@ -963,7 +963,7 @@ class TransportManager {
         );
       }
       return success;
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.warning('TransportManager: Wi-Fi Direct error: $e', 'Transport');
       return false;
     }
@@ -1643,7 +1643,7 @@ class TransportManager {
     // reverse-path (fff5), and buffered pending handshakes.
     try {
       await _bleService.sendHandshakeMessage(bleId, msg.step, msg.payload);
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error(
         'Handshake step ${msg.step} failed for $bleId via all transports',
         e, null, 'Transport',

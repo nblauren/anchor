@@ -82,7 +82,7 @@ class ImageService {
 
       if (image == null) return null;
       return File(image.path);
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Failed to pick image from gallery', e, null, 'Image');
       throw ImageError('Failed to pick image from gallery', e);
     }
@@ -101,7 +101,7 @@ class ImageService {
 
       if (image == null) return null;
       return File(image.path);
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Failed to pick image from camera', e, null, 'Image');
       throw ImageError('Failed to pick image from camera', e);
     }
@@ -145,7 +145,7 @@ class ImageService {
         thumbnailPath: 'thumbnails/${fileId}_thumb.jpg',
         thumbnailBytes: thumbnailBytes,
       );
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Failed to process image', e, null, 'Image');
       throw ImageError('Failed to process image', e);
     }
@@ -250,7 +250,7 @@ class ImageService {
         await File(resolvedThumb).delete();
         Logger.info('Deleted thumbnail: $resolvedThumb', 'Image');
       }
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Failed to delete image', e, null, 'Image');
       throw ImageError('Failed to delete image', e);
     }
@@ -264,7 +264,7 @@ class ImageService {
         await photoFile.delete();
         Logger.info('Deleted photo: $photoPath', 'Image');
       }
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Failed to delete image', e, null, 'Image');
       throw ImageError('Failed to delete image', e);
     }
@@ -280,7 +280,7 @@ class ImageService {
         return await file.readAsBytes();
       }
       return null;
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Failed to read thumbnail', e, null, 'Image');
       return null;
     }
@@ -330,7 +330,7 @@ class ImageService {
 
       // Return relative path so it survives sandbox UUID changes on reinstall
       return 'chat_images/$fileId.jpg';
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Failed to compress chat image', e, null, 'Image');
       throw ImageError('Failed to compress chat image', e);
     }
@@ -412,7 +412,7 @@ class ImageService {
       );
 
       return output.rawBytes;
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Failed to compress photo for BLE', e, null, 'Image');
       // Fallback: return original bytes
       return File(imagePath).readAsBytes();
@@ -440,7 +440,7 @@ class ImageService {
 
       // Return relative path so it survives sandbox UUID changes on reinstall
       return 'received_photos/$fileId.jpg';
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Failed to save received photo', e, null, 'Image');
       throw ImageError('Failed to save received photo', e);
     }
@@ -469,7 +469,7 @@ class ImageService {
       );
 
       return 'chat_thumbnails/$fileId.jpg';
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Failed to save chat thumbnail', e, null, 'Image');
       throw ImageError('Failed to save chat thumbnail', e);
     }
@@ -508,7 +508,7 @@ class ImageService {
           }
         }
       }
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Failed to cleanup orphaned images', e, null, 'Image');
     }
   }

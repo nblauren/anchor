@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:anchor/core/utils/logger.dart';
 import 'package:anchor/data/local_database/database.dart';
 import 'package:anchor/data/repositories/chat_repository.dart';
+import 'package:anchor/data/repositories/chat_repository_interface.dart';
 import 'package:anchor/services/chat_event_bus.dart';
 import 'package:anchor/services/message_send_service.dart';
 import 'package:anchor/services/notification_service.dart';
@@ -89,7 +90,7 @@ enum ConversationListStatus {
 class ConversationListBloc
     extends Bloc<ConversationListEvent, ConversationListState> {
   ConversationListBloc({
-    required ChatRepository chatRepository,
+    required ChatRepositoryInterface chatRepository,
     required NotificationService notificationService,
     required ChatEventBus chatEventBus,
     required MessageSendService messageSendService,
@@ -136,7 +137,7 @@ class ConversationListBloc
     }
   }
 
-  final ChatRepository _chatRepository;
+  final ChatRepositoryInterface _chatRepository;
   final NotificationService _notificationService;
 
   StreamSubscription<void>? _busSub;
@@ -160,7 +161,7 @@ class ConversationListBloc
       final totalUnread =
           conversations.fold(0, (sum, c) => sum + c.unreadCount);
       await _notificationService.setBadgeCount(totalUnread);
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Failed to load conversations', e, null, 'ConversationListBloc');
       emit(state.copyWith(
         status: ConversationListStatus.error,
@@ -181,7 +182,7 @@ class ConversationListBloc
           .toList();
 
       emit(state.copyWith(conversations: updatedConversations));
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Failed to delete conversation', e, null, 'ConversationListBloc');
       emit(state.copyWith(
         status: ConversationListStatus.error,

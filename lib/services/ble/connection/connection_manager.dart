@@ -282,7 +282,7 @@ class ConnectionManager {
       final conn = await _connectImpl(peerId, peripheral);
       if (!completer.isCompleted) completer.complete(conn);
       return conn;
-    } catch (e) {
+    } on Exception {
       if (!completer.isCompleted) completer.complete(null);
       return null;
     } finally {
@@ -307,7 +307,7 @@ class ConnectionManager {
       if (Platform.isAndroid) {
         try {
           await _central.requestMTU(peripheral, mtu: 517);
-        } catch (e) {
+        } on Exception {
           Logger.warning(
               'ConnectionManager: MTU request failed for $peerId', 'BLE',);
         }
@@ -320,7 +320,7 @@ class ConnectionManager {
           peripheral,
           type: GATTCharacteristicWriteType.withResponse,
         );
-      } catch (e) {
+      } on Exception {
         Logger.warning(
             'ConnectionManager: getMaximumWriteLength failed for $peerId',
             'BLE',);
@@ -379,7 +379,7 @@ class ConnectionManager {
       );
 
       return conn;
-    } catch (e) {
+    } on Exception catch (e) {
       // Track consecutive failures
       final existing = _connections[peerId];
       final failures = existing?.recordFailure() ??

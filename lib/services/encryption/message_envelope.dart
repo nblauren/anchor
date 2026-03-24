@@ -124,7 +124,7 @@ Map<String, dynamic>? tryParseEncryptedContent(String content) {
     if (parsed['v'] == 1 && parsed['n'] != null && parsed['c'] != null) {
       return parsed;
     }
-  } catch (_) {}
+  } on Exception catch (_) {}
   return null;
 }
 

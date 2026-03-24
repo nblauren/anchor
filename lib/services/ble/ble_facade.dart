@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:anchor/core/constants/message_keys.dart';
 import 'package:anchor/core/utils/logger.dart';
 import 'package:anchor/services/ble/binary_message_codec.dart';
 import 'package:anchor/services/ble/ble_config.dart';
@@ -230,7 +231,7 @@ class BleFacade implements BleServiceInterface {
       _onStateChanged(_central.state);
 
       Logger.info('BleService: Initialized successfully', 'BLE');
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('BleService: Initialization failed', e, null, 'BLE');
       _setStatus(BleStatus.error);
       rethrow;
@@ -247,7 +248,7 @@ class BleFacade implements BleServiceInterface {
       await _gattServer.setup(force: true);
       await startScanning();
       _setStatus(BleStatus.ready);
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('BleService: Start failed', e, null, 'BLE');
       rethrow;
     }
@@ -373,7 +374,7 @@ class BleFacade implements BleServiceInterface {
       final json = jsonDecode(jsonStr) as Map<String, dynamic>;
 
       final fromPeerId = _resolveSenderPeerId(json, centralUuid);
-      final type = json['type'] as String? ?? 'message';
+      final type = json[MessageKeys.type] as String? ?? MessageTypes.message;
 
       Logger.info(
         'BleService: [RECV] type=$type from '
@@ -388,7 +389,7 @@ class BleFacade implements BleServiceInterface {
       // Critical on Android where GATT reads are less reliable: the sender_id
       // in the message payload gives us the userId before profile reading does.
       if (fromPeerId != centralId && fromPeerId.isNotEmpty) {
-        final senderName = json['sender_name'] as String?;
+        final senderName = json[MessageKeys.senderName] as String?;
         _registerCentralAsPeer(centralId, fromPeerId, senderName);
       }
 
@@ -419,36 +420,36 @@ class BleFacade implements BleServiceInterface {
         _scanner.triggerImmediateScan();
       }
 
-      if (type == 'profile_request') {
+      if (type == MessageTypes.profileRequest) {
         _handleProfileRequest(centralId);
-      } else if (type == 'profile_data') {
+      } else if (type == MessageTypes.profileData) {
         _handleProfileData(json, centralId);
-      } else if (type == 'photo_start') {
+      } else if (type == MessageTypes.photoStart) {
         _photoTransfer.handlePhotoStart(json, fromPeerId, centralId: centralId);
-      } else if (type == 'photo_chunk') {
+      } else if (type == MessageTypes.photoChunk) {
         _photoTransfer.handleReceivedPhotoChunk(json, fromPeerId);
-      } else if (type == 'photo_preview') {
+      } else if (type == MessageTypes.photoPreview) {
         _photoTransfer.handlePhotoPreviewStart(json, fromPeerId, centralId: centralId);
-      } else if (type == 'photo_request') {
+      } else if (type == MessageTypes.photoRequest) {
         _photoTransfer.handlePhotoRequest(json, fromPeerId);
-      } else if (type == 'peer_announce') {
+      } else if (type == MessageTypes.peerAnnounce) {
         _meshRelay.handlePeerAnnounce(json, fromPeerId);
-      } else if (type == 'neighbor_list') {
+      } else if (type == MessageTypes.neighborList) {
         _meshRelay.handleNeighborList(json);
         // Reverse profile exchange: neighbor_list is the "I'm an Anchor peer"
         // signal sent after connection is stable. Safe to request profile here
         // — the handshake hasn't started yet or is already complete.
         _requestProfileFromCentralIfNeeded(centralId);
-      } else if (type == 'noise_hs') {
+      } else if (type == MessageTypes.noiseHandshake) {
         _handleNoiseHandshake(json, fromPeerId);
-      } else if (type == 'drop_anchor') {
+      } else if (type == MessageTypes.dropAnchor) {
         _handleDropAnchor(fromPeerId);
-      } else if (type == 'reaction') {
+      } else if (type == MessageTypes.reaction) {
         _handleReaction(json, fromPeerId);
       } else {
         _handleReceivedMessage(json, fromPeerId);
       }
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('BleService: Write receive failed', e, null, 'BLE');
     }
   }
@@ -564,7 +565,7 @@ class BleFacade implements BleServiceInterface {
           } else {
             _meshRelay.handleNeighborList(json);
           }
-        } catch (e) {
+        } on Exception {
           Logger.warning('BLE: Failed to parse mesh payload from binary packet', 'BLE');
         }
       case PacketType.gossipSync:
@@ -641,13 +642,13 @@ class BleFacade implements BleServiceInterface {
                 fromPeerId: resolvedPeerId,
                 messageId: messageId,
                 type: chat.messageType,
-                content: inner['content'] as String? ?? '',
+                content: inner[MessageKeys.content] as String? ?? '',
                 timestamp: packet.timestamp,
-                replyToId: inner['reply_to_id'] as String?,
+                replyToId: inner[MessageKeys.replyToId] as String?,
                 isEncrypted: true,
               );
               _messageReceivedController.add(message);
-            } catch (e) {
+            } on Exception catch (e) {
               Logger.error('E2EE binary inner envelope parse failed', e, null, 'E2EE');
             }
           });
@@ -724,8 +725,8 @@ class BleFacade implements BleServiceInterface {
 
     // Convert back to the Map format GossipSyncService expects
     final payload = {
-      'gcs': base64Encode(gossipSync.gcsBytes),
-      'n': gossipSync.messageCount,
+      MessageKeys.gcs: base64Encode(gossipSync.gcsBytes),
+      MessageKeys.gossipCount: gossipSync.messageCount,
     };
     gossip.handleGossipSync(fromPeerId, payload);
 
@@ -760,7 +761,7 @@ class BleFacade implements BleServiceInterface {
   /// Falls back to the Central UUID only if sender_id is missing (rare edge
   /// case for very old clients).
   String _resolveSenderPeerId(Map<String, dynamic> json, UUID centralUuid) {
-    final senderId = json['sender_id'] as String?;
+    final senderId = json[MessageKeys.senderId] as String?;
     if (senderId != null && senderId.isNotEmpty) {
       return senderId;
     }
@@ -768,7 +769,7 @@ class BleFacade implements BleServiceInterface {
   }
 
   void _handleReceivedMessage(Map<String, dynamic> json, String fromPeerId) {
-    final messageId = json['message_id'] as String? ?? '';
+    final messageId = json[MessageKeys.messageId] as String? ?? '';
 
     // Deduplicate — BLE transport can retransmit the same write.
     // Uses a capacity-bounded LRU cache (no timers, no memory leaks).
@@ -780,7 +781,7 @@ class BleFacade implements BleServiceInterface {
     }
 
     // Mesh routing: check if this message is addressed to us
-    final destinationId = json['destination_id'] as String?;
+    final destinationId = json[MessageKeys.destinationId] as String?;
     final ownUserId = _gattServer.ownUserId;
     final isForUs = destinationId == null ||
         destinationId.isEmpty ||
@@ -793,7 +794,7 @@ class BleFacade implements BleServiceInterface {
       final encPayload = enc?.parseEncryptedFields(json);
 
       String content;
-      final replyToId = json['reply_to_id'] as String?;
+      final replyToId = json[MessageKeys.replyToId] as String?;
 
       if (encPayload != null && enc != null) {
         // Decrypt the inner envelope asynchronously, then emit.
@@ -809,10 +810,10 @@ class BleFacade implements BleServiceInterface {
           try {
             final inner =
                 jsonDecode(utf8.decode(plaintextBytes)) as Map<String, dynamic>;
-            final decryptedContent = inner['content'] as String? ?? '';
-            final decryptedReplyTo = inner['reply_to_id'] as String?;
+            final decryptedContent = inner[MessageKeys.content] as String? ?? '';
+            final decryptedReplyTo = inner[MessageKeys.replyToId] as String?;
             final messageType =
-                MessageType.values[json['message_type'] as int? ?? 0];
+                MessageType.values[json[MessageKeys.messageType] as int? ?? 0];
             final message = ReceivedMessage(
               fromPeerId: fromPeerId,
               messageId: messageId,
@@ -828,7 +829,7 @@ class BleFacade implements BleServiceInterface {
                   '${fromPeerId.substring(0, min(8, fromPeerId.length))} 🔒',
               'E2EE',
             );
-          } catch (e) {
+          } on Exception catch (e) {
             Logger.error('E2EE inner envelope parse failed', e, null, 'E2EE');
           }
         });
@@ -836,11 +837,11 @@ class BleFacade implements BleServiceInterface {
       }
 
       // Plaintext path (no encryption or old client)
-      content = json['content'] as String? ?? '';
+      content = json[MessageKeys.content] as String? ?? '';
       final message = ReceivedMessage(
         fromPeerId: fromPeerId,
         messageId: messageId,
-        type: MessageType.values[json['message_type'] as int? ?? 0],
+        type: MessageType.values[json[MessageKeys.messageType] as int? ?? 0],
         content: content,
         timestamp: DateTime.now(),
         replyToId: replyToId,
@@ -864,8 +865,8 @@ class BleFacade implements BleServiceInterface {
   /// Wire JSON:
   ///   { "type": "noise_hs", "step": 1|2|3, "payload": "<base64>", "sender_id": "..." }
   void _handleNoiseHandshake(Map<String, dynamic> json, String fromPeerId) {
-    final step = json['step'] as int?;
-    final payloadB64 = json['payload'] as String?;
+    final step = json[MessageKeys.step] as int?;
+    final payloadB64 = json[MessageKeys.payload] as String?;
     if (step == null || payloadB64 == null) {
       Logger.warning('Malformed noise_hs message from $fromPeerId', 'E2EE');
       return;
@@ -1243,7 +1244,7 @@ class BleFacade implements BleServiceInterface {
 
       // iOS: permissions are requested implicitly by the BLE managers
       return true;
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('BleService: Permission request failed', e, null, 'BLE');
       return false;
     }
@@ -1407,13 +1408,13 @@ class BleFacade implements BleServiceInterface {
 
     _refreshPeerTimeout(peerId);
 
-    final userId = json['userId'] as String?;
+    final userId = json[MessageKeys.userId] as String?;
 
     // Extract E2EE public keys now; store AFTER _emitPeer so that
     // TransportManager._migrateIfNeeded (triggered by _emitPeer) sets
     // _bleIdForCanonical before peerKeyStoredStream fires.
-    final peerPublicKeyHex = json['pk'] as String?;
-    final peerEd25519KeyHex = json['spk'] as String?;
+    final peerPublicKeyHex = json[MessageKeys.publicKey] as String?;
+    final peerEd25519KeyHex = json[MessageKeys.signingPublicKey] as String?;
 
     // If this peer was previously tracked under a different BLE UUID
     // (e.g. MAC rotation), emit PeerIdChanged so consumers can update
@@ -1440,12 +1441,12 @@ class BleFacade implements BleServiceInterface {
     }
 
     // Update the existing peer entry with profile data
-    final photoCount = json['photo_count'] as int?;
-    final position = json['pos'] as int?;
-    final interests = json['int'] as String?;
-    final newName = json['name'] as String? ?? existingPeer.name;
-    final newAge = json['age'] as int? ?? existingPeer.age;
-    final newBio = json['bio'] as String?;
+    final photoCount = json[MessageKeys.photoCount] as int?;
+    final position = json[MessageKeys.position] as int?;
+    final interests = json[MessageKeys.interests] as String?;
+    final newName = json[MessageKeys.name] as String? ?? existingPeer.name;
+    final newAge = json[MessageKeys.age] as int? ?? existingPeer.age;
+    final newBio = json[MessageKeys.bio] as String?;
     final newPosition = position ?? existingPeer.position;
     final newInterests = interests ?? existingPeer.interests;
     final newPhotoCount = photoCount ?? existingPeer.fullPhotoCount;
@@ -1497,7 +1498,7 @@ class BleFacade implements BleServiceInterface {
 
     // Record the profile version from the GATT read so the scanner can
     // skip future reads when the advertised version hasn't changed.
-    final profileVersion = json['pv'] as int?;
+    final profileVersion = json[MessageKeys.profileVersion] as int?;
     if (profileVersion != null) {
       _scanner.recordProfileVersion(peerId, profileVersion);
     }
@@ -1641,7 +1642,7 @@ class BleFacade implements BleServiceInterface {
 
       final jsonStr = utf8.decode(data);
       final json = jsonDecode(jsonStr) as Map<String, dynamic>;
-      final type = json['type'] as String? ?? 'message';
+      final type = json[MessageKeys.type] as String? ?? MessageTypes.message;
 
       _refreshPeerTimeout(peerId);
 
@@ -1654,32 +1655,32 @@ class BleFacade implements BleServiceInterface {
       // Route photo-transfer messages to the photo handler — same dispatch
       // as _onMessageWriteReceived. Without these, photo_request/preview/etc.
       // sent via the bidirectional path would be silently dropped.
-      if (type == 'photo_start') {
+      if (type == MessageTypes.photoStart) {
         _photoTransfer.handlePhotoStart(json, peerId);
-      } else if (type == 'photo_chunk') {
+      } else if (type == MessageTypes.photoChunk) {
         _photoTransfer.handleReceivedPhotoChunk(json, peerId);
-      } else if (type == 'photo_preview') {
+      } else if (type == MessageTypes.photoPreview) {
         _photoTransfer.handlePhotoPreviewStart(json, peerId);
-      } else if (type == 'photo_request') {
+      } else if (type == MessageTypes.photoRequest) {
         _photoTransfer.handlePhotoRequest(json, peerId);
-      } else if (type == 'noise_hs') {
+      } else if (type == MessageTypes.noiseHandshake) {
         _handleNoiseHandshake(json, peerId);
-      } else if (type == 'drop_anchor') {
+      } else if (type == MessageTypes.dropAnchor) {
         _handleDropAnchor(peerId);
-      } else if (type == 'reaction') {
+      } else if (type == MessageTypes.reaction) {
         _handleReaction(json, peerId);
-      } else if (type == 'peer_announce') {
+      } else if (type == MessageTypes.peerAnnounce) {
         _meshRelay.handlePeerAnnounce(json, peerId);
-      } else if (type == 'neighbor_list') {
+      } else if (type == MessageTypes.neighborList) {
         _meshRelay.handleNeighborList(json);
-      } else if (type == 'profile_request') {
+      } else if (type == MessageTypes.profileRequest) {
         _handleProfileRequest(peerId);
-      } else if (type == 'profile_data') {
+      } else if (type == MessageTypes.profileData) {
         _handleProfileData(json, peerId);
       } else {
         _handleReceivedMessage(json, peerId);
       }
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error(
           'BleService: fff3 notification processing failed', e, null, 'BLE',);
     }
@@ -1708,7 +1709,7 @@ class BleFacade implements BleServiceInterface {
 
       final jsonStr = utf8.decode(data);
       final json = jsonDecode(jsonStr) as Map<String, dynamic>;
-      final type = json['type'] as String? ?? 'message';
+      final type = json[MessageKeys.type] as String? ?? MessageTypes.message;
 
       _refreshPeerTimeout(peerId);
 
@@ -1719,24 +1720,24 @@ class BleFacade implements BleServiceInterface {
       );
 
       // Route photo-transfer messages to the photo handler — same as fff3 path.
-      if (type == 'photo_start') {
+      if (type == MessageTypes.photoStart) {
         _photoTransfer.handlePhotoStart(json, peerId);
-      } else if (type == 'photo_chunk') {
+      } else if (type == MessageTypes.photoChunk) {
         _photoTransfer.handleReceivedPhotoChunk(json, peerId);
-      } else if (type == 'photo_preview') {
+      } else if (type == MessageTypes.photoPreview) {
         _photoTransfer.handlePhotoPreviewStart(json, peerId);
-      } else if (type == 'photo_request') {
+      } else if (type == MessageTypes.photoRequest) {
         _photoTransfer.handlePhotoRequest(json, peerId);
-      } else if (type == 'noise_hs') {
+      } else if (type == MessageTypes.noiseHandshake) {
         _handleNoiseHandshake(json, peerId);
-      } else if (type == 'drop_anchor') {
+      } else if (type == MessageTypes.dropAnchor) {
         _handleDropAnchor(peerId);
-      } else if (type == 'reaction') {
+      } else if (type == MessageTypes.reaction) {
         _handleReaction(json, peerId);
       } else {
         _handleReceivedMessage(json, peerId);
       }
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error(
           'BleService: Reverse-path notification failed', e, null, 'BLE',);
     }
@@ -1811,8 +1812,8 @@ class BleFacade implements BleServiceInterface {
     _profileRequestedFromCentral.add(centralId);
 
     final requestJson = jsonEncode({
-      'type': 'profile_request',
-      'sender_id': _gattServer.ownUserId,
+      MessageKeys.type: MessageTypes.profileRequest,
+      MessageKeys.senderId: _gattServer.ownUserId,
     });
 
     Logger.info(
@@ -1839,17 +1840,17 @@ class BleFacade implements BleServiceInterface {
     );
 
     final responseJson = jsonEncode({
-      'type': 'profile_data',
-      'sender_id': payload.userId,
-      'userId': payload.userId,
-      'name': payload.name,
-      'age': payload.age,
-      'bio': payload.bio,
-      'pos': payload.position,
-      'int': payload.interests,
-      'pk': payload.publicKeyHex,
-      'spk': payload.signingPublicKeyHex,
-      'pv': _gattServer.profileVersion,
+      MessageKeys.type: MessageTypes.profileData,
+      MessageKeys.senderId: payload.userId,
+      MessageKeys.userId: payload.userId,
+      MessageKeys.name: payload.name,
+      MessageKeys.age: payload.age,
+      MessageKeys.bio: payload.bio,
+      MessageKeys.position: payload.position,
+      MessageKeys.interests: payload.interests,
+      MessageKeys.publicKey: payload.publicKeyHex,
+      MessageKeys.signingPublicKey: payload.signingPublicKeyHex,
+      MessageKeys.profileVersion: _gattServer.profileVersion,
     });
 
     _gattServer.sendToCentralViaFff3(
@@ -1860,8 +1861,8 @@ class BleFacade implements BleServiceInterface {
 
   /// Handle an incoming profile_data: process it like a GATT profile read.
   void _handleProfileData(Map<String, dynamic> json, String centralId) {
-    final userId = json['userId'] as String?;
-    final name = json['name'] as String?;
+    final userId = json[MessageKeys.userId] as String?;
+    final name = json[MessageKeys.name] as String?;
 
     Logger.info(
       'BleService: Received profile_data from '
@@ -2065,7 +2066,7 @@ class BleFacade implements BleServiceInterface {
         _connectionManager.disconnect(peerId);
       }
       return success;
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('BleService: Message send failed', e, null, 'BLE');
       // Disconnect so it retries with a fresh connection next time
       _connectionManager.disconnect(peerId);
@@ -2143,7 +2144,7 @@ class BleFacade implements BleServiceInterface {
         Logger.info('BleService: Anchor drop sent successfully', 'BLE');
       }
       return success;
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('BleService: Anchor drop send failed', e, null, 'BLE');
       return false;
     }
@@ -2220,7 +2221,7 @@ class BleFacade implements BleServiceInterface {
         Logger.info('BleService: Reaction sent successfully', 'BLE');
       }
       return success;
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('BleService: Reaction send failed', e, null, 'BLE');
       return false;
     }
@@ -2248,7 +2249,7 @@ class BleFacade implements BleServiceInterface {
         data: data,
         priority: WritePriority.meshRelay,
       );
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('BleService: sendRawBytes failed', e, null, 'BLE');
       return false;
     }
@@ -2259,10 +2260,10 @@ class BleFacade implements BleServiceInterface {
       _reactionReceivedController.stream;
 
   void _handleReaction(Map<String, dynamic> json, String fromPeerId) {
-    final messageId = json['message_id'] as String?;
-    final emoji = json['emoji'] as String?;
-    final action = json['action'] as String?;
-    final timestampStr = json['timestamp'] as String?;
+    final messageId = json[MessageKeys.messageId] as String?;
+    final emoji = json[MessageKeys.emoji] as String?;
+    final action = json[MessageKeys.action] as String?;
+    final timestampStr = json[MessageKeys.timestamp] as String?;
 
     if (messageId == null || emoji == null || action == null) {
       Logger.warning('BleService: Malformed reaction payload', 'BLE');
@@ -2328,8 +2329,8 @@ class BleFacade implements BleServiceInterface {
     if (enc != null && enc.hasSession(peerId)) {
       // Build the inner plaintext envelope (the part we want to keep secret)
       final innerMap = <String, dynamic>{
-        'content': payload.content,
-        if (payload.replyToId != null) 'reply_to_id': payload.replyToId,
+        MessageKeys.content: payload.content,
+        if (payload.replyToId != null) MessageKeys.replyToId: payload.replyToId,
       };
       final innerBytes = Uint8List.fromList(utf8.encode(jsonEncode(innerMap)));
 
@@ -2426,10 +2427,10 @@ class BleFacade implements BleServiceInterface {
     );
 
     final requestPayload = Uint8List.fromList(utf8.encode(jsonEncode({
-      'type': 'photo_request',
-      'sender_id': _gattServer.ownUserId,
-      'message_id': messageId,
-      'photo_id': photoId,
+      MessageKeys.type: MessageTypes.photoRequest,
+      MessageKeys.senderId: _gattServer.ownUserId,
+      MessageKeys.messageId: messageId,
+      MessageKeys.photoId: photoId,
     }),),);
 
     // On iOS, Central UUID ≠ Peripheral UUID. peerId is the Peripheral UUID

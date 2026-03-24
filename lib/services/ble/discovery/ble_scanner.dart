@@ -124,7 +124,7 @@ class BleScanner {
       await _central.stopDiscovery();
       await _discoveredSubscription?.cancel();
       _discoveredSubscription = null;
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('BleScanner: Scan stop failed', e, null, 'BLE');
     }
   }
@@ -148,7 +148,7 @@ class BleScanner {
     _scanRestartTimer?.cancel();
     try {
       _central.stopDiscovery().catchError((_) {});
-    } catch (_) {}
+    } on Exception catch (_) {}
     _runScanCycle();
   }
 
@@ -230,7 +230,7 @@ class BleScanner {
         if (!_isScanning) return;
         try {
           await _central.stopDiscovery();
-        } catch (_) {}
+        } on Exception catch (_) {}
 
         if (_isScanning && offTime > Duration.zero) {
           _scanRestartTimer = Timer(offTime, _runScanCycle);
@@ -239,7 +239,7 @@ class BleScanner {
           unawaited(_runScanCycle());
         }
       });
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('BleScanner: Scan cycle failed', e, null, 'BLE');
 
       if (_isScanning) {

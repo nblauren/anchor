@@ -1,5 +1,6 @@
 import 'package:anchor/core/constants/app_constants.dart';
 import 'package:anchor/data/local_database/database.dart';
+import 'package:anchor/data/repositories/chat_repository_interface.dart';
 import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
 
@@ -7,7 +8,7 @@ import 'package:uuid/uuid.dart';
 ///
 /// All [peerId] parameters refer to the peer's stable app-level userId
 /// (canonical UUID). Transport-specific IDs are resolved upstream.
-class ChatRepository {
+class ChatRepository implements ChatRepositoryInterface {
   ChatRepository(this._db);
 
   final AppDatabase _db;
@@ -16,6 +17,7 @@ class ChatRepository {
   // ==================== Conversations ====================
 
   /// Get all conversations with peer details
+  @override
   Future<List<ConversationWithPeer>> getAllConversations() async {
     final query = _db.select(_db.conversations).join([
       leftOuterJoin(
@@ -48,12 +50,14 @@ class ChatRepository {
   }
 
   /// Get a conversation by ID
+  @override
   Future<ConversationEntry?> getConversationById(String id) async {
     return (_db.select(_db.conversations)..where((t) => t.id.equals(id)))
         .getSingleOrNull();
   }
 
   /// Get or create a conversation with a peer
+  @override
   Future<ConversationEntry> getOrCreateConversation(String peerId) async {
     // Try to find existing
     final existing = await (_db.select(_db.conversations)
@@ -107,12 +111,14 @@ class ChatRepository {
   }
 
   /// Update conversation's updated_at timestamp
+  @override
   Future<void> touchConversation(String id) async {
     await (_db.update(_db.conversations)..where((t) => t.id.equals(id)))
         .write(ConversationsCompanion(updatedAt: Value(DateTime.now())));
   }
 
   /// Delete a conversation and all its messages
+  @override
   Future<void> deleteConversation(String id) async {
     await _db.transaction(() async {
       // Delete messages first
@@ -125,6 +131,7 @@ class ChatRepository {
   }
 
   /// Watch all conversations
+  @override
   Stream<List<ConversationEntry>> watchConversations() {
     return (_db.select(_db.conversations)
           ..orderBy([(t) => OrderingTerm.desc(t.updatedAt)]))
@@ -134,6 +141,7 @@ class ChatRepository {
   // ==================== Messages ====================
 
   /// Get messages for a conversation
+  @override
   Future<List<MessageEntry>> getMessages(
     String conversationId, {
     int limit = 50,
@@ -147,6 +155,7 @@ class ChatRepository {
   }
 
   /// Get a single message by its ID (used for reply quote lookup).
+  @override
   Future<MessageEntry?> getMessageById(String messageId) async {
     return (_db.select(_db.messages)
           ..where((t) => t.id.equals(messageId)))
@@ -154,6 +163,7 @@ class ChatRepository {
   }
 
   /// Get the last message in a conversation
+  @override
   Future<MessageEntry?> getLastMessage(String conversationId) async {
     return (_db.select(_db.messages)
           ..where((t) => t.conversationId.equals(conversationId))
@@ -163,6 +173,7 @@ class ChatRepository {
   }
 
   /// Send a text message
+  @override
   Future<MessageEntry> sendTextMessage({
     required String conversationId,
     required String senderId,
@@ -202,6 +213,7 @@ class ChatRepository {
   }
 
   /// Send a photo message
+  @override
   Future<MessageEntry> sendPhotoMessage({
     required String conversationId,
     required String senderId,
@@ -245,6 +257,7 @@ class ChatRepository {
   ///
   /// Returns null if the message was a duplicate (already in DB), allowing
   /// callers to skip UI updates for re-delivered messages.
+  @override
   Future<MessageEntry?> receiveMessage({
     required String conversationId,
     required String senderId,
@@ -305,6 +318,7 @@ class ChatRepository {
   /// [thumbnailPath] is the relative path to the saved thumbnail file.
   ///
   /// Returns null if the message was a duplicate (already in DB).
+  @override
   Future<MessageEntry?> receivePhotoPreview({
     required String conversationId,
     required String senderId,
@@ -357,6 +371,7 @@ class ChatRepository {
   ///
   /// Updates the content type to [photo], replaces the thumbnail path with
   /// the full-resolution photo path, and clears the metadata JSON.
+  @override
   Future<MessageEntry?> upgradePreviewToPhoto({
     required String messageId,
     required String fullPhotoPath,
@@ -374,12 +389,14 @@ class ChatRepository {
   }
 
   /// Update message status
+  @override
   Future<void> updateMessageStatus(String id, MessageStatus status) async {
     await (_db.update(_db.messages)..where((t) => t.id.equals(id)))
         .write(MessagesCompanion(status: Value(status)));
   }
 
   /// Mark all pending messages as failed
+  @override
   Future<void> markPendingAsFailed(String conversationId) async {
     await (_db.update(_db.messages)
           ..where((t) =>
@@ -389,11 +406,13 @@ class ChatRepository {
   }
 
   /// Delete a message
+  @override
   Future<void> deleteMessage(String id) async {
     await (_db.delete(_db.messages)..where((t) => t.id.equals(id))).go();
   }
 
   /// Get unread count for a conversation (messages from peer, not yet read)
+  @override
   Future<int> getUnreadCount(String conversationId,
       {String? localUserId,}) async {
     final count = _db.messages.id.count();
@@ -409,6 +428,7 @@ class ChatRepository {
   }
 
   /// Mark all delivered messages in a conversation as read
+  @override
   Future<void> markConversationRead(String conversationId) async {
     await (_db.update(_db.messages)
           ..where((t) => t.conversationId.equals(conversationId))
@@ -423,6 +443,7 @@ class ChatRepository {
   /// [read] after the receiver has actually downloaded the full photo (handled
   /// in ChatBloc._sendFullPhoto). A read receipt fires when the receiver opens
   /// the chat, which precedes any photo download request.
+  @override
   Future<void> markSentMessagesRead(
     String conversationId,
     String ownUserId,
@@ -437,6 +458,7 @@ class ChatRepository {
   }
 
   /// Watch messages for a conversation
+  @override
   Stream<List<MessageEntry>> watchMessages(String conversationId) {
     return (_db.select(_db.messages)
           ..where((t) => t.conversationId.equals(conversationId))
@@ -445,6 +467,7 @@ class ChatRepository {
   }
 
   /// Get message count for a conversation
+  @override
   Future<int> getMessageCount(String conversationId) async {
     final count = _db.messages.id.count();
     final query = _db.selectOnly(_db.messages)
@@ -455,11 +478,13 @@ class ChatRepository {
   }
 
   /// Retry sending a failed message
+  @override
   Future<void> retryMessage(String id) async {
     await updateMessageStatus(id, MessageStatus.pending);
   }
 
   /// Get conversation by peer ID
+  @override
   Future<ConversationEntry?> getConversationByPeerId(String peerId) async {
     return (_db.select(_db.conversations)
           ..where((t) => t.peerId.equals(peerId)))
@@ -467,6 +492,7 @@ class ChatRepository {
   }
 
   /// Add a message to a conversation (for received messages)
+  @override
   Future<MessageEntry?> addMessage({
     required String conversationId,
     required String senderId,
@@ -485,11 +511,13 @@ class ChatRepository {
   }
 
   /// Get conversations with peer details (alias for getAllConversations)
+  @override
   Future<List<ConversationWithPeer>> getConversationsWithPeers() async {
     return getAllConversations();
   }
 
   /// Clear all conversations and messages
+  @override
   Future<void> clearAllConversations() async {
     await _db.transaction(() async {
       await _db.delete(_db.messages).go();
@@ -497,6 +525,7 @@ class ChatRepository {
     });
   }
 
+  @override
   Future<int> getUnreadMessageCount(String senderId) {
     final count = _db.messages.id.count();
     final query = _db.selectOnly(_db.messages)
@@ -508,11 +537,13 @@ class ChatRepository {
 
   /// Persist the stable [photoId] into a sent photo message's [textContent]
   /// so it survives session restarts and can be recovered in [findMessageByPhotoId].
+  @override
   Future<void> updateMessagePhotoPath(String messageId, String photoPath) async {
     await (_db.update(_db.messages)..where((t) => t.id.equals(messageId)))
         .write(MessagesCompanion(photoPath: Value(photoPath)));
   }
 
+  @override
   Future<void> updateMessagePhotoId(String messageId, String photoId) async {
     await (_db.update(_db.messages)..where((t) => t.id.equals(messageId)))
         .write(MessagesCompanion(textContent: Value('{"photo_id":"$photoId"}')));
@@ -521,6 +552,7 @@ class ChatRepository {
   /// Find a [photoPreview] message whose JSON textContent contains the given
   /// [photoId]. Used by [PhotoTransferBloc] to match incoming full photos to
   /// their preview bubble.
+  @override
   Future<MessageEntry?> findPreviewByPhotoId(String photoId) async {
     return (_db.select(_db.messages)
           ..where((t) =>
@@ -532,6 +564,7 @@ class ChatRepository {
 
   /// Find a sent photo message by its stored [photoId] (set via [updateMessagePhotoId]).
   /// Used to recover [PendingOutgoingPhoto] data after session restarts.
+  @override
   Future<MessageEntry?> findMessageByPhotoId(String photoId) async {
     // Try exact content type first (photo messages on the sender side).
     final result = await (_db.select(_db.messages)
@@ -553,6 +586,7 @@ class ChatRepository {
   /// Find the most recent outgoing photo message for a given peer that has a
   /// valid [photoPath]. Used as a last-resort fallback when [findMessageByPhotoId]
   /// fails (e.g. textContent doesn't contain the photoId).
+  @override
   Future<MessageEntry?> findRecentOutgoingPhoto({
     required String ownUserId,
     required String peerId,
@@ -581,6 +615,7 @@ class ChatRepository {
   /// Returns pending or failed outgoing text messages for a conversation that
   /// are still within the retry window and haven't exceeded the retry cap.
   /// Used by [StoreAndForwardService] to retry delivery on peer rediscovery.
+  @override
   Future<List<MessageEntry>> getPendingOutgoingMessages({
     required String ownUserId,
     required String conversationId,
@@ -606,6 +641,7 @@ class ChatRepository {
   }
 
   /// Updates retry tracking columns without touching message status.
+  @override
   Future<void> updateRetryMetadata(
     String messageId, {
     required int retryCount,
@@ -620,6 +656,7 @@ class ChatRepository {
 
   /// Marks all pending/failed outgoing messages older than [window] as failed.
   /// Called at startup to clear stale state from previous sessions.
+  @override
   Future<void> expireStaleOutgoingMessages(
     String ownUserId,
     Duration window,
@@ -639,6 +676,7 @@ class ChatRepository {
 
   /// Add an emoji reaction on a message, replacing any existing reaction from
   /// the same sender (only one reaction per user per message is allowed).
+  @override
   Future<void> addReaction({
     required String messageId,
     required String senderId,
@@ -673,6 +711,7 @@ class ChatRepository {
   }
 
   /// Remove an emoji reaction from a message.
+  @override
   Future<void> removeReaction({
     required String messageId,
     required String senderId,
@@ -687,6 +726,7 @@ class ChatRepository {
   }
 
   /// Return all reactions for messages in a conversation, grouped by messageId.
+  @override
   Future<Map<String, List<ReactionEntry>>> getReactionsForConversation(
     String conversationId,
   ) async {

@@ -1,15 +1,17 @@
 import 'package:anchor/data/local_database/database.dart';
+import 'package:anchor/data/repositories/anchor_drop_repository_interface.dart';
 import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
 
 /// Repository for tracking sent and received ⚓ anchor drops
-class AnchorDropRepository {
+class AnchorDropRepository implements AnchorDropRepositoryInterface {
   AnchorDropRepository(this._db);
 
   final AppDatabase _db;
   static const _uuid = Uuid();
 
   /// Record a sent or received anchor drop
+  @override
   Future<void> recordDrop({
     required String peerId,
     required String peerName,
@@ -29,6 +31,7 @@ class AnchorDropRepository {
   }
 
   /// Mark a pending anchor drop as delivered.
+  @override
   Future<void> markDelivered(String dropId) async {
     await (_db.update(_db.anchorDrops)..where((t) => t.id.equals(dropId)))
         .write(const AnchorDropsCompanion(
@@ -37,6 +40,7 @@ class AnchorDropRepository {
 
   /// Get all pending (undelivered) sent anchor drops for a specific peer,
   /// within the last [hours] (default 24h — stale drops are not useful).
+  @override
   Future<List<AnchorDropEntry>> getPendingDropsForPeer(
     String peerId, {
     int hours = 24,
@@ -52,6 +56,7 @@ class AnchorDropRepository {
   }
 
   /// Expire all pending anchor drops older than [hours].
+  @override
   Future<void> expireStalePendingDrops({int hours = 24}) async {
     final cutoff = DateTime.now().subtract(Duration(hours: hours));
     await (_db.delete(_db.anchorDrops)
@@ -62,6 +67,7 @@ class AnchorDropRepository {
   }
 
   /// Returns true if we've already dropped anchor on this peer today
+  @override
   Future<bool> hasDroppedToPeerToday(String peerId) async {
     final today = DateTime.now();
     final startOfDay = DateTime(today.year, today.month, today.day);
@@ -78,6 +84,7 @@ class AnchorDropRepository {
   }
 
   /// Returns the number of anchors dropped (sent) today
+  @override
   Future<int> getTodaySentCount() async {
     final today = DateTime.now();
     final startOfDay = DateTime(today.year, today.month, today.day);
@@ -92,6 +99,7 @@ class AnchorDropRepository {
   }
 
   /// Returns the most recent drops (sent + received), newest first
+  @override
   Future<List<AnchorDropEntry>> getRecentDrops({int limit = 50}) async {
     return (_db.select(_db.anchorDrops)
           ..orderBy([(t) => OrderingTerm.desc(t.droppedAt)])
@@ -101,6 +109,7 @@ class AnchorDropRepository {
 
   /// Returns peer IDs that we sent an anchor drop to within the last [hours].
   /// Used to restore the ⚓ badge on the discovery grid after app restart.
+  @override
   Future<Set<String>> getSentPeerIdsSince({int hours = 24}) async {
     final cutoff = DateTime.now().subtract(Duration(hours: hours));
     final rows = await (_db.select(_db.anchorDrops)
@@ -115,6 +124,7 @@ class AnchorDropRepository {
 
   /// Returns received anchor drops, newest first, deduplicated by peerId
   /// (keeps the most recent drop per peer).
+  @override
   Future<List<AnchorDropEntry>> getReceivedDrops({int limit = 50}) async {
     return (_db.select(_db.anchorDrops)
           ..where(

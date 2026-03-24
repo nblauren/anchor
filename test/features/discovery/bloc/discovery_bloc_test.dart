@@ -1,7 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:anchor/data/local_database/database.dart';
-import 'package:anchor/data/repositories/peer_repository.dart';
+import 'package:anchor/data/repositories/peer_repository_interface.dart';
 import 'package:anchor/features/discovery/bloc/discovery_bloc.dart';
 import 'package:anchor/features/discovery/bloc/discovery_event.dart';
 import 'package:anchor/features/discovery/bloc/discovery_state.dart';
@@ -19,7 +19,7 @@ import '../../../helpers/test_fixtures.dart';
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
-class MockPeerRepository extends Mock implements PeerRepository {}
+class MockPeerRepository extends Mock implements PeerRepositoryInterface {}
 
 
 // ── Test helpers ──────────────────────────────────────────────────────────────
@@ -85,6 +85,8 @@ void main() {
     when(() => mockRepo.blockPeer(any())).thenAnswer((_) async {});
     when(() => mockRepo.unblockPeer(any())).thenAnswer((_) async {});
     when(() => mockRepo.getPeerById(any())).thenAnswer((_) async => null);
+    when(() => mockRepo.getBlockedPeers())
+        .thenAnswer((_) async => <BlockedUserEntry>[]);
   });
 
   tearDown(() async {

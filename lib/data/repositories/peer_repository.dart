@@ -1,12 +1,13 @@
 import 'package:anchor/core/utils/logger.dart';
 import 'package:anchor/data/local_database/database.dart';
+import 'package:anchor/data/repositories/peer_repository_interface.dart';
 import 'package:drift/drift.dart';
 
 /// Repository for managing discovered peers and blocking logic.
 ///
 /// All methods take [peerId] which is the peer's stable app-level userId
 /// (canonical UUID). Transport-specific IDs are resolved upstream.
-class PeerRepository {
+class PeerRepository implements PeerRepositoryInterface {
   PeerRepository(this._db);
 
   final AppDatabase _db;
@@ -14,6 +15,7 @@ class PeerRepository {
   // ==================== Peer CRUD ====================
 
   /// Get all discovered peers (excluding blocked)
+  @override
   Future<List<DiscoveredPeerEntry>> getAllPeers(
       {bool includeBlocked = false,}) async {
     final query = _db.select(_db.discoveredPeers);
@@ -25,6 +27,7 @@ class PeerRepository {
   }
 
   /// Get a peer by ID (peerId = stable app-level userId).
+  @override
   Future<DiscoveredPeerEntry?> getPeerById(String peerId) async {
     return (_db.select(_db.discoveredPeers)
           ..where((t) => t.peerId.equals(peerId)))
@@ -32,6 +35,7 @@ class PeerRepository {
   }
 
   /// Get peers seen within a time window
+  @override
   Future<List<DiscoveredPeerEntry>> getRecentPeers(Duration window) async {
     final cutoff = DateTime.now().subtract(window);
     return (_db.select(_db.discoveredPeers)
@@ -52,6 +56,7 @@ class PeerRepository {
   /// [transportId] / [transportType] are the original transport-level ID and
   /// type (e.g. BLE UUID / "ble"). When provided, a PeerAliases row is
   /// persisted after the peer row is guaranteed to exist, satisfying the FK.
+  @override
   Future<DiscoveredPeerEntry> upsertPeer({
     required String peerId,
     required String name,
@@ -171,6 +176,7 @@ class PeerRepository {
   }
 
   /// Update peer's last seen time and RSSI
+  @override
   Future<void> updatePeerPresence(String peerId, {int? rssi}) async {
     await (_db.update(_db.discoveredPeers)
           ..where((t) => t.peerId.equals(peerId)))
@@ -181,6 +187,7 @@ class PeerRepository {
   }
 
   /// Delete a peer and their conversations/messages/aliases
+  @override
   Future<void> deletePeer(String peerId) async {
     await _db.transaction(() async {
       // Delete messages in conversations with this peer
@@ -217,6 +224,7 @@ class PeerRepository {
   }
 
   /// Watch all peers (excluding blocked)
+  @override
   Stream<List<DiscoveredPeerEntry>> watchPeers({bool includeBlocked = false}) {
     final query = _db.select(_db.discoveredPeers);
     if (!includeBlocked) {
@@ -229,6 +237,7 @@ class PeerRepository {
   // ==================== Blocking Logic ====================
 
   /// Block a peer
+  @override
   Future<void> blockPeer(String peerId) async {
     await _db.transaction(() async {
       // Add to blocked users table
@@ -247,6 +256,7 @@ class PeerRepository {
   }
 
   /// Unblock a peer
+  @override
   Future<void> unblockPeer(String peerId) async {
     await _db.transaction(() async {
       // Remove from blocked users table
@@ -262,6 +272,7 @@ class PeerRepository {
   }
 
   /// Check if a peer is blocked
+  @override
   Future<bool> isPeerBlocked(String peerId) async {
     final blocked = await (_db.select(_db.blockedUsers)
           ..where((t) => t.peerId.equals(peerId)))
@@ -270,6 +281,7 @@ class PeerRepository {
   }
 
   /// Get all blocked peers
+  @override
   Future<List<BlockedUserEntry>> getBlockedPeers() async {
     return (_db.select(_db.blockedUsers)
           ..orderBy([(t) => OrderingTerm.desc(t.blockedAt)]))
@@ -277,6 +289,7 @@ class PeerRepository {
   }
 
   /// Get blocked peer details (joins with discovered peers)
+  @override
   Future<List<DiscoveredPeerEntry>> getBlockedPeerDetails() async {
     return (_db.select(_db.discoveredPeers)
           ..where((t) => t.isBlocked.equals(true))
@@ -285,6 +298,7 @@ class PeerRepository {
   }
 
   /// Watch blocked peers
+  @override
   Stream<List<BlockedUserEntry>> watchBlockedPeers() {
     return (_db.select(_db.blockedUsers)
           ..orderBy([(t) => OrderingTerm.desc(t.blockedAt)]))
@@ -294,6 +308,7 @@ class PeerRepository {
   // ==================== Utility Methods ====================
 
   /// Get peer count
+  @override
   Future<int> getPeerCount({bool includeBlocked = false}) async {
     final count = _db.discoveredPeers.peerId.count();
     final query = _db.selectOnly(_db.discoveredPeers)..addColumns([count]);
@@ -305,6 +320,7 @@ class PeerRepository {
   }
 
   /// Clear all peers older than a duration
+  @override
   Future<int> clearOldPeers(Duration olderThan) async {
     final cutoff = DateTime.now().subtract(olderThan);
     return _db.transaction(() async {
@@ -345,6 +361,7 @@ class PeerRepository {
   }
 
   /// Search peers by name
+  @override
   Future<List<DiscoveredPeerEntry>> searchPeers(String query) async {
     return (_db.select(_db.discoveredPeers)
           ..where((t) => t.name.like('%$query%') & t.isBlocked.equals(false))
@@ -356,6 +373,7 @@ class PeerRepository {
 
   /// Look up the canonical peerId for a transport-level ID.
   /// Returns null if no alias exists.
+  @override
   Future<String?> resolveAlias(String transportId) async {
     final row = await (_db.select(_db.peerAliases)
           ..where((t) => t.transportId.equals(transportId)))
@@ -365,6 +383,7 @@ class PeerRepository {
 
   /// Register a transport ID → canonical peerId mapping.
   /// Idempotent (insertOrIgnore).
+  @override
   Future<void> registerAlias(
     String transportId,
     String canonicalPeerId,
@@ -381,11 +400,13 @@ class PeerRepository {
   }
 
   /// Get all persisted aliases (for PeerRegistry hydration at startup).
+  @override
   Future<List<PeerAliasEntry>> getAllAliases() async {
     return _db.select(_db.peerAliases).get();
   }
 
   /// Delete all aliases pointing to a given canonical peerId.
+  @override
   Future<void> deleteAliasesForPeer(String canonicalPeerId) async {
     await (_db.delete(_db.peerAliases)
           ..where((t) => t.canonicalPeerId.equals(canonicalPeerId)))

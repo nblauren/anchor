@@ -1,4 +1,9 @@
 import 'package:anchor/core/utils/logger.dart';
+import 'package:anchor/data/repositories/anchor_drop_repository_interface.dart';
+import 'package:anchor/data/repositories/chat_repository_interface.dart';
+import 'package:anchor/data/repositories/encryption_repository_interface.dart';
+import 'package:anchor/data/repositories/peer_repository_interface.dart';
+import 'package:anchor/data/repositories/profile_repository_interface.dart';
 import 'package:anchor/features/chat/bloc/chat_bloc.dart';
 import 'package:anchor/features/chat/bloc/chat_e2ee_bloc.dart';
 import 'package:anchor/features/chat/bloc/conversation_list_bloc.dart';
@@ -58,12 +63,31 @@ Future<void> initializeDependencies({
   // Initialize database
   await getIt<DatabaseService>().initialize();
 
-  // Encryption service — registered after database is ready.
-  // Must be initialized before BLE so it can supply the local public key
-  // for embedding in BroadcastPayload (fff1 characteristic).
-  getIt.registerLazySingleton<EncryptionService>(
+  // Register repository interfaces (backed by DatabaseService instances)
+  final dbService = getIt<DatabaseService>();
+  getIt
+    ..registerLazySingleton<ChatRepositoryInterface>(
+      () => dbService.chatRepository,
+    )
+    ..registerLazySingleton<PeerRepositoryInterface>(
+      () => dbService.peerRepository,
+    )
+    ..registerLazySingleton<ProfileRepositoryInterface>(
+      () => dbService.profileRepository,
+    )
+    ..registerLazySingleton<AnchorDropRepositoryInterface>(
+      () => dbService.anchorDropRepository,
+    )
+    ..registerLazySingleton<EncryptionRepositoryInterface>(
+      () => dbService.encryptionRepository,
+    )
+
+    // Encryption service — registered after database is ready.
+    // Must be initialized before BLE so it can supply the local public key
+    // for embedding in BroadcastPayload (fff1 characteristic).
+    ..registerLazySingleton<EncryptionService>(
     () => EncryptionService(
-      database: getIt<DatabaseService>().database,
+      encryptionRepository: getIt<EncryptionRepositoryInterface>(),
     ),
   );
   await getIt<EncryptionService>().initialize();
@@ -105,7 +129,7 @@ Future<void> initializeDependencies({
   // Initialize BLE service
   try {
     await getIt<BleServiceInterface>().initialize();
-  } catch (e) {
+  } on Exception catch (e) {
     // BLE initialization may fail if permissions not granted or BLE unavailable
     // Log the error but don't crash - user will see permissions screen
     Logger.warning('BLE initialization failed: $e', 'DI');
@@ -186,9 +210,9 @@ Future<void> initializeDependencies({
     // Store-and-forward service (singleton — retries pending messages on peer rediscovery)
     ..registerLazySingleton<StoreAndForwardService>(
       () => StoreAndForwardService(
-        chatRepository: getIt<DatabaseService>().chatRepository,
-        peerRepository: getIt<DatabaseService>().peerRepository,
-        profileRepository: getIt<DatabaseService>().profileRepository,
+        chatRepository: getIt<ChatRepositoryInterface>(),
+        peerRepository: getIt<PeerRepositoryInterface>(),
+        profileRepository: getIt<ProfileRepositoryInterface>(),
         transportManager: getIt<TransportManager>(),
       ),
     );
@@ -204,7 +228,7 @@ Future<void> initializeDependencies({
     ..registerLazySingleton<MessageSendService>(() => MessageSendService(
       transportManager: getIt<TransportManager>(),
       imageService: getIt<ImageService>(),
-      chatRepository: getIt<DatabaseService>().chatRepository,
+      chatRepository: getIt<ChatRepositoryInterface>(),
       retryQueue: getIt<TransportRetryQueue>(),
     ),)
 
@@ -212,8 +236,8 @@ Future<void> initializeDependencies({
     ..registerLazySingleton<IncomingMessageService>(
         () => IncomingMessageService(
               transportManager: getIt<TransportManager>(),
-              chatRepository: getIt<DatabaseService>().chatRepository,
-              peerRepository: getIt<DatabaseService>().peerRepository,
+              chatRepository: getIt<ChatRepositoryInterface>(),
+              peerRepository: getIt<PeerRepositoryInterface>(),
               notificationService: getIt<NotificationService>(),
               chatEventBus: getIt<ChatEventBus>(),
             )..start(),)
@@ -237,7 +261,7 @@ Future<void> initializeDependencies({
 
     ..registerFactory<DiscoveryBloc>(
       () => DiscoveryBloc(
-        peerRepository: getIt<DatabaseService>().peerRepository,
+        peerRepository: getIt<PeerRepositoryInterface>(),
         transportManager: getIt<TransportManager>(),
         notificationService: getIt<NotificationService>(),
       ),
@@ -246,8 +270,8 @@ Future<void> initializeDependencies({
     // AnchorDropBloc for ⚓ drop anchor feature
     ..registerFactory<AnchorDropBloc>(
       () => AnchorDropBloc(
-        anchorDropRepository: getIt<DatabaseService>().anchorDropRepository,
-        peerRepository: getIt<DatabaseService>().peerRepository,
+        anchorDropRepository: getIt<AnchorDropRepositoryInterface>(),
+        peerRepository: getIt<PeerRepositoryInterface>(),
         transportManager: getIt<TransportManager>(),
         notificationService: getIt<NotificationService>(),
       ),
@@ -256,8 +280,8 @@ Future<void> initializeDependencies({
     // ChatBloc needs the user's own ID, which we get from profile
     ..registerFactoryParam<ChatBloc, String, void>(
       (ownUserId, _) => ChatBloc(
-        chatRepository: getIt<DatabaseService>().chatRepository,
-        peerRepository: getIt<DatabaseService>().peerRepository,
+        chatRepository: getIt<ChatRepositoryInterface>(),
+        peerRepository: getIt<PeerRepositoryInterface>(),
         transportManager: getIt<TransportManager>(),
         notificationService: getIt<NotificationService>(),
         ownUserId: ownUserId,
@@ -271,8 +295,8 @@ Future<void> initializeDependencies({
     // PhotoTransferBloc for photo transfer progress and state
     ..registerFactoryParam<PhotoTransferBloc, String, void>(
       (ownUserId, _) => PhotoTransferBloc(
-        chatRepository: getIt<DatabaseService>().chatRepository,
-        peerRepository: getIt<DatabaseService>().peerRepository,
+        chatRepository: getIt<ChatRepositoryInterface>(),
+        peerRepository: getIt<PeerRepositoryInterface>(),
         imageService: getIt<ImageService>(),
         transportManager: getIt<TransportManager>(),
         notificationService: getIt<NotificationService>(),
@@ -286,7 +310,7 @@ Future<void> initializeDependencies({
     // ConversationListBloc for conversation list management
     ..registerFactoryParam<ConversationListBloc, String, void>(
       (ownUserId, _) => ConversationListBloc(
-        chatRepository: getIt<DatabaseService>().chatRepository,
+        chatRepository: getIt<ChatRepositoryInterface>(),
         notificationService: getIt<NotificationService>(),
         chatEventBus: getIt<ChatEventBus>(),
         messageSendService: getIt<MessageSendService>(),
@@ -305,8 +329,8 @@ Future<void> initializeDependencies({
     // ReactionBloc for emoji reactions per conversation
     ..registerFactoryParam<ReactionBloc, String, void>(
       (ownUserId, _) => ReactionBloc(
-        chatRepository: getIt<DatabaseService>().chatRepository,
-        peerRepository: getIt<DatabaseService>().peerRepository,
+        chatRepository: getIt<ChatRepositoryInterface>(),
+        peerRepository: getIt<PeerRepositoryInterface>(),
         transportManager: getIt<TransportManager>(),
         notificationService: getIt<NotificationService>(),
         ownUserId: ownUserId,

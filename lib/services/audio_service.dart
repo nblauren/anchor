@@ -34,7 +34,7 @@ class AudioService {
     try {
       await _player.setAudioContext(_silentRespectingContext);
       await _player.play(AssetSource(_popSound));
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.warning('AudioService: Failed to play sound: $e', 'Audio');
     }
   }
@@ -45,7 +45,7 @@ class AudioService {
     try {
       await _player.setAudioContext(_silentRespectingContext);
       await _player.play(AssetSource(_popSound));
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.warning('AudioService: Failed to play reaction sound: $e', 'Audio');
     }
   }

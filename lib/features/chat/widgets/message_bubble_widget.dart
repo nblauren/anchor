@@ -414,7 +414,7 @@ class MessageBubbleWidget extends StatelessWidget {
           jsonDecode(message.textContent ?? '{}') as Map<String, dynamic>;
       photoId = meta['photo_id'] as String? ?? '';
       originalSize = meta['original_size'] as int? ?? 0;
-    } catch (_) {}
+    } on Exception catch (_) {}
 
     return _PhotoPreviewContent(
       thumbnailPath: message.photoPath,

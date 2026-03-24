@@ -263,7 +263,7 @@ class GattWriteQueue {
           if (!request.completer.isCompleted) {
             request.completer.complete(true);
           }
-        } catch (e) {
+        } on Exception catch (e) {
           Logger.warning(
             'GattWriteQueue: Write failed to ${request.peerId}: $e',
             'BLE',
@@ -330,7 +330,7 @@ class GattWriteQueue {
           'GATT write timed out after ${maxRetries + 1} attempts',
           _writeTimeout,
         );
-      } catch (e) {
+      } on Exception catch (e) {
         final isPrepareQueueFull =
             e.toString().contains('Code=9') || e.toString().contains('Code 9');
         if (isPrepareQueueFull && attempt < maxRetries) {

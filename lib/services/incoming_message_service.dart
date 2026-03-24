@@ -2,8 +2,8 @@ import 'dart:async';
 
 import 'package:anchor/core/utils/logger.dart';
 import 'package:anchor/data/local_database/database.dart';
-import 'package:anchor/data/repositories/chat_repository.dart';
-import 'package:anchor/data/repositories/peer_repository.dart';
+import 'package:anchor/data/repositories/chat_repository_interface.dart';
+import 'package:anchor/data/repositories/peer_repository_interface.dart';
 import 'package:anchor/services/ble/ble.dart' as ble;
 import 'package:anchor/services/chat_event_bus.dart';
 import 'package:anchor/services/notification_service.dart';
@@ -20,8 +20,8 @@ import 'package:anchor/services/transport/transport.dart';
 class IncomingMessageService {
   IncomingMessageService({
     required TransportManager transportManager,
-    required ChatRepository chatRepository,
-    required PeerRepository peerRepository,
+    required ChatRepositoryInterface chatRepository,
+    required PeerRepositoryInterface peerRepository,
     required NotificationService notificationService,
     required ChatEventBus chatEventBus,
   })  : _transportManager = transportManager,
@@ -31,8 +31,8 @@ class IncomingMessageService {
         _chatEventBus = chatEventBus;
 
   final TransportManager _transportManager;
-  final ChatRepository _chatRepository;
-  final PeerRepository _peerRepository;
+  final ChatRepositoryInterface _chatRepository;
+  final PeerRepositoryInterface _peerRepository;
   final NotificationService _notificationService;
   final ChatEventBus _chatEventBus;
 
@@ -97,7 +97,7 @@ class IncomingMessageService {
       _chatEventBus
         ..notifyMessageAdded(message)
         ..notifyConversationsChanged();
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error(
           'IncomingMessageService: failed to persist message', e, null, 'Chat',);
     }

@@ -56,7 +56,8 @@ class PanicService {
     try {
       await _transport.stop();
       Logger.info('PanicService: Transports stopped', 'Panic');
-    } catch (e) {
+    } on Exception catch (e) {
+      // Best-effort cleanup during emergency wipe
       Logger.error('PanicService: Transport stop failed', e, null, 'Panic');
       allSuccess = false;
     }
@@ -65,7 +66,8 @@ class PanicService {
     try {
       await _encryption.destroyAllKeys();
       Logger.info('PanicService: Encryption keys destroyed', 'Panic');
-    } catch (e) {
+    } on Exception catch (e) {
+      // Best-effort cleanup during emergency wipe
       Logger.error('PanicService: Key destruction failed', e, null, 'Panic');
       allSuccess = false;
     }
@@ -74,7 +76,8 @@ class PanicService {
     try {
       await _database.clearAllData();
       Logger.info('PanicService: Database cleared', 'Panic');
-    } catch (e) {
+    } on Exception catch (e) {
+      // Best-effort cleanup during emergency wipe
       Logger.error('PanicService: Database clear failed', e, null, 'Panic');
       allSuccess = false;
     }
@@ -84,7 +87,8 @@ class PanicService {
       final prefs = await SharedPreferences.getInstance();
       await prefs.clear();
       Logger.info('PanicService: SharedPreferences cleared', 'Panic');
-    } catch (e) {
+    } on Exception catch (e) {
+      // Best-effort cleanup during emergency wipe
       Logger.error('PanicService: SharedPreferences clear failed', e, null, 'Panic');
       allSuccess = false;
     }
@@ -93,7 +97,8 @@ class PanicService {
     try {
       await _wipeCacheDirectory();
       Logger.info('PanicService: Cache directory wiped', 'Panic');
-    } catch (e) {
+    } on Exception catch (e) {
+      // Best-effort cleanup during emergency wipe
       Logger.error('PanicService: Cache wipe failed', e, null, 'Panic');
       allSuccess = false;
     }
@@ -112,17 +117,23 @@ class PanicService {
 
     try {
       dirs.add(await getTemporaryDirectory());
-    } catch (_) {}
+    } on Exception catch (_) {
+      // Best-effort cleanup during emergency wipe
+    }
 
     try {
       dirs.add(await getApplicationCacheDirectory());
-    } catch (_) {}
+    } on Exception catch (_) {
+      // Best-effort cleanup during emergency wipe
+    }
 
     // Also wipe app support directory (may contain cached images)
     if (!kIsWeb) {
       try {
         dirs.add(await getApplicationSupportDirectory());
-      } catch (_) {}
+      } on Exception catch (_) {
+        // Best-effort cleanup during emergency wipe
+      }
     }
 
     for (final dir in dirs) {

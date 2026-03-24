@@ -92,7 +92,7 @@ class ProfileState extends Equatable {
   ProfilePhoto? get primaryPhoto {
     try {
       return photos.firstWhere((p) => p.isPrimary);
-    } catch (_) {
+    } on Exception catch (_) {
       return photos.isNotEmpty ? photos.first : null;
     }
   }

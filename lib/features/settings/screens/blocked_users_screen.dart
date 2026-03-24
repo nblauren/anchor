@@ -41,7 +41,7 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
         _blockedPeers = peers;
         _isLoading = false;
       });
-    } catch (e) {
+    } on Exception {
       setState(() {
         _error = 'Failed to load blocked users';
         _isLoading = false;
@@ -82,7 +82,7 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
             SnackBar(content: Text('${peer.name} unblocked')),
           );
         }
-      } catch (e) {
+      } on Exception {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Failed to unblock user')),

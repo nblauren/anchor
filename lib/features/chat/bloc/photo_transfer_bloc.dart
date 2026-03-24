@@ -5,8 +5,8 @@ import 'dart:typed_data';
 
 import 'package:anchor/core/utils/logger.dart';
 import 'package:anchor/data/local_database/database.dart';
-import 'package:anchor/data/repositories/chat_repository.dart';
-import 'package:anchor/data/repositories/peer_repository.dart';
+import 'package:anchor/data/repositories/chat_repository_interface.dart';
+import 'package:anchor/data/repositories/peer_repository_interface.dart';
 import 'package:anchor/features/chat/bloc/chat_state.dart';
 import 'package:anchor/services/ble/ble.dart' as ble;
 import 'package:anchor/services/chat_event_bus.dart';
@@ -214,8 +214,8 @@ class PhotoTransferState extends Equatable {
 class PhotoTransferBloc
     extends Bloc<PhotoTransferEvent, PhotoTransferState> {
   PhotoTransferBloc({
-    required ChatRepository chatRepository,
-    required PeerRepository peerRepository,
+    required ChatRepositoryInterface chatRepository,
+    required PeerRepositoryInterface peerRepository,
     required ImageService imageService,
     required TransportManager transportManager,
     required NotificationService notificationService,
@@ -317,7 +317,7 @@ class PhotoTransferBloc
             senderNearbyId: senderNearbyId,
           ),);
         }
-      } catch (_) {
+      } on Exception catch (_) {
         add(WifiTransferReady(
           fromPeerId: msg.fromPeerId,
           transferId: msg.content,
@@ -326,8 +326,8 @@ class PhotoTransferBloc
     });
   }
 
-  final ChatRepository _chatRepository;
-  final PeerRepository _peerRepository;
+  final ChatRepositoryInterface _chatRepository;
+  final PeerRepositoryInterface _peerRepository;
   final ImageService _imageService;
   final String? _ownUserId;
   final TransportManager _transportManager;
@@ -454,7 +454,7 @@ class PhotoTransferBloc
       _chatEventBus
         ..notifyMessageAdded(message)
         ..notifyConversationsChanged();
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Failed to handle photo preview', e, null, 'PhotoTransfer');
     }
   }
@@ -510,7 +510,7 @@ class PhotoTransferBloc
           },
         );
       }
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Failed to send photo request', e, null, 'PhotoTransfer');
     }
   }
@@ -606,7 +606,7 @@ class PhotoTransferBloc
         pending: pending,
         photoBytes: photoBytes,
       ),);
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Failed to handle photo request', e, null, 'PhotoTransfer');
     }
   }
@@ -633,7 +633,7 @@ class PhotoTransferBloc
           'PhotoTransfer',
         );
       }
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('_sendFullPhoto failed', e, null, 'PhotoTransfer');
     }
   }
@@ -720,7 +720,7 @@ class PhotoTransferBloc
         'PhotoTransferBloc: Received full photo from ${photo.fromPeerId.substring(0, 8)}',
         'PhotoTransfer',
       );
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Failed to handle BLE photo', e, null, 'PhotoTransfer');
     }
   }
@@ -885,7 +885,7 @@ class PhotoTransferBloc
         'PhotoTransferBloc: Received photo via Wi-Fi Direct from ${canonicalPeerId.substring(0, 8)}',
         'PhotoTransfer',
       );
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error(
           'Failed to handle Nearby payload', e, null, 'PhotoTransfer',);
     }

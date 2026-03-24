@@ -81,7 +81,7 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
         return false;
       }
       return true;
-    } catch (e) {
+    } on Exception catch (e) {
       // On detection error, allow the photo — don't block on service failure.
       Logger.error(
           'NSFW detection failed, allowing photo', e, null, 'ProfileBloc',);
@@ -120,7 +120,7 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
 
       // Broadcast profile via BLE so this device is discoverable
       add(const BroadcastProfile());
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Failed to load profile', e, null, 'ProfileBloc');
       emit(state.copyWith(
         status: ProfileStatus.error,
@@ -194,7 +194,7 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
 
       // Broadcast profile via BLE
       add(const BroadcastProfile());
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Failed to create profile', e, null, 'ProfileBloc');
       emit(state.copyWith(
         status: ProfileStatus.error,
@@ -300,7 +300,7 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
 
       // Broadcast updated profile via BLE
       add(const BroadcastProfile());
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Failed to update profile', e, null, 'ProfileBloc');
       emit(state.copyWith(
         status: ProfileStatus.error,
@@ -371,7 +371,7 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
       if (isPrimary) {
         add(const BroadcastProfile());
       }
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Failed to add photo', e, null, 'ProfileBloc');
       emit(state.copyWith(
         isProcessingPhoto: false,
@@ -412,7 +412,7 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
       }
 
       Logger.info('Photo removed: ${event.photoId}', 'ProfileBloc');
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Failed to remove photo', e, null, 'ProfileBloc');
       emit(state.copyWith(errorMessage: 'Failed to remove photo'));
     }
@@ -476,7 +476,7 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
 
       // Rebroadcast whenever order changes (new primary thumbnail may differ).
       add(const BroadcastProfile());
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Failed to reorder photos', e, null, 'ProfileBloc');
       emit(state.copyWith(errorMessage: 'Failed to reorder photos'));
     }
@@ -523,7 +523,7 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
 
       // Rebroadcast with new primary photo thumbnail
       add(const BroadcastProfile());
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Failed to set primary photo', e, null, 'ProfileBloc');
       emit(state.copyWith(
         isProcessingPhoto: false,
@@ -541,7 +541,7 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
       if (file != null) {
         add(AddPhoto(file));
       }
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Failed to pick photo from gallery', e, null, 'ProfileBloc');
       emit(state.copyWith(errorMessage: 'Failed to pick photo'));
     }
@@ -556,7 +556,7 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
       if (file != null) {
         add(AddPhoto(file));
       }
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Failed to pick photo from camera', e, null, 'ProfileBloc');
       emit(state.copyWith(errorMessage: 'Failed to take photo'));
     }
@@ -672,7 +672,7 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
       Logger.info('Quick setup profile created: ${profile.id}', 'ProfileBloc');
 
       add(const BroadcastProfile());
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Quick setup failed', e, null, 'ProfileBloc');
       emit(state.copyWith(
         status: ProfileStatus.error,

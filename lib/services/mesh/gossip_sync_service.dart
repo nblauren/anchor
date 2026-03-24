@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:anchor/core/constants/message_keys.dart';
 import 'package:anchor/core/utils/logger.dart';
 import 'package:anchor/services/mesh/golomb_coded_set.dart';
 
@@ -120,8 +121,8 @@ class GossipSyncService {
   /// and emits [onMissingMessages] for any we're missing.
   void handleGossipSync(String fromPeerId, Map<String, dynamic> payload) {
     try {
-      final gcsBase64 = payload['gcs'] as String?;
-      final remoteN = payload['n'] as int?;
+      final gcsBase64 = payload[MessageKeys.gcs] as String?;
+      final remoteN = payload[MessageKeys.gossipCount] as int?;
       if (gcsBase64 == null || remoteN == null || remoteN == 0) return;
 
       final gcsBytes = base64Decode(gcsBase64);
@@ -155,7 +156,7 @@ class GossipSyncService {
           remoteN,
         );
       }
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.warning(
           'GossipSync: Failed to process sync from $fromPeerId: $e', 'Mesh',);
     }
@@ -202,9 +203,9 @@ class GossipSyncService {
 
     final encoded = _gcs.encode(recentIds);
     return {
-      'type': 'gossip_sync',
-      'gcs': base64Encode(encoded),
-      'n': recentIds.length,
+      MessageKeys.type: MessageTypes.gossipSync,
+      MessageKeys.gcs: base64Encode(encoded),
+      MessageKeys.gossipCount: recentIds.length,
     };
   }
 

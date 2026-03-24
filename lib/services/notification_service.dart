@@ -331,7 +331,7 @@ class NotificationService {
       await AppBadgePlus.updateBadge(count);
       Logger.info(
           'NotificationService: Badge count set to $count', 'Notifications',);
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.debug(
           'NotificationService: Badge update not supported on this launcher: $e',
           'Notifications',);

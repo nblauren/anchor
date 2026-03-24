@@ -80,7 +80,7 @@ class _ChatScreenState extends State<ChatScreen> {
           .droppedAnchorPeerIds
           .contains(widget.peerId);
       if (dropped) _anchorDropped = true;
-    } catch (_) {
+    } on Exception catch (_) {
       // AnchorDropBloc may not be in the tree from all entry points.
     }
 
@@ -143,7 +143,7 @@ class _ChatScreenState extends State<ChatScreen> {
       context.read<AnchorDropBloc>().add(
             DropAnchor(peerId: widget.peerId, peerName: widget.peerName),
           );
-    } catch (_) {
+    } on Exception catch (_) {
       // DiscoveryBloc may not be in the widget tree from all entry points
     }
     setState(() => _anchorDropped = true);
@@ -280,7 +280,7 @@ class _ChatScreenState extends State<ChatScreen> {
       }
 
       context.read<ChatBloc>().add(SendPhotoMessage(image.path));
-    } catch (e) {
+    } on Exception {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Failed to pick photo')),

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:anchor/core/constants/message_keys.dart';
 import 'package:anchor/core/utils/logger.dart';
 import 'package:anchor/services/ble/binary_message_codec.dart';
 import 'package:anchor/services/ble/ble_models.dart' as ble;
@@ -198,7 +199,7 @@ class LanTransportServiceImpl implements LanTransportService {
         },
       );
       Logger.info('LAN: UDP socket bound on port $_udpPort', _tag);
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('LAN: Failed to bind UDP socket', e, null, _tag);
       return;
     }
@@ -265,7 +266,7 @@ class LanTransportServiceImpl implements LanTransportService {
     for (final socket in _outgoingConnections.values) {
       try {
         await socket.close();
-      } catch (_) {}
+      } on Exception catch (_) {}
     }
     _outgoingConnections.clear();
     _frameBuffers.clear();
@@ -322,7 +323,7 @@ class LanTransportServiceImpl implements LanTransportService {
               (a) => !a.isLoopback && a.type == InternetAddressType.IPv4,
             );
       });
-    } catch (_) {
+    } on Exception catch (_) {
       return false;
     }
   }
@@ -396,16 +397,16 @@ class LanTransportServiceImpl implements LanTransportService {
       final chunk = photoData.sublist(start, end);
 
       final envelope = {
-        'v': 1,
-        'type': 'photo_chunk',
-        'fromPeerId': _lanPeerId,
-        'fromUserId': _ownUserId,
-        'payload': {
-          'messageId': messageId,
-          'photoId': id,
-          'chunkIndex': i,
-          'totalChunks': totalChunks,
-          'data': base64Encode(chunk),
+        MessageKeys.version: 1,
+        MessageKeys.type: MessageTypes.photoChunk,
+        MessageKeys.fromPeerId: _lanPeerId,
+        MessageKeys.fromUserId: _ownUserId,
+        MessageKeys.payloadObj: {
+          MessageKeys.messageIdCamel: messageId,
+          MessageKeys.photoIdCamel: id,
+          MessageKeys.chunkIndexCamel: i,
+          MessageKeys.totalChunksCamel: totalChunks,
+          MessageKeys.data: base64Encode(chunk),
         },
       };
 
@@ -456,15 +457,15 @@ class LanTransportServiceImpl implements LanTransportService {
     if (socket == null) return false;
 
     final envelope = {
-      'v': 1,
-      'type': 'photo_preview',
-      'fromPeerId': _lanPeerId,
-      'fromUserId': _ownUserId,
-      'payload': {
-        'messageId': messageId,
-        'photoId': photoId,
-        'originalSize': originalSize,
-        'thumbnail': base64Encode(thumbnailBytes),
+      MessageKeys.version: 1,
+      MessageKeys.type: MessageTypes.photoPreview,
+      MessageKeys.fromPeerId: _lanPeerId,
+      MessageKeys.fromUserId: _ownUserId,
+      MessageKeys.payloadObj: {
+        MessageKeys.messageIdCamel: messageId,
+        MessageKeys.photoIdCamel: photoId,
+        MessageKeys.originalSizeCamel: originalSize,
+        MessageKeys.thumbnail: base64Encode(thumbnailBytes),
       },
     };
     return _sendFrame(socket, envelope);
@@ -480,13 +481,13 @@ class LanTransportServiceImpl implements LanTransportService {
     if (socket == null) return false;
 
     final envelope = {
-      'v': 1,
-      'type': 'photo_request',
-      'fromPeerId': _lanPeerId,
-      'fromUserId': _ownUserId,
-      'payload': {
-        'messageId': messageId,
-        'photoId': photoId,
+      MessageKeys.version: 1,
+      MessageKeys.type: MessageTypes.photoRequest,
+      MessageKeys.fromPeerId: _lanPeerId,
+      MessageKeys.fromUserId: _ownUserId,
+      MessageKeys.payloadObj: {
+        MessageKeys.messageIdCamel: messageId,
+        MessageKeys.photoIdCamel: photoId,
       },
     };
     return _sendFrame(socket, envelope);
@@ -553,26 +554,26 @@ class LanTransportServiceImpl implements LanTransportService {
     if (_udpSocket == null || _profile == null || _lanPeerId == null) return;
 
     final beacon = {
-      'v': 1,
-      'type': 'anchor_hello',
-      'userId': _ownUserId,
-      'lanPeerId': _lanPeerId,
-      'tcpPort': _tcpPort,
-      'name': _profile!.name,
-      if (_profile!.age != null) 'age': _profile!.age,
-      if (_profile!.bio != null) 'bio': _profile!.bio,
-      if (_profile!.position != null) 'position': _profile!.position,
+      MessageKeys.version: 1,
+      MessageKeys.type: MessageTypes.anchorHello,
+      MessageKeys.userId: _ownUserId,
+      MessageKeys.lanPeerId: _lanPeerId,
+      MessageKeys.tcpPort: _tcpPort,
+      MessageKeys.name: _profile!.name,
+      if (_profile!.age != null) MessageKeys.age: _profile!.age,
+      if (_profile!.bio != null) MessageKeys.bio: _profile!.bio,
+      if (_profile!.position != null) MessageKeys.positionFull: _profile!.position,
       if (_profile!.interests != null && _profile!.interests!.isNotEmpty)
-        'interests': _profile!.interests,
-      if (_profile!.publicKeyHex != null) 'pk': _profile!.publicKeyHex,
-      if (_profile!.signingPublicKeyHex != null) 'spk': _profile!.signingPublicKeyHex,
+        MessageKeys.interestsFull: _profile!.interests,
+      if (_profile!.publicKeyHex != null) MessageKeys.publicKey: _profile!.publicKeyHex,
+      if (_profile!.signingPublicKeyHex != null) MessageKeys.signingPublicKey: _profile!.signingPublicKeyHex,
     };
 
     try {
       final data = utf8.encode(jsonEncode(beacon));
       final dest = _broadcastAddress ?? InternetAddress('255.255.255.255');
       _udpSocket!.send(data, dest, _udpPort);
-    } catch (e) {
+    } on Exception catch (e) {
       // Recompute broadcast address and retry once — IP may have changed.
       _computeBroadcastAddress().then((addr) {
         if (addr != null && addr.address != _broadcastAddress?.address) {
@@ -603,7 +604,7 @@ class LanTransportServiceImpl implements LanTransportService {
           }
         }
       }
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.warning('LAN: Failed to compute broadcast address: $e', _tag);
     }
     return null;
@@ -660,21 +661,21 @@ class LanTransportServiceImpl implements LanTransportService {
     try {
       final json = jsonDecode(utf8.decode(datagram.data)) as Map<String, dynamic>;
 
-      if (json['type'] != 'anchor_hello') return;
+      if (json[MessageKeys.type] != MessageTypes.anchorHello) return;
 
-      final lanPeerId = json['lanPeerId'] as String?;
+      final lanPeerId = json[MessageKeys.lanPeerId] as String?;
       if (lanPeerId == null || lanPeerId == _lanPeerId) return; // Own beacon
 
-      final userId = json['userId'] as String? ?? '';
-      final tcpPort = json['tcpPort'] as int? ?? _tcpPortBase;
-      final name = json['name'] as String? ?? 'Unknown';
-      final age = json['age'] as int?;
-      final bio = json['bio'] as String?;
-      final position = json['position'] as int?;
-      final interests = json['interests'] as String?;
-      final pk = json['pk'] as String?;
+      final userId = json[MessageKeys.userId] as String? ?? '';
+      final tcpPort = json[MessageKeys.tcpPort] as int? ?? _tcpPortBase;
+      final name = json[MessageKeys.name] as String? ?? 'Unknown';
+      final age = json[MessageKeys.age] as int?;
+      final bio = json[MessageKeys.bio] as String?;
+      final position = json[MessageKeys.positionFull] as int?;
+      final interests = json[MessageKeys.interestsFull] as String?;
+      final pk = json[MessageKeys.publicKey] as String?;
       final publicKeyHex = (pk != null && pk.length == 64) ? pk : null;
-      final spk = json['spk'] as String?;
+      final spk = json[MessageKeys.signingPublicKey] as String?;
       final signingPublicKeyHex = (spk != null && spk.length == 64) ? spk : null;
       final ipAddress = datagram.address.address;
 
@@ -730,7 +731,7 @@ class LanTransportServiceImpl implements LanTransportService {
           _peerDiscoveredController.add(_buildDiscoveredPeer(updated));
         }
       }
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.debug('LAN: Failed to parse UDP datagram: $e', _tag);
     }
   }
@@ -795,57 +796,57 @@ class LanTransportServiceImpl implements LanTransportService {
 
       // Legacy JSON path
       final json = jsonDecode(utf8.decode(frame)) as Map<String, dynamic>;
-      final type = json['type'] as String?;
-      final fromPeerId = json['fromPeerId'] as String?;
-      final payload = json['payload'] as Map<String, dynamic>? ?? {};
+      final type = json[MessageKeys.type] as String?;
+      final fromPeerId = json[MessageKeys.fromPeerId] as String?;
+      final payload = json[MessageKeys.payloadObj] as Map<String, dynamic>? ?? {};
 
       if (type == null || fromPeerId == null) return;
 
       switch (type) {
-        case 'chat_message':
-          final rawType = payload['messageType'] as String? ?? 'text';
+        case MessageTypes.chatMessage:
+          final rawType = payload[MessageKeys.messageTypeCamel] as String? ?? 'text';
           final ble.MessageType messageType;
           try {
             messageType = ble.MessageType.values.byName(rawType);
-          } catch (_) {
+          } on Exception catch (_) {
             Logger.debug('LAN: unknown messageType "$rawType" — skipping', _tag);
             return;
           }
           _messageReceivedController.add(ble.ReceivedMessage(
             fromPeerId: fromPeerId,
-            messageId: payload['messageId'] as String? ?? const Uuid().v4(),
+            messageId: payload[MessageKeys.messageIdCamel] as String? ?? const Uuid().v4(),
             type: messageType,
-            content: payload['content'] as String? ?? '',
+            content: payload[MessageKeys.contentCamel] as String? ?? '',
             timestamp: DateTime.now(),
-            replyToId: payload['replyToId'] as String?,
+            replyToId: payload[MessageKeys.replyToIdCamel] as String?,
           ),);
 
-        case 'photo_preview':
-          final thumbnailB64 = payload['thumbnail'] as String?;
+        case MessageTypes.photoPreview:
+          final thumbnailB64 = payload[MessageKeys.thumbnail] as String?;
           if (thumbnailB64 == null) return;
           _photoPreviewReceivedController.add(ble.ReceivedPhotoPreview(
             fromPeerId: fromPeerId,
-            messageId: payload['messageId'] as String? ?? const Uuid().v4(),
-            photoId: payload['photoId'] as String? ?? const Uuid().v4(),
+            messageId: payload[MessageKeys.messageIdCamel] as String? ?? const Uuid().v4(),
+            photoId: payload[MessageKeys.photoIdCamel] as String? ?? const Uuid().v4(),
             thumbnailBytes: base64Decode(thumbnailB64),
-            originalSize: payload['originalSize'] as int? ?? 0,
+            originalSize: payload[MessageKeys.originalSizeCamel] as int? ?? 0,
             timestamp: DateTime.now(),
           ),);
 
-        case 'photo_request':
+        case MessageTypes.photoRequest:
           _photoRequestReceivedController.add(ble.ReceivedPhotoRequest(
             fromPeerId: fromPeerId,
-            messageId: payload['messageId'] as String? ?? const Uuid().v4(),
-            photoId: payload['photoId'] as String? ?? const Uuid().v4(),
+            messageId: payload[MessageKeys.messageIdCamel] as String? ?? const Uuid().v4(),
+            photoId: payload[MessageKeys.photoIdCamel] as String? ?? const Uuid().v4(),
             timestamp: DateTime.now(),
           ),);
 
-        case 'photo_chunk':
+        case MessageTypes.photoChunk:
           _handlePhotoChunk(fromPeerId, payload);
 
-        case 'noise_hs':
-          final step = payload['step'] as int?;
-          final dataB64 = payload['data'] as String?;
+        case MessageTypes.noiseHandshake:
+          final step = payload[MessageKeys.step] as int?;
+          final dataB64 = payload[MessageKeys.data] as String?;
           if (step != null && dataB64 != null) {
             _noiseHandshakeController.add(ble.NoiseHandshakeReceived(
               fromPeerId: fromPeerId,
@@ -854,27 +855,27 @@ class LanTransportServiceImpl implements LanTransportService {
             ),);
           }
 
-        case 'drop_anchor':
+        case MessageTypes.dropAnchor:
           _anchorDropReceivedController.add(ble.AnchorDropReceived(
             fromPeerId: fromPeerId,
             timestamp: DateTime.now(),
           ),);
 
-        case 'reaction':
+        case MessageTypes.reaction:
           _reactionReceivedController.add(ble.ReactionReceived(
             fromPeerId: fromPeerId,
-            messageId: payload['messageId'] as String? ?? '',
-            emoji: payload['emoji'] as String? ?? '',
-            action: payload['action'] as String? ?? 'add',
+            messageId: payload[MessageKeys.messageIdCamel] as String? ?? '',
+            emoji: payload[MessageKeys.emoji] as String? ?? '',
+            action: payload[MessageKeys.action] as String? ?? 'add',
             timestamp: DateTime.now(),
           ),);
 
-        case 'thumb_request':
+        case MessageTypes.thumbRequest:
           // Send our thumbnail back on the same socket
           unawaited(_sendThumbnailResponse(replySocket));
 
-        case 'thumb_response':
-          final dataB64 = payload['data'] as String?;
+        case MessageTypes.thumbResponse:
+          final dataB64 = payload[MessageKeys.data] as String?;
           if (dataB64 != null) {
             _handleThumbnailResponse(fromPeerId, base64Decode(dataB64));
           }
@@ -882,7 +883,7 @@ class LanTransportServiceImpl implements LanTransportService {
         default:
           Logger.debug('LAN: unknown message type: $type', _tag);
       }
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('LAN: Failed to handle frame', e, null, _tag);
     }
   }
@@ -970,11 +971,11 @@ class LanTransportServiceImpl implements LanTransportService {
   }
 
   void _handlePhotoChunk(String fromPeerId, Map<String, dynamic> payload) {
-    final messageId = payload['messageId'] as String? ?? '';
-    final photoId = payload['photoId'] as String? ?? '';
-    final chunkIndex = payload['chunkIndex'] as int? ?? 0;
-    final totalChunks = payload['totalChunks'] as int? ?? 1;
-    final dataB64 = payload['data'] as String?;
+    final messageId = payload[MessageKeys.messageIdCamel] as String? ?? '';
+    final photoId = payload[MessageKeys.photoIdCamel] as String? ?? '';
+    final chunkIndex = payload[MessageKeys.chunkIndexCamel] as int? ?? 0;
+    final totalChunks = payload[MessageKeys.totalChunksCamel] as int? ?? 1;
+    final dataB64 = payload[MessageKeys.data] as String?;
 
     if (dataB64 == null) return;
 
@@ -1035,11 +1036,11 @@ class LanTransportServiceImpl implements LanTransportService {
     if (socket == null) return;
 
     final envelope = {
-      'v': 1,
-      'type': 'thumb_request',
-      'fromPeerId': _lanPeerId,
-      'fromUserId': _ownUserId,
-      'payload': <String, dynamic>{},
+      MessageKeys.version: 1,
+      MessageKeys.type: MessageTypes.thumbRequest,
+      MessageKeys.fromPeerId: _lanPeerId,
+      MessageKeys.fromUserId: _ownUserId,
+      MessageKeys.payloadObj: <String, dynamic>{},
     };
     await _sendFrame(socket, envelope);
   }
@@ -1049,12 +1050,12 @@ class LanTransportServiceImpl implements LanTransportService {
     if (thumb == null) return;
 
     final envelope = {
-      'v': 1,
-      'type': 'thumb_response',
-      'fromPeerId': _lanPeerId,
-      'fromUserId': _ownUserId,
-      'payload': {
-        'data': base64Encode(thumb),
+      MessageKeys.version: 1,
+      MessageKeys.type: MessageTypes.thumbResponse,
+      MessageKeys.fromPeerId: _lanPeerId,
+      MessageKeys.fromUserId: _ownUserId,
+      MessageKeys.payloadObj: {
+        MessageKeys.data: base64Encode(thumb),
       },
     };
     await _sendFrame(socket, envelope);
@@ -1110,7 +1111,7 @@ class LanTransportServiceImpl implements LanTransportService {
       _outgoingConnections[peerId] = socket;
       Logger.debug('LAN: connected to $peerId at ${meta.ipAddress}:${meta.tcpPort}', _tag);
       return socket;
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('LAN: Failed to connect to $peerId', e, null, _tag);
       return null;
     }
@@ -1126,7 +1127,7 @@ class LanTransportServiceImpl implements LanTransportService {
         ..add(payload);
       await socket.flush();
       return true;
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('LAN: send failed', e, null, _tag);
       return false;
     }
@@ -1141,7 +1142,7 @@ class LanTransportServiceImpl implements LanTransportService {
         ..add(data);
       await socket.flush();
       return true;
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('LAN: binary send failed', e, null, _tag);
       return false;
     }

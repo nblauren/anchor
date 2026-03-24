@@ -6,9 +6,9 @@ import 'dart:typed_data';
 import 'package:anchor/core/constants/app_constants.dart';
 import 'package:anchor/core/utils/logger.dart';
 import 'package:anchor/data/local_database/database.dart';
-import 'package:anchor/data/repositories/chat_repository.dart';
-import 'package:anchor/data/repositories/peer_repository.dart';
-import 'package:anchor/data/repositories/profile_repository.dart';
+import 'package:anchor/data/repositories/chat_repository_interface.dart';
+import 'package:anchor/data/repositories/peer_repository_interface.dart';
+import 'package:anchor/data/repositories/profile_repository_interface.dart';
 import 'package:anchor/services/ble/ble_models.dart' as ble;
 import 'package:anchor/services/transport/transport_manager.dart';
 
@@ -36,18 +36,18 @@ import 'package:anchor/services/transport/transport_manager.dart';
 ///      show "Message could not be delivered" labels.
 class StoreAndForwardService {
   StoreAndForwardService({
-    required ChatRepository chatRepository,
-    required PeerRepository peerRepository,
-    required ProfileRepository profileRepository,
+    required ChatRepositoryInterface chatRepository,
+    required PeerRepositoryInterface peerRepository,
+    required ProfileRepositoryInterface profileRepository,
     required TransportManager transportManager,
   })  : _chatRepository = chatRepository,
         _peerRepository = peerRepository,
         _profileRepository = profileRepository,
         _transportManager = transportManager;
 
-  final ChatRepository _chatRepository;
-  final PeerRepository _peerRepository;
-  final ProfileRepository _profileRepository;
+  final ChatRepositoryInterface _chatRepository;
+  final PeerRepositoryInterface _peerRepository;
+  final ProfileRepositoryInterface _profileRepository;
   final TransportManager _transportManager;
   final _random = Random();
 
@@ -209,7 +209,7 @@ class StoreAndForwardService {
         }
         await _retrySingleMessage(message, peerId);
       }
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error(
         'StoreAndForward: Retry failed for peer $peerId',
         e,
@@ -296,7 +296,7 @@ class StoreAndForwardService {
           'StoreForward',
         );
       }
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error(
         'StoreAndForward: Single message retry failed',
         e,
@@ -313,7 +313,7 @@ class StoreAndForwardService {
     try {
       final json = jsonDecode(text) as Map<String, dynamic>;
       return json['photo_id'] as String?;
-    } catch (_) {
+    } on Exception catch (_) {
       return null;
     }
   }

@@ -169,7 +169,7 @@ class TransportRetryQueue {
           // Re-enqueue for next opportunity
           list.add(item);
         }
-      } catch (e) {
+      } on Exception catch (e) {
         Logger.warning(
           'RetryQueue: retry failed for ${item.messageId.substring(0, 8)}…: $e',
           'Transport',

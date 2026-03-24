@@ -1,9 +1,10 @@
 import 'package:anchor/data/local_database/database.dart';
+import 'package:anchor/data/repositories/profile_repository_interface.dart';
 import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
 
 /// Repository for managing local user profile and photos
-class ProfileRepository {
+class ProfileRepository implements ProfileRepositoryInterface {
   ProfileRepository(this._db);
 
   final AppDatabase _db;
@@ -12,11 +13,13 @@ class ProfileRepository {
   // ==================== Profile CRUD ====================
 
   /// Get the local user's profile (there should only be one)
+  @override
   Future<UserProfileEntry?> getProfile() async {
     return (_db.select(_db.userProfiles)..limit(1)).getSingleOrNull();
   }
 
   /// Get profile by ID
+  @override
   Future<UserProfileEntry?> getProfileById(String id) async {
     return (_db.select(_db.userProfiles)
           ..where((t) => t.id.equals(id)))
@@ -24,6 +27,7 @@ class ProfileRepository {
   }
 
   /// Create a new profile
+  @override
   Future<UserProfileEntry> createProfile({
     required String name,
     int? age,
@@ -60,6 +64,7 @@ class ProfileRepository {
   }
 
   /// Update the profile
+  @override
   Future<void> updateProfile({
     required String id,
     String? name,
@@ -84,6 +89,7 @@ class ProfileRepository {
   }
 
   /// Delete the profile and all associated photos
+  @override
   Future<void> deleteProfile(String id) async {
     await _db.transaction(() async {
       // Delete photos first (foreign key constraint)
@@ -95,6 +101,7 @@ class ProfileRepository {
   }
 
   /// Watch profile changes
+  @override
   Stream<UserProfileEntry?> watchProfile() {
     return (_db.select(_db.userProfiles)..limit(1)).watchSingleOrNull();
   }
@@ -102,6 +109,7 @@ class ProfileRepository {
   // ==================== Photos CRUD ====================
 
   /// Get all photos for a user, ordered by order_index
+  @override
   Future<List<UserPhotoEntry>> getPhotos(String userId) async {
     return (_db.select(_db.userPhotos)
           ..where((t) => t.userId.equals(userId))
@@ -110,6 +118,7 @@ class ProfileRepository {
   }
 
   /// Get the primary photo for a user
+  @override
   Future<UserPhotoEntry?> getPrimaryPhoto(String userId) async {
     return (_db.select(_db.userPhotos)
           ..where((t) => t.userId.equals(userId) & t.isPrimary.equals(true)))
@@ -117,6 +126,7 @@ class ProfileRepository {
   }
 
   /// Add a new photo
+  @override
   Future<UserPhotoEntry> addPhoto({
     required String userId,
     required String photoPath,
@@ -164,6 +174,7 @@ class ProfileRepository {
   }
 
   /// Set a photo as primary
+  @override
   Future<void> setPrimaryPhoto(String userId, String photoId) async {
     await _db.transaction(() async {
       // Unset current primary
@@ -178,6 +189,7 @@ class ProfileRepository {
   }
 
   /// Update photo order
+  @override
   Future<void> reorderPhotos(String userId, List<String> photoIds) async {
     await _db.transaction(() async {
       for (var i = 0; i < photoIds.length; i++) {
@@ -192,6 +204,7 @@ class ProfileRepository {
   }
 
   /// Delete a photo
+  @override
   Future<void> deletePhoto(String photoId) async {
     final photo = await (_db.select(_db.userPhotos)
           ..where((t) => t.id.equals(photoId)))
@@ -211,12 +224,14 @@ class ProfileRepository {
   }
 
   /// Delete all photos for a user
+  @override
   Future<void> deleteAllPhotos(String userId) async {
     await (_db.delete(_db.userPhotos)..where((t) => t.userId.equals(userId)))
         .go();
   }
 
   /// Watch photos for a user
+  @override
   Stream<List<UserPhotoEntry>> watchPhotos(String userId) {
     return (_db.select(_db.userPhotos)
           ..where((t) => t.userId.equals(userId))
@@ -225,6 +240,7 @@ class ProfileRepository {
   }
 
   /// Get photo count for a user
+  @override
   Future<int> getPhotoCount(String userId) async {
     final count = _db.userPhotos.id.count();
     final query = _db.selectOnly(_db.userPhotos)

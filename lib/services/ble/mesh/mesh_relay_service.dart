@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:anchor/core/constants/message_keys.dart';
 import 'package:anchor/core/utils/logger.dart';
 import 'package:anchor/services/ble/ble_config.dart';
 import 'package:anchor/services/ble/ble_models.dart';
@@ -165,11 +166,11 @@ class MeshRelayService {
     var effectiveData = data;
     try {
       final json = jsonDecode(utf8.decode(data)) as Map<String, dynamic>;
-      json['ttl'] = effectiveTtl;
+      json[MessageKeys.ttl] = effectiveTtl;
       final ownUserId = getOwnUserId?.call() ?? '';
-      json['relay_path'] = <String>[ownUserId];
+      json[MessageKeys.relayPath] = <String>[ownUserId];
       effectiveData = Uint8List.fromList(utf8.encode(jsonEncode(json)));
-    } catch (_) {
+    } on Exception catch (_) {
       // Not JSON — send raw
     }
 
@@ -209,7 +210,7 @@ class MeshRelayService {
       Map<String, dynamic> json, String receivedFromPeerId,) {
     if (!_enabled) return;
 
-    final ttl = json['ttl'] as int? ?? 0;
+    final ttl = json[MessageKeys.ttl] as int? ?? 0;
     if (ttl <= 0) {
       Logger.info('MeshRelay: TTL exhausted, dropping relay', 'BLE');
       return;
@@ -218,7 +219,7 @@ class MeshRelayService {
     // Dedup: check if we've already relayed this message.
     // If it's in the dedup cache, another neighbor already relayed it —
     // track the observation count for suppression decisions.
-    final messageId = json['messageId'] as String? ?? json['message_id'] as String? ?? '';
+    final messageId = json[MessageKeys.messageIdCamel] as String? ?? json[MessageKeys.messageId] as String? ?? '';
     if (messageId.isNotEmpty && isMessageSeen(messageId)) {
       _trackRelayObservation(messageId);
       Logger.debug('MeshRelay: Dedup dropped relay for $messageId', 'BLE');
@@ -228,7 +229,7 @@ class MeshRelayService {
 
     final ownUserId = getOwnUserId?.call() ?? '';
     final relayPath =
-        List<String>.from(json['relay_path'] as List<dynamic>? ?? []);
+        List<String>.from(json[MessageKeys.relayPath] as List<dynamic>? ?? []);
 
     // Cycle detection: check both userId and path
     if (relayPath.contains(ownUserId)) {
@@ -237,13 +238,13 @@ class MeshRelayService {
     }
 
     final relayJson = Map<String, dynamic>.from(json);
-    relayJson['ttl'] = ttl - 1;
-    relayJson['relay_path'] = [...relayPath, ownUserId];
+    relayJson[MessageKeys.ttl] = ttl - 1;
+    relayJson[MessageKeys.relayPath] = [...relayPath, ownUserId];
 
     final data = Uint8List.fromList(utf8.encode(jsonEncode(relayJson)));
 
     // Directed routing: if we know which peer can reach the destination
-    final destinationId = json['destination_id'] as String? ?? '';
+    final destinationId = json[MessageKeys.destinationId] as String? ?? '';
     if (destinationId.isNotEmpty) {
       final bestRelay = findBestRelayPeer(destinationId, receivedFromPeerId);
       if (bestRelay != null) {
@@ -256,8 +257,8 @@ class MeshRelayService {
 
     // Flood to all connected peers except sender, with deterministic suppression
     var relayCount = 0;
-    final type = json['type'] as String? ?? '';
-    final isHighPriority = type == 'noise_hs' || type == 'drop_anchor';
+    final type = json[MessageKeys.type] as String? ?? '';
+    final isHighPriority = type == MessageTypes.noiseHandshake || type == MessageTypes.dropAnchor;
     for (final targetPeerId in _connectionManager.connectedPeerIds) {
       if (targetPeerId == receivedFromPeerId) continue;
       if (!_connectionManager.canSendTo(targetPeerId)) continue;
@@ -354,17 +355,17 @@ class MeshRelayService {
 
     final msgId = const Uuid().v4();
     final json = <String, dynamic>{
-      'type': 'peer_announce',
-      'message_id': msgId,
-      'peer_id': peer.peerId,
-      'peer_user_id': getAppUserIdForPeer?.call(peer.peerId) ?? '',
-      'name': peer.name,
-      if (peer.age != null) 'age': peer.age,
-      if (peer.bio != null) 'bio': peer.bio,
-      if (peer.publicKeyHex != null) 'pk': peer.publicKeyHex,
-      if (peer.signingPublicKeyHex != null) 'spk': peer.signingPublicKeyHex,
-      'ttl': _config.meshTtl - 1,
-      'relay_path': <String>[ownUserId],
+      MessageKeys.type: MessageTypes.peerAnnounce,
+      MessageKeys.messageId: msgId,
+      MessageKeys.peerId: peer.peerId,
+      MessageKeys.peerUserId: getAppUserIdForPeer?.call(peer.peerId) ?? '',
+      MessageKeys.name: peer.name,
+      if (peer.age != null) MessageKeys.age: peer.age,
+      if (peer.bio != null) MessageKeys.bio: peer.bio,
+      if (peer.publicKeyHex != null) MessageKeys.publicKey: peer.publicKeyHex,
+      if (peer.signingPublicKeyHex != null) MessageKeys.signingPublicKey: peer.signingPublicKeyHex,
+      MessageKeys.ttl: _config.meshTtl - 1,
+      MessageKeys.relayPath: <String>[ownUserId],
     };
 
     // Mark as seen so our own announce doesn't loop back
@@ -381,7 +382,7 @@ class MeshRelayService {
       final payloadBytes = Uint8List.fromList(utf8.encode(jsonEncode(json)));
       final sig = await signData!(payloadBytes);
       if (sig != null) {
-        json['sig'] = base64Encode(sig);
+        json[MessageKeys.signature] = base64Encode(sig);
       }
     }
 
@@ -389,16 +390,16 @@ class MeshRelayService {
     _broadcastToAll(data);
 
     Logger.info(
-        'MeshRelay: Announced "${json['name']}" to '
+        'MeshRelay: Announced "${json[MessageKeys.name]}" to '
         '${_connectionManager.activeConnectionCount} mesh peers'
-        '${json.containsKey('sig') ? ' (signed)' : ''}',
+        '${json.containsKey(MessageKeys.signature) ? ' (signed)' : ''}',
         'BLE',);
   }
 
   /// Handle an incoming peer_announce — returns a [RelayedPeerResult] if the
   /// announce should be emitted to the discovery stream, or null if suppressed.
   Future<void> handlePeerAnnounce(Map<String, dynamic> json, String fromPeerId) async {
-    final messageId = json['message_id'] as String? ?? '';
+    final messageId = json[MessageKeys.messageId] as String? ?? '';
 
     // Dedup via Bloom filter
     if (messageId.isNotEmpty) {
@@ -406,11 +407,11 @@ class MeshRelayService {
       markAnnounceSeen(messageId);
     }
 
-    final announcedPeerId = json['peer_id'] as String? ?? '';
+    final announcedPeerId = json[MessageKeys.peerId] as String? ?? '';
     if (announcedPeerId.isEmpty) return;
 
     // Don't emit ourselves
-    final announcedUserId = json['peer_user_id'] as String? ?? '';
+    final announcedUserId = json[MessageKeys.peerUserId] as String? ?? '';
     final ownUserId = getOwnUserId?.call() ?? '';
     if (announcedUserId.isNotEmpty && announcedUserId == ownUserId) return;
 
@@ -421,14 +422,14 @@ class MeshRelayService {
     }
 
     // Verify Ed25519 signature if present and we have a verify callback.
-    final sigB64 = json['sig'] as String?;
-    final spkHex = json['spk'] as String?;
+    final sigB64 = json[MessageKeys.signature] as String?;
+    final spkHex = json[MessageKeys.signingPublicKey] as String?;
     if (sigB64 != null && spkHex != null && spkHex.length == 64 && verifySignature != null) {
       try {
         final sig = base64Decode(sigB64);
         final spkBytes = _hexToBytes(spkHex);
         // Reconstruct the signed payload (JSON without the 'sig' field).
-        final signedJson = Map<String, dynamic>.from(json)..remove('sig');
+        final signedJson = Map<String, dynamic>.from(json)..remove(MessageKeys.signature);
         final payloadBytes = Uint8List.fromList(utf8.encode(jsonEncode(signedJson)));
         final valid = await verifySignature!(payloadBytes, Uint8List.fromList(sig), spkBytes);
         if (!valid) {
@@ -438,7 +439,7 @@ class MeshRelayService {
           );
           return;
         }
-      } catch (e) {
+      } on Exception catch (e) {
         Logger.warning('MeshRelay: Signature verification failed: $e', 'BLE');
         // Don't drop — old clients won't sign, so missing/malformed sigs are tolerated.
       }
@@ -446,25 +447,25 @@ class MeshRelayService {
 
     // Decode thumbnail
     Uint8List? thumbnail;
-    final thumbB64 = json['thumbnail_b64'] as String?;
+    final thumbB64 = json[MessageKeys.thumbnailB64] as String?;
     if (thumbB64 != null && thumbB64.isNotEmpty) {
       try {
         thumbnail = base64Decode(thumbB64);
-      } catch (_) {}
+      } on Exception catch (_) {}
     }
 
     final relayPath =
-        List<String>.from(json['relay_path'] as List<dynamic>? ?? []);
+        List<String>.from(json[MessageKeys.relayPath] as List<dynamic>? ?? []);
     final hopCount = relayPath.length;
 
-    final peerPkHex = json['pk'] as String?;
-    final peerSpkHex = json['spk'] as String?;
+    final peerPkHex = json[MessageKeys.publicKey] as String?;
+    final peerSpkHex = json[MessageKeys.signingPublicKey] as String?;
 
     final peer = DiscoveredPeer(
       peerId: announcedPeerId,
-      name: json['name'] as String? ?? 'Unknown',
-      age: json['age'] as int?,
-      bio: json['bio'] as String?,
+      name: json[MessageKeys.name] as String? ?? 'Unknown',
+      age: json[MessageKeys.age] as int?,
+      bio: json[MessageKeys.bio] as String?,
       thumbnailBytes: thumbnail,
       timestamp: DateTime.now(),
       isRelayed: true,
@@ -491,9 +492,9 @@ class MeshRelayService {
   /// Store the sender's neighbor list in the routing table.
   /// Entries now have a timestamp and expire after [_neighborTimeout].
   void handleNeighborList(Map<String, dynamic> json) {
-    final senderId = json['sender_id'] as String? ?? '';
+    final senderId = json[MessageKeys.senderId] as String? ?? '';
     if (senderId.isEmpty) return;
-    final peers = List<String>.from(json['peers'] as List<dynamic>? ?? []);
+    final peers = List<String>.from(json[MessageKeys.peers] as List<dynamic>? ?? []);
     _neighborMap[senderId] = _NeighborEntry(
       neighbors: Set<String>.from(peers),
       updatedAt: DateTime.now(),
@@ -512,10 +513,10 @@ class MeshRelayService {
 
     final ownUserId = getOwnUserId?.call() ?? '';
     final json = <String, dynamic>{
-      'type': 'neighbor_list',
-      'sender_id': ownUserId,
-      'peers': directPeerUserIds,
-      'ttl': 1,
+      MessageKeys.type: MessageTypes.neighborList,
+      MessageKeys.senderId: ownUserId,
+      MessageKeys.peers: directPeerUserIds,
+      MessageKeys.ttl: 1,
     };
 
     final data = Uint8List.fromList(utf8.encode(jsonEncode(json)));
@@ -630,23 +631,23 @@ class MeshRelayService {
   }
 
   void _relayPeerAnnounce(Map<String, dynamic> json, String excludePeerId) {
-    final ttl = json['ttl'] as int? ?? 0;
+    final ttl = json[MessageKeys.ttl] as int? ?? 0;
     if (ttl <= 0) return;
 
     final ownUserId = getOwnUserId?.call() ?? '';
     final relayPath =
-        List<String>.from(json['relay_path'] as List<dynamic>? ?? []);
+        List<String>.from(json[MessageKeys.relayPath] as List<dynamic>? ?? []);
     if (relayPath.contains(ownUserId)) return;
 
     final relayJson = Map<String, dynamic>.from(json);
-    relayJson['ttl'] = ttl - 1;
-    relayJson['relay_path'] = [...relayPath, ownUserId];
+    relayJson[MessageKeys.ttl] = ttl - 1;
+    relayJson[MessageKeys.relayPath] = [...relayPath, ownUserId];
 
     final data = Uint8List.fromList(utf8.encode(jsonEncode(relayJson)));
 
     // Directed: prefer a peer who already knows the announced peer
-    final announcedPeerId = json['peer_id'] as String? ?? '';
-    final announcedUserId = json['peer_user_id'] as String? ?? '';
+    final announcedPeerId = json[MessageKeys.peerId] as String? ?? '';
+    final announcedUserId = json[MessageKeys.peerUserId] as String? ?? '';
     final targetId =
         announcedUserId.isNotEmpty ? announcedUserId : announcedPeerId;
     if (targetId.isNotEmpty) {
@@ -659,7 +660,7 @@ class MeshRelayService {
 
     // Fallback: flood with deterministic suppression.
     // Peer announces are high-priority (discovery is critical).
-    final msgId = json['message_id'] as String? ?? '';
+    final msgId = json[MessageKeys.messageId] as String? ?? '';
     for (final peerId in _connectionManager.connectedPeerIds) {
       if (peerId == excludePeerId) continue;
       if (_connectionManager.isDeadPeer(peerId)) continue;

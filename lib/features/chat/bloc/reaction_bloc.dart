@@ -2,8 +2,8 @@ import 'dart:async';
 
 import 'package:anchor/core/utils/logger.dart';
 import 'package:anchor/data/local_database/database.dart';
-import 'package:anchor/data/repositories/chat_repository.dart';
-import 'package:anchor/data/repositories/peer_repository.dart';
+import 'package:anchor/data/repositories/chat_repository_interface.dart';
+import 'package:anchor/data/repositories/peer_repository_interface.dart';
 import 'package:anchor/services/ble/ble.dart' as ble;
 import 'package:anchor/services/notification_service.dart';
 import 'package:anchor/services/transport/transport.dart';
@@ -107,8 +107,8 @@ class ReactionState extends Equatable {
 /// Manages emoji reactions for the active chat conversation.
 class ReactionBloc extends Bloc<ReactionEvent, ReactionState> {
   ReactionBloc({
-    required ChatRepository chatRepository,
-    required PeerRepository peerRepository,
+    required ChatRepositoryInterface chatRepository,
+    required PeerRepositoryInterface peerRepository,
     required TransportManager transportManager,
     required NotificationService notificationService,
     required String ownUserId,
@@ -131,8 +131,8 @@ class ReactionBloc extends Bloc<ReactionEvent, ReactionState> {
     );
   }
 
-  final ChatRepository _chatRepository;
-  final PeerRepository _peerRepository;
+  final ChatRepositoryInterface _chatRepository;
+  final PeerRepositoryInterface _peerRepository;
   final TransportManager _transportManager;
   final NotificationService _notificationService;
   final String _ownUserId;
@@ -155,7 +155,7 @@ class ReactionBloc extends Bloc<ReactionEvent, ReactionState> {
         event.conversationId,
       );
       emit(state.copyWith(reactions: loaded));
-    } catch (e) {
+    } on Exception {
       Logger.warning('ReactionBloc: Failed to load reactions', 'ReactionBloc');
     }
   }
@@ -221,7 +221,7 @@ class ReactionBloc extends Bloc<ReactionEvent, ReactionState> {
         senderId: _ownUserId,
         emoji: event.emoji,
       );
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error(
           'ReactionBloc: Failed to save reaction', e, null, 'ReactionBloc',);
     }
@@ -262,7 +262,7 @@ class ReactionBloc extends Bloc<ReactionEvent, ReactionState> {
         senderId: _ownUserId,
         emoji: event.emoji,
       );
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error(
           'ReactionBloc: Failed to remove reaction', e, null, 'ReactionBloc',);
     }
@@ -293,7 +293,7 @@ class ReactionBloc extends Bloc<ReactionEvent, ReactionState> {
       final isBlocked =
           await _peerRepository.isPeerBlocked(reaction.fromPeerId);
       if (isBlocked) return;
-    } catch (_) {}
+    } on Exception catch (_) {}
 
     final messageId = reaction.messageId;
     final isAdd = reaction.action == 'add';
@@ -313,7 +313,7 @@ class ReactionBloc extends Bloc<ReactionEvent, ReactionState> {
           emoji: reaction.emoji,
         );
       }
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('ReactionBloc: Failed to persist received reaction', e, null,
           'ReactionBloc',);
     }

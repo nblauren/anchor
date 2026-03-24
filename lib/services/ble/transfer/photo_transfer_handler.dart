@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:anchor/core/constants/message_keys.dart';
 import 'package:anchor/core/utils/logger.dart';
 import 'package:anchor/services/ble/ble_config.dart';
 import 'package:anchor/services/ble/ble_models.dart';
@@ -162,13 +163,13 @@ class PhotoTransferHandler {
 
       // Phase 1: JSON metadata
       final startPayload = utf8.encode(jsonEncode({
-        'type': 'photo_start',
-        'sender_id': getOwnUserId?.call() ?? '',
-        'message_id': messageId,
-        if (photoId != null) 'photo_id': photoId,
-        'total_chunks': totalChunks,
-        'total_size': transferData.length,
-        if (nonceB64 != null) ...{'v': 1, 'n': nonceB64},
+        MessageKeys.type: MessageTypes.photoStart,
+        MessageKeys.senderId: getOwnUserId?.call() ?? '',
+        MessageKeys.messageId: messageId,
+        if (photoId != null) MessageKeys.photoId: photoId,
+        MessageKeys.totalChunks: totalChunks,
+        MessageKeys.totalSize: transferData.length,
+        if (nonceB64 != null) ...{MessageKeys.version: 1, MessageKeys.nonce: nonceB64},
       }),);
 
       final startSuccess = await _writeQueue.enqueue(
@@ -242,7 +243,7 @@ class PhotoTransferHandler {
 
       Logger.info('PhotoTransfer: Transfer completed: $messageId', 'BLE');
       return true;
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('PhotoTransfer: Transfer failed', e, null, 'BLE');
       _connectionManager.disconnect(peerId);
       _emitProgress(messageId, peerId, 0, PhotoTransferStatus.failed,
@@ -296,13 +297,13 @@ class PhotoTransferHandler {
 
       // Phase 1: JSON metadata
       final startPayload = utf8.encode(jsonEncode({
-        'type': 'photo_preview',
-        'sender_id': getOwnUserId?.call() ?? '',
-        'message_id': messageId,
-        'photo_id': photoId,
-        'original_size': originalSize,
-        'thumbnail_chunks': totalChunks,
-        if (thumbNonceB64 != null) ...{'v': 1, 'n': thumbNonceB64},
+        MessageKeys.type: MessageTypes.photoPreview,
+        MessageKeys.senderId: getOwnUserId?.call() ?? '',
+        MessageKeys.messageId: messageId,
+        MessageKeys.photoId: photoId,
+        MessageKeys.originalSize: originalSize,
+        MessageKeys.thumbnailChunks: totalChunks,
+        if (thumbNonceB64 != null) ...{MessageKeys.version: 1, MessageKeys.nonce: thumbNonceB64},
       }),);
 
       final startSuccess = await _writeQueue.enqueue(
@@ -351,7 +352,7 @@ class PhotoTransferHandler {
 
       Logger.info('PhotoTransfer: Preview sent: $photoId', 'BLE');
       return true;
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('PhotoTransfer: Preview send failed', e, null, 'BLE');
       _connectionManager.disconnect(peerId);
       return false;
@@ -382,10 +383,10 @@ class PhotoTransferHandler {
       }
 
       final requestPayload = Uint8List.fromList(utf8.encode(jsonEncode({
-        'type': 'photo_request',
-        'sender_id': getOwnUserId?.call() ?? '',
-        'message_id': messageId,
-        'photo_id': photoId,
+        MessageKeys.type: MessageTypes.photoRequest,
+        MessageKeys.senderId: getOwnUserId?.call() ?? '',
+        MessageKeys.messageId: messageId,
+        MessageKeys.photoId: photoId,
       }),),);
 
       final success = await _writeQueue.enqueue(
@@ -399,7 +400,7 @@ class PhotoTransferHandler {
         Logger.info('PhotoTransfer: photo_request sent: $photoId', 'BLE');
       }
       return success;
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('PhotoTransfer: photo_request send failed', e, null, 'BLE');
       return false;
     }
@@ -422,14 +423,14 @@ class PhotoTransferHandler {
   /// (0x02) only carry this ID, so we record the mapping for chunk lookup.
   void handlePhotoStart(Map<String, dynamic> json, String fromPeerId,
       {String? centralId,}) {
-    final messageId = json['message_id'] as String? ?? '';
-    final photoId = json['photo_id'] as String?;
-    final totalChunks = json['total_chunks'] as int? ?? 0;
-    final totalSize = json['total_size'] as int? ?? 0;
+    final messageId = json[MessageKeys.messageId] as String? ?? '';
+    final photoId = json[MessageKeys.photoId] as String?;
+    final totalChunks = json[MessageKeys.totalChunks] as int? ?? 0;
+    final totalSize = json[MessageKeys.totalSize] as int? ?? 0;
 
     Uint8List? nonce;
-    if (json['v'] == 1) {
-      final nStr = json['n'] as String?;
+    if (json[MessageKeys.version] == 1) {
+      final nStr = json[MessageKeys.nonce] as String?;
       if (nStr != null) nonce = Uint8List.fromList(base64.decode(nStr));
     }
 
@@ -452,7 +453,7 @@ class PhotoTransferHandler {
     // Also record the sender tag (first 8 chars of sender_id) for v2 binary
     // chunk identification. This provides a timing-independent fallback when
     // the Central UUID lookup fails.
-    final senderId = json['sender_id'] as String?;
+    final senderId = json[MessageKeys.senderId] as String?;
     if (senderId != null && senderId.length >= 8) {
       _senderTagToResolvedId[senderId.substring(0, 8)] = fromPeerId;
     }
@@ -633,7 +634,7 @@ class PhotoTransferHandler {
   /// Handle legacy JSON photo_chunk.
   void handleReceivedPhotoChunk(
       Map<String, dynamic> json, String fromPeerId,) {
-    final dataField = json['data'];
+    final dataField = json[MessageKeys.data];
     Uint8List chunkData;
     if (dataField is String) {
       chunkData = base64Decode(dataField);
@@ -644,11 +645,11 @@ class PhotoTransferHandler {
     }
 
     final chunk = PhotoChunk(
-      messageId: json['message_id'] as String? ?? '',
-      chunkIndex: json['chunk_index'] as int? ?? 0,
-      totalChunks: json['total_chunks'] as int? ?? 1,
+      messageId: json[MessageKeys.messageId] as String? ?? '',
+      chunkIndex: json[MessageKeys.chunkIndex] as int? ?? 0,
+      totalChunks: json[MessageKeys.totalChunks] as int? ?? 1,
       data: chunkData,
-      totalSize: json['total_size'] as int? ?? 0,
+      totalSize: json[MessageKeys.totalSize] as int? ?? 0,
     );
 
     Logger.info(
@@ -687,10 +688,10 @@ class PhotoTransferHandler {
   /// Handle photo_preview JSON — stores metadata for incoming thumbnail chunks.
   void handlePhotoPreviewStart(
       Map<String, dynamic> json, String fromPeerId, {String? centralId,}) {
-    final messageId = json['message_id'] as String? ?? '';
-    final photoId = json['photo_id'] as String? ?? '';
-    final originalSize = json['original_size'] as int? ?? 0;
-    final totalChunks = json['thumbnail_chunks'] as int? ?? 0;
+    final messageId = json[MessageKeys.messageId] as String? ?? '';
+    final photoId = json[MessageKeys.photoId] as String? ?? '';
+    final originalSize = json[MessageKeys.originalSize] as int? ?? 0;
+    final totalChunks = json[MessageKeys.thumbnailChunks] as int? ?? 0;
 
     Logger.info(
       'PhotoTransfer: Preview starting from '
@@ -712,8 +713,8 @@ class PhotoTransferHandler {
     }
 
     Uint8List? thumbNonce;
-    if (json['v'] == 1) {
-      final nStr = json['n'] as String?;
+    if (json[MessageKeys.version] == 1) {
+      final nStr = json[MessageKeys.nonce] as String?;
       if (nStr != null) thumbNonce = Uint8List.fromList(base64.decode(nStr));
     }
 
@@ -733,7 +734,7 @@ class PhotoTransferHandler {
     }
 
     // Record sender tag for v2 binary chunk identification.
-    final senderId = json['sender_id'] as String?;
+    final senderId = json[MessageKeys.senderId] as String?;
     if (senderId != null && senderId.length >= 8) {
       _senderTagToResolvedId[senderId.substring(0, 8)] = fromPeerId;
     }
@@ -854,8 +855,8 @@ class PhotoTransferHandler {
 
   /// Handle incoming photo_request JSON.
   void handlePhotoRequest(Map<String, dynamic> json, String fromPeerId) {
-    final messageId = json['message_id'] as String? ?? '';
-    final photoId = json['photo_id'] as String? ?? '';
+    final messageId = json[MessageKeys.messageId] as String? ?? '';
+    final photoId = json[MessageKeys.photoId] as String? ?? '';
 
     Logger.info(
       'PhotoTransfer: photo_request from '

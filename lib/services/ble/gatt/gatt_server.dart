@@ -5,6 +5,7 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:anchor/core/constants/message_keys.dart';
 import 'package:anchor/core/utils/logger.dart';
 import 'package:anchor/services/ble/ble_config.dart';
 import 'package:anchor/services/ble/ble_models.dart';
@@ -273,7 +274,7 @@ class GattServer {
       _peripheralPoweredOn = true;
       _isReady = true;
       Logger.info('GattServer: GATT server ready', 'BLE');
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('GattServer: GATT server setup failed', e, null, 'BLE');
       // Native call failed — peripheral not ready yet. Subscribe to state
       // changes so we retry as soon as it becomes ready.
@@ -362,7 +363,7 @@ class GattServer {
     Logger.info('GattServer: Stopped broadcasting', 'BLE');
     try {
       await _peripheral.stopAdvertising();
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('GattServer: Stop advertising failed', e, null, 'BLE');
     }
     _isBroadcasting = false;
@@ -375,7 +376,7 @@ class GattServer {
     await stopAdvertising();
     try {
       await _peripheral.removeAllServices();
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('GattServer: Remove services failed', e, null, 'BLE');
     }
     _isReady = false;
@@ -522,7 +523,7 @@ class GattServer {
       _isBroadcasting = true;
       _scheduleReAnnounce(payload);
       Logger.info('GattServer: Advertising started successfully', 'BLE');
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('GattServer: Advertising failed', e, null, 'BLE');
       _isBroadcasting = false;
       _reAnnounceTimer?.cancel();
@@ -546,7 +547,7 @@ class GattServer {
             'GattServer: Advertising started successfully (retry)',
             'BLE',
           );
-        } catch (retryErr) {
+        } on Exception catch (retryErr) {
           Logger.error(
             'GattServer: Advertising retry also failed — device will not be '
             'discoverable until next broadcast update',
@@ -573,12 +574,12 @@ class GattServer {
             name: compactName,
             serviceUUIDs: [_serviceUuid],
           ),);
-        } catch (_) {
+        } on Exception catch (_) {
           await _peripheral.startAdvertising(Advertisement(
             serviceUUIDs: [_serviceUuid],
           ),);
         }
-      } catch (e) {
+      } on Exception catch (e) {
         Logger.warning('GattServer: Re-announce failed: $e', 'BLE');
       }
     });
@@ -607,24 +608,24 @@ class GattServer {
   /// knows whether to request fff4 and how to split the data.
   Uint8List _encodeProfileData(BroadcastPayload payload) {
     final json = <String, dynamic>{
-      'userId': payload.userId,
-      'name': payload.name,
-      'age': payload.age,
-      'bio': payload.bio,
-      if (payload.position != null) 'pos': payload.position,
+      MessageKeys.userId: payload.userId,
+      MessageKeys.name: payload.name,
+      MessageKeys.age: payload.age,
+      MessageKeys.bio: payload.bio,
+      if (payload.position != null) MessageKeys.position: payload.position,
       if (payload.interests != null && payload.interests!.isNotEmpty)
-        'int': payload.interests,
-      if (_thumbnailData.isNotEmpty) 'thumbnail_size': _thumbnailData.length,
+        MessageKeys.interests: payload.interests,
+      if (_thumbnailData.isNotEmpty) MessageKeys.thumbnailSize: _thumbnailData.length,
       if (_ownFullPhotoSizes.length > 1) ...{
-        'photo_count': _ownFullPhotoSizes.length,
-        'full_photo_sizes': _ownFullPhotoSizes,
+        MessageKeys.photoCount: _ownFullPhotoSizes.length,
+        MessageKeys.fullPhotoSizes: _ownFullPhotoSizes,
       },
       // E2EE: include our X25519 public key so the peer can initiate Noise_XK.
-      if (payload.publicKeyHex != null) 'pk': payload.publicKeyHex,
+      if (payload.publicKeyHex != null) MessageKeys.publicKey: payload.publicKeyHex,
       // Ed25519 signing public key for mesh packet signature verification.
-      if (payload.signingPublicKeyHex != null) 'spk': payload.signingPublicKeyHex,
+      if (payload.signingPublicKeyHex != null) MessageKeys.signingPublicKey: payload.signingPublicKeyHex,
       // Profile version for change detection — scanners skip re-reads when unchanged.
-      'pv': _profileVersion,
+      MessageKeys.profileVersion: _profileVersion,
     };
     return Uint8List.fromList(utf8.encode(jsonEncode(json)));
   }
@@ -691,7 +692,7 @@ class GattServer {
         args.request,
         value: slice,
       );
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error(
           'GattServer: Characteristic read response failed', e, null, 'BLE',);
     }
@@ -723,7 +724,7 @@ class GattServer {
       );
 
       onWriteReceived?.call(data, args.central.uuid);
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('GattServer: Write receive failed', e, null, 'BLE');
     }
   }
@@ -755,7 +756,7 @@ class GattServer {
         'BLE',
       );
       return true;
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.warning(
         'GattServer: fff5 notify to $centralUuidStr failed: $e',
         'BLE',
@@ -793,7 +794,7 @@ class GattServer {
         'BLE',
       );
       return true;
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.warning(
         'GattServer: fff3 notify to $centralUuidStr failed: $e — '
         'falling back to fff5',
@@ -835,7 +836,7 @@ class GattServer {
     int maxChunk;
     try {
       maxChunk = await _peripheral.getMaximumNotifyLength(central);
-    } catch (_) {
+    } on Exception catch (_) {
       maxChunk = 500;
     }
 
@@ -866,7 +867,7 @@ class GattServer {
         if (offset < data.length) {
           await Future<void>.delayed(_interChunkDelay);
         }
-      } catch (e) {
+      } on Exception catch (e) {
         Logger.warning(
           'GattServer: Thumbnail chunk $chunkIdx/$totalChunks failed '
           'at offset $offset: $e',
@@ -902,7 +903,7 @@ class GattServer {
     int maxChunk;
     try {
       maxChunk = await _peripheral.getMaximumNotifyLength(central);
-    } catch (_) {
+    } on Exception catch (_) {
       maxChunk = 500;
     }
 
@@ -931,7 +932,7 @@ class GattServer {
         if (offset < data.length) {
           await Future<void>.delayed(_interChunkDelay);
         }
-      } catch (e) {
+      } on Exception catch (e) {
         Logger.warning(
           'GattServer: Full-photos chunk $chunkIdx/$totalChunks failed '
           'at offset $offset: $e',

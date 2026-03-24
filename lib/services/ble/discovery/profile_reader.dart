@@ -101,7 +101,7 @@ class ProfileReader {
         'ProfileReader: Loaded ${map.length} persisted thumbnail sizes',
         'BLE',
       );
-    } catch (_) {}
+    } on Exception catch (_) {}
   }
 
   void _persistSizes() {
@@ -174,7 +174,7 @@ class ProfileReader {
           'BLE',
         );
         _handleProfileData(peerId, data);
-      } catch (e) {
+      } on Exception catch (e) {
         Logger.warning(
             'ProfileReader: Profile read failed for $peerId: $e', 'BLE',);
       }
@@ -206,7 +206,7 @@ class ProfileReader {
             thumbnailChar,
             state: false,
           );
-        } catch (_) {}
+        } on Exception catch (_) {}
 
         // Small settling delay: the Peripheral's notify state handler fires
         // immediately on subscribe and starts pushing chunks. Without this
@@ -223,7 +223,7 @@ class ProfileReader {
           'ProfileReader: Subscribed to thumbnail notifications from $peerId',
           'BLE',
         );
-      } catch (e) {
+      } on Exception catch (e) {
         Logger.warning(
           'ProfileReader: Failed to subscribe to thumbnail from $peerId: $e',
           'BLE',
@@ -257,7 +257,7 @@ class ProfileReader {
           'ProfileReader: Subscribed to fff3 notify from $peerId (bidirectional)',
           'BLE',
         );
-      } catch (e) {
+      } on Exception catch (e) {
         Logger.warning(
           'ProfileReader: fff3 notify subscribe FAILED for $peerId: $e — '
           'will retry on next profile read cycle',
@@ -282,7 +282,7 @@ class ProfileReader {
           'ProfileReader: Subscribed to fff5 notifications from $peerId',
           'BLE',
         );
-      } catch (e) {
+      } on Exception catch (e) {
         // Don't add to _reversePathNotifySubscribed on failure so we retry next cycle.
         Logger.warning(
           'ProfileReader: fff5 notify subscribe FAILED for $peerId: $e — '
@@ -328,7 +328,7 @@ class ProfileReader {
         await _central.setCharacteristicNotifyState(
             conn.peripheral, fullPhotosChar,
             state: false,);
-      } catch (_) {}
+      } on Exception catch (_) {}
 
       await _central.setCharacteristicNotifyState(
           conn.peripheral, fullPhotosChar,
@@ -340,7 +340,7 @@ class ProfileReader {
         'BLE',
       );
       return true;
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error(
           'ProfileReader: fetchFullProfilePhotos failed for $peerId', e,
           null, 'BLE',);
@@ -515,7 +515,7 @@ class ProfileReader {
         fullPhotoSizes: fullPhotoSizes,
         legacyPhotoSizes: legacyPhotoSizes,
       ),);
-    } catch (e) {
+    } on Exception {
       Logger.warning('ProfileReader: Profile decode failed for $peerId', 'BLE');
     }
   }

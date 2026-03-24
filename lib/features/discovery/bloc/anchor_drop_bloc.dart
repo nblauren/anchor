@@ -2,8 +2,8 @@ import 'dart:async';
 
 import 'package:anchor/core/utils/logger.dart';
 import 'package:anchor/data/local_database/database.dart';
-import 'package:anchor/data/repositories/anchor_drop_repository.dart';
-import 'package:anchor/data/repositories/peer_repository.dart';
+import 'package:anchor/data/repositories/anchor_drop_repository_interface.dart';
+import 'package:anchor/data/repositories/peer_repository_interface.dart';
 import 'package:anchor/services/ble/ble_models.dart' as ble;
 import 'package:anchor/services/notification_service.dart';
 import 'package:anchor/services/transport/transport.dart';
@@ -24,6 +24,11 @@ sealed class AnchorDropEvent extends Equatable {
 /// Load anchor drop history (sent peer IDs from last 24h) for badge state.
 class LoadAnchorDropHistory extends AnchorDropEvent {
   const LoadAnchorDropHistory();
+}
+
+/// Load received anchor drops for the anchor drops screen.
+class LoadReceivedDrops extends AnchorDropEvent {
+  const LoadReceivedDrops();
 }
 
 /// User tapped the ⚓ button to drop anchor on a peer.
@@ -81,6 +86,8 @@ class AnchorDropState extends Equatable {
   const AnchorDropState({
     this.droppedAnchorPeerIds = const {},
     this.incomingAnchorDropName,
+    this.receivedDrops = const [],
+    this.receivedDropsLoading = false,
   });
 
   /// Peer IDs we have dropped anchor on (for ⚓ button highlight).
@@ -89,20 +96,35 @@ class AnchorDropState extends Equatable {
   /// Set briefly when a peer drops anchor on us — used to show a SnackBar.
   final String? incomingAnchorDropName;
 
+  /// Received anchor drops (deduplicated by peerId, most recent first).
+  final List<AnchorDropEntry> receivedDrops;
+
+  /// Whether received drops are currently loading.
+  final bool receivedDropsLoading;
+
   AnchorDropState copyWith({
     Set<String>? droppedAnchorPeerIds,
     Object? incomingAnchorDropName = _sentinel,
+    List<AnchorDropEntry>? receivedDrops,
+    bool? receivedDropsLoading,
   }) {
     return AnchorDropState(
       droppedAnchorPeerIds: droppedAnchorPeerIds ?? this.droppedAnchorPeerIds,
       incomingAnchorDropName: incomingAnchorDropName == _sentinel
           ? this.incomingAnchorDropName
           : incomingAnchorDropName as String?,
+      receivedDrops: receivedDrops ?? this.receivedDrops,
+      receivedDropsLoading: receivedDropsLoading ?? this.receivedDropsLoading,
     );
   }
 
   @override
-  List<Object?> get props => [droppedAnchorPeerIds, incomingAnchorDropName];
+  List<Object?> get props => [
+        droppedAnchorPeerIds,
+        incomingAnchorDropName,
+        receivedDrops,
+        receivedDropsLoading,
+      ];
 }
 
 const _sentinel = Object();
@@ -118,8 +140,8 @@ const _sentinel = Object();
 /// On peer rediscovery, pending drops are retried automatically.
 class AnchorDropBloc extends Bloc<AnchorDropEvent, AnchorDropState> {
   AnchorDropBloc({
-    required AnchorDropRepository anchorDropRepository,
-    required PeerRepository peerRepository,
+    required AnchorDropRepositoryInterface anchorDropRepository,
+    required PeerRepositoryInterface peerRepository,
     required TransportManager transportManager,
     NotificationService? notificationService,
   })  : _anchorDropRepository = anchorDropRepository,
@@ -128,6 +150,7 @@ class AnchorDropBloc extends Bloc<AnchorDropEvent, AnchorDropState> {
         _notificationService = notificationService,
         super(const AnchorDropState()) {
     on<LoadAnchorDropHistory>(_onLoadHistory);
+    on<LoadReceivedDrops>(_onLoadReceivedDrops);
     on<DropAnchor>(_onDropAnchor);
     on<AnchorDropReceived>(_onAnchorDropReceived);
     on<_ClearNotification>(
@@ -159,8 +182,8 @@ class AnchorDropBloc extends Bloc<AnchorDropEvent, AnchorDropState> {
     _anchorDropRepository.expireStalePendingDrops();
   }
 
-  final AnchorDropRepository _anchorDropRepository;
-  final PeerRepository _peerRepository;
+  final AnchorDropRepositoryInterface _anchorDropRepository;
+  final PeerRepositoryInterface _peerRepository;
   final TransportManager _transportManager;
   final NotificationService? _notificationService;
 
@@ -178,6 +201,36 @@ class AnchorDropBloc extends Bloc<AnchorDropEvent, AnchorDropState> {
     final sentDropPeerIds =
         await _anchorDropRepository.getSentPeerIdsSince();
     emit(state.copyWith(droppedAnchorPeerIds: sentDropPeerIds));
+  }
+
+  Future<void> _onLoadReceivedDrops(
+    LoadReceivedDrops event,
+    Emitter<AnchorDropState> emit,
+  ) async {
+    emit(state.copyWith(receivedDropsLoading: true));
+    try {
+      final drops = await _anchorDropRepository.getReceivedDrops();
+      // Deduplicate by peerId, keeping most recent per peer.
+      final seen = <String>{};
+      final unique = <AnchorDropEntry>[];
+      for (final drop in drops) {
+        if (seen.add(drop.peerId)) {
+          unique.add(drop);
+        }
+      }
+      emit(state.copyWith(
+        receivedDrops: unique,
+        receivedDropsLoading: false,
+      ),);
+    } on Exception catch (e) {
+      Logger.error(
+        'AnchorDropBloc: Failed to load received drops',
+        e,
+        null,
+        'AnchorDrop',
+      );
+      emit(state.copyWith(receivedDropsLoading: false));
+    }
   }
 
   Future<void> _onDropAnchor(
@@ -211,7 +264,7 @@ class AnchorDropBloc extends Bloc<AnchorDropEvent, AnchorDropState> {
             'AnchorDropBloc: Anchor queued for ${event.peerName} (peer unreachable)',
             'AnchorDrop',);
       }
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error(
           'AnchorDropBloc: Failed to drop anchor', e, null, 'AnchorDrop',);
     }
@@ -242,7 +295,7 @@ class AnchorDropBloc extends Bloc<AnchorDropEvent, AnchorDropState> {
           );
         }
       }
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error(
           'AnchorDropBloc: Retry failed', e, null, 'AnchorDrop',);
     } finally {
@@ -283,7 +336,7 @@ class AnchorDropBloc extends Bloc<AnchorDropEvent, AnchorDropState> {
       Logger.info(
           'AnchorDropBloc: Received anchor drop from $peerName',
           'AnchorDrop',);
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('AnchorDropBloc: Failed to handle anchor drop', e, null,
           'AnchorDrop',);
     }

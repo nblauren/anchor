@@ -111,7 +111,7 @@ class WifiAwareTransportServiceImpl implements WifiAwareTransportService {
       );
 
       Logger.info('WifiAwareTransport: session started', 'WifiAware');
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error(
           'WifiAwareTransport: failed to start session', e, null, 'WifiAware',);
       _started = false;
@@ -130,7 +130,7 @@ class WifiAwareTransportServiceImpl implements WifiAwareTransportService {
     for (final conn in _connections.values) {
       try {
         await conn.close();
-      } catch (_) {}
+      } on Exception catch (_) {}
     }
     _connections.clear();
     _activePeers.clear();
@@ -144,7 +144,7 @@ class WifiAwareTransportServiceImpl implements WifiAwareTransportService {
 
     try {
       await _session?.close();
-    } catch (_) {}
+    } on Exception catch (_) {}
     _session = null;
     _started = false;
 
@@ -213,7 +213,7 @@ class WifiAwareTransportServiceImpl implements WifiAwareTransportService {
 
       Logger.info(
           'WifiAwareTransport: profile updated and published', 'WifiAware',);
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error(
           'WifiAwareTransport: failed to update profile', e, null, 'WifiAware',);
     }
@@ -240,7 +240,7 @@ class WifiAwareTransportServiceImpl implements WifiAwareTransportService {
 
       _lastActivity[peerId] = DateTime.now();
       return true;
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error(
         'WifiAwareTransport: failed to send message to $peerId',
         e,
@@ -315,7 +315,7 @@ class WifiAwareTransportServiceImpl implements WifiAwareTransportService {
         'WifiAware',
       );
       return true;
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error(
         'WifiAwareTransport: photo send failed to $peerId',
         e,
@@ -373,7 +373,7 @@ class WifiAwareTransportServiceImpl implements WifiAwareTransportService {
 
       _lastActivity[peerId] = DateTime.now();
       return true;
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error(
         'WifiAwareTransport: failed to send photo preview',
         e,
@@ -405,7 +405,7 @@ class WifiAwareTransportServiceImpl implements WifiAwareTransportService {
       await session.sendMessage(peerId, bytes);
       _lastActivity[peerId] = DateTime.now();
       return true;
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error(
         'WifiAwareTransport: failed to send photo request',
         e,
@@ -442,7 +442,7 @@ class WifiAwareTransportServiceImpl implements WifiAwareTransportService {
       await session.sendMessage(peerId, bytes);
       _lastActivity[peerId] = DateTime.now();
       return true;
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error(
         'WifiAwareTransport: failed to send anchor drop',
         e,
@@ -482,7 +482,7 @@ class WifiAwareTransportServiceImpl implements WifiAwareTransportService {
       await session.sendMessage(peerId, bytes);
       _lastActivity[peerId] = DateTime.now();
       return true;
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error(
         'WifiAwareTransport: failed to send reaction',
         e,
@@ -563,7 +563,7 @@ class WifiAwareTransportServiceImpl implements WifiAwareTransportService {
     try {
       final json = jsonDecode(utf8.decode(msg.data)) as Map<String, dynamic>;
       _routeMessage(msg.peerId, json, msg.receivedAt);
-    } catch (e) {
+    } on Exception {
       Logger.warning(
         'WifiAwareTransport: failed to decode message from ${msg.peerId}',
         'WifiAware',
@@ -648,7 +648,7 @@ class WifiAwareTransportServiceImpl implements WifiAwareTransportService {
               content: payload.content,
               timestamp: timestamp,
             ),);
-          } catch (e) {
+          } on Exception {
             Logger.warning(
               'WifiAwareTransport: unrecognised message type: $type',
               'WifiAware',
@@ -668,7 +668,7 @@ class WifiAwareTransportServiceImpl implements WifiAwareTransportService {
       await conn.send(Uint8List.fromList(utf8.encode(request)));
 
       // Thumbnail data arrives via _listenToConnection
-    } catch (e) {
+    } on Exception {
       Logger.warning(
         'WifiAwareTransport: failed to fetch thumbnail from $peerId',
         'WifiAware',
@@ -747,7 +747,7 @@ class WifiAwareTransportServiceImpl implements WifiAwareTransportService {
 
           // Route other JSON messages
           _routeMessage(conn.peerId, json, DateTime.now());
-        } catch (_) {
+        } on Exception catch (_) {
           // Not JSON — binary photo data
           if (pendingPhotoMessageId != null) {
             photoBuffer.addAll(data);

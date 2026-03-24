@@ -5,7 +5,7 @@ import 'dart:typed_data';
 
 import 'package:anchor/core/utils/logger.dart';
 import 'package:anchor/data/local_database/database.dart';
-import 'package:anchor/data/repositories/chat_repository.dart';
+import 'package:anchor/data/repositories/chat_repository_interface.dart';
 import 'package:anchor/services/ble/ble.dart' as ble;
 import 'package:anchor/services/image_service.dart';
 import 'package:anchor/services/transport/transport.dart';
@@ -45,7 +45,7 @@ class MessageSendService {
   MessageSendService({
     required TransportManager transportManager,
     required ImageService imageService,
-    required ChatRepository chatRepository,
+    required ChatRepositoryInterface chatRepository,
     TransportRetryQueue? retryQueue,
   })  : _transportManager = transportManager,
         _imageService = imageService,
@@ -65,7 +65,7 @@ class MessageSendService {
 
   final TransportManager _transportManager;
   final ImageService _imageService;
-  final ChatRepository _chatRepository;
+  final ChatRepositoryInterface _chatRepository;
   final TransportRetryQueue? _retryQueue;
   StreamSubscription<RetryDeliveryUpdate>? _retryDeliverySub;
 
@@ -159,7 +159,7 @@ class MessageSendService {
         _emitDelivery(message.id, MessageStatus.failed);
         _conversationsChangedController.add(null);
       }
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Background text send failed', e, null, 'MessageSendService');
       _emitDelivery(message.id, MessageStatus.failed);
     }
@@ -219,7 +219,7 @@ class MessageSendService {
 
       _emitDelivery(message.id, previewSent ? MessageStatus.sent : MessageStatus.failed);
       _conversationsChangedController.add(null);
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Background photo send failed', e, null, 'MessageSendService');
       _emitDelivery(message.id, MessageStatus.failed);
     }
@@ -249,7 +249,7 @@ class MessageSendService {
         } else {
           photoId = const Uuid().v4();
         }
-      } catch (_) {
+      } on Exception catch (_) {
         photoId = const Uuid().v4();
       }
 
@@ -274,7 +274,7 @@ class MessageSendService {
 
       _emitDelivery(message.id, success ? MessageStatus.sent : MessageStatus.failed);
       _conversationsChangedController.add(null);
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Background photo retry failed', e, null, 'MessageSendService');
       _emitDelivery(message.id, MessageStatus.failed);
     }
@@ -296,7 +296,7 @@ class MessageSendService {
       final task = _sendQueue.removeAt(0);
       try {
         await task();
-      } catch (e) {
+      } on Exception catch (e) {
         Logger.error('Send queue task failed', e, null, 'MessageSendService');
       }
     }

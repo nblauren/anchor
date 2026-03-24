@@ -142,7 +142,7 @@ class NearbyTransferServiceImpl implements HighSpeedTransferService {
 
       _initialized = true;
       Logger.info('NearbyTransferService ready ($_ownUserId)', _tag);
-    } catch (e) {
+    } on Exception catch (e) {
       _initialized = false;
       _initFuture = null; // Allow retry on next call.
       Logger.error('NearbyTransferService init failed', e, null, _tag);
@@ -183,7 +183,7 @@ class NearbyTransferServiceImpl implements HighSpeedTransferService {
       try {
         await _nearbyService!.stopAdvertisingPeer();
         await _nearbyService!.stopBrowsingForPeers();
-      } catch (_) {}
+      } on Exception catch (_) {}
       _connectedDevices.clear();
       _discoveredDevices.clear();
       _pendingInvites.clear();
@@ -280,7 +280,7 @@ class NearbyTransferServiceImpl implements HighSpeedTransferService {
       },);
       await _stopNearby();
       return true;
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('sendPayload failed', e, null, _tag);
       _emitProgress(transferId, peerId, NearbyTransferStatus.failed, 0,
           error: e.toString(),);
@@ -313,7 +313,7 @@ class NearbyTransferServiceImpl implements HighSpeedTransferService {
       try {
         await _nearbyService!.stopAdvertisingPeer();
         await _nearbyService!.stopBrowsingForPeers();
-      } catch (_) {}
+      } on Exception catch (_) {}
       _connectedDevices.clear();
       _discoveredDevices.clear();
       _pendingInvites.clear();
@@ -350,7 +350,7 @@ class NearbyTransferServiceImpl implements HighSpeedTransferService {
       _incoming.remove(transferId);
       await _stopNearby();
       return result;
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('receivePayload failed', e, null, _tag);
       _emitProgress(transferId, peerId, NearbyTransferStatus.failed, 0,
           error: e.toString(),);
@@ -446,7 +446,7 @@ class NearbyTransferServiceImpl implements HighSpeedTransferService {
       return await _connectionCompleter!.future.timeout(timeout, onTimeout: () {
         return false;
       },);
-    } catch (_) {
+    } on Exception catch (_) {
       return false;
     } finally {
       _connectionCompleter = null;
@@ -538,7 +538,7 @@ class NearbyTransferServiceImpl implements HighSpeedTransferService {
     try {
       await _nearbyService!.stopBrowsingForPeers();
       await _nearbyService!.startBrowsingForPeers();
-    } catch (_) {}
+    } on Exception catch (_) {}
   }
 
   /// Find the first connected device matching [peerId] by exact deviceName.
@@ -628,7 +628,7 @@ class NearbyTransferServiceImpl implements HighSpeedTransferService {
             }
             // Send ACK to the sender so they know we received everything.
             _sendTransferAck(transferId);
-          } catch (e) {
+          } on Exception catch (e) {
             Logger.error('Decode failed for $transferId', e, null, _tag);
             _emitProgress(transferId, incoming.peerId,
                 NearbyTransferStatus.failed, 0,
@@ -646,7 +646,7 @@ class NearbyTransferServiceImpl implements HighSpeedTransferService {
             Logger.info('Received transfer ACK for $transferId', _tag);
           }
       }
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('_handleReceivedData error', e, null, _tag);
     }
   }
@@ -661,7 +661,7 @@ class NearbyTransferServiceImpl implements HighSpeedTransferService {
           'transfer_id': transferId,
         });
         Logger.info('Sent transfer ACK for $transferId', _tag);
-      } catch (e) {
+      } on Exception catch (e) {
         Logger.warning('Failed to send transfer ACK: $e', _tag);
       }
       break; // Only one peer in the session.
@@ -678,7 +678,7 @@ class NearbyTransferServiceImpl implements HighSpeedTransferService {
     try {
       await _nearbyService?.stopAdvertisingPeer();
       await _nearbyService?.stopBrowsingForPeers();
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.warning('_stopNearby error: $e', _tag);
     }
     _discoveredDevices.clear();

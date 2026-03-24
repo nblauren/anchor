@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:anchor/core/utils/logger.dart';
-import 'package:anchor/data/repositories/peer_repository.dart';
+import 'package:anchor/data/repositories/peer_repository_interface.dart';
 import 'package:anchor/features/discovery/bloc/discovery_event.dart';
 import 'package:anchor/features/discovery/bloc/discovery_state.dart';
 import 'package:anchor/services/ble/ble.dart' as ble;
@@ -33,7 +33,7 @@ class _ApplyDebouncedState extends DiscoveryEvent {
 ///   - Full profile photo fetch (on-demand via fff4 characteristic)
 class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
   DiscoveryBloc({
-    required PeerRepository peerRepository,
+    required PeerRepositoryInterface peerRepository,
     required TransportManager transportManager,
     NotificationService? notificationService,
   })  : _peerRepository = peerRepository,
@@ -99,7 +99,7 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
     _debounceTimer?.cancel();
   }
 
-  final PeerRepository _peerRepository;
+  final PeerRepositoryInterface _peerRepository;
   final TransportManager _transportManager;
   final NotificationService? _notificationService;
   Timer? _debounceTimer;
@@ -147,7 +147,7 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
       emit(state.copyWith(isScanning: true));
       await _transportManager.startScanning();
       Logger.info('Discovery scanning started', 'DiscoveryBloc');
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Failed to start BLE scanning', e, null, 'DiscoveryBloc');
       emit(state.copyWith(
         isScanning: false,
@@ -165,7 +165,7 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
       await _transportManager.stopScanning();
       emit(state.copyWith(isScanning: false));
       Logger.info('Discovery scanning stopped', 'DiscoveryBloc');
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Failed to stop BLE scanning', e, null, 'DiscoveryBloc');
     }
   }
@@ -186,7 +186,7 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
         peers: peers,
         lastRefreshed: DateTime.now(),
       ),);
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Failed to load peers', e, null, 'DiscoveryBloc');
       emit(state.copyWith(
         status: DiscoveryStatus.error,
@@ -301,7 +301,7 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
       } else {
         _scheduleUpdate(emit, () => newState);
       }
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error(
           'Failed to process discovered peer', e, null, 'DiscoveryBloc',);
     }
@@ -337,7 +337,7 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
 
         return state.copyWith(peers: updatedPeers);
       });
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Failed to update peer', e, null, 'DiscoveryBloc');
     }
   }
@@ -378,7 +378,7 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
       }).toList();
 
       emit(state.copyWith(peers: updatedPeers));
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Failed to block peer', e, null, 'DiscoveryBloc');
       emit(state.copyWith(errorMessage: 'Failed to block user'));
     }
@@ -404,7 +404,7 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
       }).toList();
 
       emit(state.copyWith(peers: updatedPeers));
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Failed to unblock peer', e, null, 'DiscoveryBloc');
       emit(state.copyWith(errorMessage: 'Failed to unblock user'));
     }
@@ -419,7 +419,7 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
     try {
       await _transportManager.startScanning();
       emit(state.copyWith(isScanning: true));
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.warning(
           'Could not start scan during refresh: $e', 'DiscoveryBloc',);
     }
@@ -434,7 +434,7 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
         peers: peers,
         lastRefreshed: DateTime.now(),
       ),);
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Failed to refresh peers', e, null, 'DiscoveryBloc');
       emit(state.copyWith(errorMessage: 'Failed to refresh'));
     }
@@ -471,7 +471,7 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
         peers: peers,
         lastRefreshed: DateTime.now(),
       ),);
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Failed to load mock peers', e, null, 'DiscoveryBloc');
       emit(state.copyWith(
         status: DiscoveryStatus.error,
@@ -571,7 +571,7 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
         try {
           final data = await rootBundle.load(path);
           return data.buffer.asUint8List();
-        } catch (_) {
+        } on Exception catch (_) {
           return null;
         }
       }),
@@ -615,7 +615,7 @@ class DiscoveryBloc extends Bloc<DiscoveryEvent, DiscoveryState> {
       final blocked = await _peerRepository.getBlockedPeers();
       final blockedIds = blocked.map((e) => e.peerId).toSet();
       _transportManager.updateBlockedPeerIds(blockedIds);
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.warning(
           'Failed to push block list to transport: $e', 'DiscoveryBloc',);
     }

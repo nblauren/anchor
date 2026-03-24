@@ -256,7 +256,7 @@ class BleStatusBloc extends Bloc<BleStatusEvent, BleStatusState> {
       ),);
 
       Logger.info('BleStatusBloc: Initialized successfully', 'BLE');
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('BleStatusBloc: Initialization failed', e, null, 'BLE');
       emit(state.copyWith(
         initStatus: BleInitStatus.error,
@@ -277,7 +277,7 @@ class BleStatusBloc extends Bloc<BleStatusEvent, BleStatusState> {
         // Re-initialize if permissions were just granted
         add(const InitializeBle());
       }
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('BleStatusBloc: Permission request failed', e, null, 'BLE');
       emit(state.copyWith(
         errorMessage: 'Failed to request permissions',
@@ -300,7 +300,7 @@ class BleStatusBloc extends Bloc<BleStatusEvent, BleStatusState> {
         isScanning: _bleService.isScanning,
         isBroadcasting: _bleService.isBroadcasting,
       ),);
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('BleStatusBloc: Start failed', e, null, 'BLE');
       emit(state.copyWith(errorMessage: 'Failed to start'));
     }
@@ -316,7 +316,7 @@ class BleStatusBloc extends Bloc<BleStatusEvent, BleStatusState> {
         isScanning: false,
         isBroadcasting: false,
       ),);
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('BleStatusBloc: Stop failed', e, null, 'BLE');
     }
   }

@@ -14,8 +14,6 @@ import 'package:anchor/features/discovery/screens/anchor_drops_screen.dart';
 import 'package:anchor/features/discovery/screens/peer_detail_screen.dart';
 import 'package:anchor/features/discovery/widgets/peer_grid_tile.dart';
 import 'package:anchor/features/discovery/widgets/radar_view.dart';
-import 'package:anchor/injection.dart';
-import 'package:anchor/services/database_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -180,10 +178,7 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                             BlocProvider.value(value: context.read<ChatE2eeBloc>()),
                             BlocProvider.value(value: context.read<ReactionBloc>()),
                           ],
-                          child: AnchorDropsScreen(
-                            anchorDropRepository:
-                                getIt<DatabaseService>().anchorDropRepository,
-                          ),
+                          child: const AnchorDropsScreen(),
                         ),
                       ),
                     );

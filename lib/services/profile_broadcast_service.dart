@@ -80,7 +80,7 @@ class ProfileBroadcastService {
         'transport: ${_transportManager.activeTransport})',
         'ProfileBroadcastService',
       );
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Failed to broadcast profile', e, null, 'ProfileBroadcastService');
     }
   }

@@ -4,7 +4,7 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:anchor/core/utils/logger.dart';
-import 'package:anchor/data/local_database/database.dart';
+import 'package:anchor/data/repositories/encryption_repository_interface.dart';
 import 'package:anchor/services/encryption/encryption_models.dart';
 import 'package:anchor/services/encryption/noise_handshake.dart';
 import 'package:anchor/services/encryption/noise_xx_handshake.dart';
@@ -12,7 +12,6 @@ import 'package:anchor/services/encryption/rate_limiter.dart';
 import 'package:anchor/services/encryption/traffic_padding.dart';
 import 'package:anchor/services/mesh/mesh_packet.dart';
 import 'package:cryptography/cryptography.dart';
-import 'package:drift/drift.dart' show InsertMode, Value;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 // ---------------------------------------------------------------------------
@@ -61,9 +60,9 @@ const _kSessionTimeout = Duration(hours: 24);
 
 class EncryptionService {
   EncryptionService({
-    required AppDatabase database,
+    required EncryptionRepositoryInterface encryptionRepository,
     FlutterSecureStorage? secureStorage,
-  })  : _database = database,
+  })  : _encryptionRepository = encryptionRepository,
         _secureStorage = secureStorage ??
             const FlutterSecureStorage(
               aOptions: AndroidOptions(encryptedSharedPreferences: true),
@@ -72,7 +71,7 @@ class EncryptionService {
               ),
             );
 
-  final AppDatabase _database;
+  final EncryptionRepositoryInterface _encryptionRepository;
   final FlutterSecureStorage _secureStorage;
   final _xchacha = Xchacha20.poly1305Aead();
   final _x25519 = X25519();
@@ -175,8 +174,8 @@ class EncryptionService {
     _sessions.clear();
     _pending.clear();
     try {
-      await _database.delete(_database.noiseSessions).go();
-    } catch (_) {}
+      await _encryptionRepository.deleteAllSessionsForPanic();
+    } on Exception catch (_) {}
 
     // 3. Delete long-term keys from secure storage
     await _secureStorage.delete(key: _kPrivateKeyStorageKey);
@@ -254,11 +253,10 @@ class EncryptionService {
       if (ed25519PublicKeyHex != null) {
         final existingEd = await _getPeerEd25519PublicKeyHex(peerId);
         if (existingEd != ed25519PublicKeyHex) {
-          await (_database.update(_database.discoveredPeers)
-                ..where((t) => t.peerId.equals(peerId)))
-              .write(DiscoveredPeersCompanion(
-            ed25519PublicKeyHex: Value(ed25519PublicKeyHex),
-          ),);
+          await _encryptionRepository.updatePeerEd25519Key(
+            peerId,
+            ed25519PublicKeyHex,
+          );
           Logger.info(
             'Updated Ed25519 signing key for $peerId (X25519 unchanged)',
             'E2EE',
@@ -279,28 +277,14 @@ class EncryptionService {
 
     // Ensure the canonical peer row exists BEFORE dedup so FK constraints
     // are satisfied when migrating conversations, drops, etc. to this peerId.
-    final peerRow = await (_database.select(_database.discoveredPeers)
-          ..where((t) => t.peerId.equals(peerId)))
-        .getSingleOrNull();
-
-    if (peerRow == null) {
-      await _database.into(_database.discoveredPeers).insert(
-            DiscoveredPeersCompanion.insert(
-              peerId: peerId,
-              name: 'Unknown',
-              lastSeenAt: DateTime.now(),
-            ),
-            mode: InsertMode.insertOrIgnore,
-          );
-    }
+    await _encryptionRepository.ensurePeerExists(peerId);
 
     // Always update the public keys.
-    await (_database.update(_database.discoveredPeers)
-          ..where((t) => t.peerId.equals(peerId)))
-        .write(DiscoveredPeersCompanion(
-      publicKeyHex: Value(publicKeyHex),
-      ed25519PublicKeyHex: Value(ed25519PublicKeyHex),
-    ),);
+    await _encryptionRepository.storePeerPublicKeys(
+      peerId,
+      publicKeyHex: publicKeyHex,
+      ed25519PublicKeyHex: ed25519PublicKeyHex,
+    );
 
     Logger.info(
         'Stored public key for peer $peerId (${publicKeyHex.substring(0, 8)}…) — handshake can now proceed',
@@ -1000,7 +984,7 @@ class EncryptionService {
 
       return EncryptedPayload(
           nonce: Uint8List.fromList(nonce), ciphertext: ciphertext,);
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Crypto operation failed for $peerId: $e', e, null, 'E2EE');
       return null;
     }
@@ -1051,7 +1035,7 @@ class EncryptionService {
       Logger.warning(
           'Auth tag mismatch from peer $peerId — message dropped', 'E2EE',);
       return null;
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Crypto operation failed for $peerId: $e', e, null, 'E2EE');
       return null;
     }
@@ -1151,17 +1135,11 @@ class EncryptionService {
   }
 
   Future<String?> _getPeerPublicKeyHex(String peerId) async {
-    final row = await (_database.select(_database.discoveredPeers)
-          ..where((t) => t.peerId.equals(peerId)))
-        .getSingleOrNull();
-    return row?.publicKeyHex;
+    return _encryptionRepository.getPeerPublicKey(peerId);
   }
 
   Future<String?> _getPeerEd25519PublicKeyHex(String peerId) async {
-    final row = await (_database.select(_database.discoveredPeers)
-          ..where((t) => t.peerId.equals(peerId)))
-        .getSingleOrNull();
-    return row?.ed25519PublicKeyHex;
+    return _encryptionRepository.getPeerEd25519Key(peerId);
   }
 
   /// Get a peer's stored Ed25519 signing public key (hex).
@@ -1230,16 +1208,14 @@ class EncryptionService {
   /// Save a session to the database.
   Future<void> _persistSession(NoiseSession session) async {
     try {
-      await _database.into(_database.noiseSessions).insertOnConflictUpdate(
-            NoiseSessionsCompanion.insert(
-              peerId: session.peerId,
-              sendKeyHex: _bytesToHex(session.sendKey),
-              receiveKeyHex: _bytesToHex(session.receiveKey),
-              establishedAt: session.establishedAt,
-              messageCount: Value(session.messageCount),
-            ),
-          );
-    } catch (e) {
+      await _encryptionRepository.persistSession(
+        session.peerId,
+        sendKeyHex: _bytesToHex(session.sendKey),
+        receiveKeyHex: _bytesToHex(session.receiveKey),
+        establishedAt: session.establishedAt,
+        messageCount: session.messageCount,
+      );
+    } on Exception catch (e) {
       Logger.error('Failed to persist E2EE session', e, null, 'E2EE');
     }
   }
@@ -1247,23 +1223,21 @@ class EncryptionService {
   /// Load persisted sessions from the database on startup.
   Future<void> _loadPersistedSessions() async {
     try {
-      final rows = await _database.select(_database.noiseSessions).get();
+      final entries = await _encryptionRepository.loadAllSessions();
       final now = DateTime.now();
-      for (final row in rows) {
-        final age = now.difference(row.establishedAt);
+      for (final entry in entries) {
+        final age = now.difference(entry.establishedAt);
         if (age > _kSessionTimeout) {
           // Expired — delete from DB.
-          await (_database.delete(_database.noiseSessions)
-                ..where((t) => t.peerId.equals(row.peerId)))
-              .go();
+          await _encryptionRepository.deleteSession(entry.peerId);
           continue;
         }
-        _sessions[row.peerId] = NoiseSession(
-          peerId: row.peerId,
-          sendKey: _hexToBytes(row.sendKeyHex),
-          receiveKey: _hexToBytes(row.receiveKeyHex),
-          establishedAt: row.establishedAt,
-        )..messageCount = row.messageCount;
+        _sessions[entry.peerId] = NoiseSession(
+          peerId: entry.peerId,
+          sendKey: _hexToBytes(entry.sendKeyHex),
+          receiveKey: _hexToBytes(entry.receiveKeyHex),
+          establishedAt: entry.establishedAt,
+        )..messageCount = entry.messageCount;
       }
       if (_sessions.isNotEmpty) {
         Logger.info(
@@ -1271,7 +1245,7 @@ class EncryptionService {
           'E2EE',
         );
       }
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('Failed to load persisted E2EE sessions', e, null, 'E2EE');
     }
   }
@@ -1279,10 +1253,8 @@ class EncryptionService {
   /// Delete a persisted session from the database.
   Future<void> _deletePersistedSession(String peerId) async {
     try {
-      await (_database.delete(_database.noiseSessions)
-            ..where((t) => t.peerId.equals(peerId)))
-          .go();
-    } catch (e) {
+      await _encryptionRepository.deleteSession(peerId);
+    } on Exception catch (e) {
       Logger.error('Failed to delete persisted session', e, null, 'E2EE');
     }
   }

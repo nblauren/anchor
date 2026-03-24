@@ -62,7 +62,7 @@ class MockBleService implements BleServiceInterface {
       try {
         final data = await rootBundle.load(_mockAvatarPaths[i]);
         _avatarCache[i] = data.buffer.asUint8List();
-      } catch (_) {
+      } on Exception catch (_) {
         _avatarCache[i] = null;
       }
     }

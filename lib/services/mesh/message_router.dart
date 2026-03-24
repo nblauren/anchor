@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:anchor/core/constants/message_keys.dart';
 import 'package:anchor/core/utils/logger.dart';
 import 'package:anchor/services/encryption/encryption.dart';
 import 'package:anchor/services/mesh/bloom_filter.dart';
@@ -330,21 +331,21 @@ class MessageRouter {
     required String rawSenderId,
     required TransportType fromTransport,
   }) async {
-    final messageId = json['messageId'] as String? ?? json['message_id'] as String? ?? '';
-    final typeStr = json['type'] as String? ?? 'message';
+    final messageId = json[MessageKeys.messageIdCamel] as String? ?? json[MessageKeys.messageId] as String? ?? '';
+    final typeStr = json[MessageKeys.type] as String? ?? MessageTypes.message;
     final type = _legacyType(typeStr);
-    final content = json['content'] as String? ?? '';
-    final ttl = json['ttl'] as int? ?? 0;
-    final destinationId = json['destination_id'] as String?;
+    final content = json[MessageKeys.content] as String? ?? '';
+    final ttl = json[MessageKeys.ttl] as int? ?? 0;
+    final destinationId = json[MessageKeys.destinationId] as String?;
 
     var flags = 0;
-    if (json['v'] == 1) flags |= PacketFlags.encrypted;
+    if (json[MessageKeys.version] == 1) flags |= PacketFlags.encrypted;
 
     // For encrypted messages, rebuild the ciphertext from JSON fields
     Uint8List payload;
     if ((flags & PacketFlags.encrypted) != 0) {
-      final nonce = json['n'] as String?;
-      final ciphertext = json['c'] as String?;
+      final nonce = json[MessageKeys.nonce] as String?;
+      final ciphertext = json[MessageKeys.ciphertext] as String?;
       if (nonce != null && ciphertext != null) {
         final nonceBytes = base64.decode(nonce);
         final ctBytes = base64.decode(ciphertext);
@@ -455,24 +456,24 @@ class MessageRouter {
 
   PacketType _legacyType(String type) {
     switch (type) {
-      case 'message':
+      case MessageTypes.message:
       case 'text':
         return PacketType.message;
-      case 'noise_hs':
+      case MessageTypes.noiseHandshake:
         return PacketType.handshake;
-      case 'peer_announce':
+      case MessageTypes.peerAnnounce:
         return PacketType.peerAnnounce;
-      case 'neighbor_list':
+      case MessageTypes.neighborList:
         return PacketType.neighborList;
-      case 'drop_anchor':
+      case MessageTypes.dropAnchor:
         return PacketType.anchorDrop;
-      case 'reaction':
+      case MessageTypes.reaction:
         return PacketType.reaction;
-      case 'photo_preview':
+      case MessageTypes.photoPreview:
         return PacketType.photoPreview;
-      case 'photo_request':
+      case MessageTypes.photoRequest:
         return PacketType.photoRequest;
-      case 'read_receipt':
+      case MessageTypes.readReceipt:
       case 'read':
         return PacketType.readReceipt;
       default:

@@ -274,7 +274,7 @@ class BleConnectionBloc extends Bloc<BleConnectionEvent, BleConnectionState> {
       try {
         final level = await _battery.batteryLevel;
         if (!isClosed) add(_BatteryLevelChanged(level));
-      } catch (_) {
+      } on Exception catch (_) {
         // Battery level unavailable (e.g. simulator)
       }
     });
@@ -360,7 +360,7 @@ class BleConnectionBloc extends Bloc<BleConnectionEvent, BleConnectionState> {
       if (state.isInForeground && state.isVisible) {
         add(const StartBleService());
       }
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('BleConnectionBloc: Initialization failed', e, null, 'BLE');
       emit(state.copyWith(
         status: BleConnectionStatus.error,
@@ -381,7 +381,7 @@ class BleConnectionBloc extends Bloc<BleConnectionEvent, BleConnectionState> {
         // Re-initialize after permissions granted
         add(const InitializeBleConnection());
       }
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('BleConnectionBloc: Permission request failed', e, null, 'BLE');
     }
   }
@@ -405,7 +405,7 @@ class BleConnectionBloc extends Bloc<BleConnectionEvent, BleConnectionState> {
         isBroadcasting: _bleService.isBroadcasting,
       ),);
       Logger.info('BleConnectionBloc: Started', 'BLE');
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('BleConnectionBloc: Start failed', e, null, 'BLE');
       emit(state.copyWith(
         status: BleConnectionStatus.error,
@@ -426,7 +426,7 @@ class BleConnectionBloc extends Bloc<BleConnectionEvent, BleConnectionState> {
         isBroadcasting: false,
       ),);
       Logger.info('BleConnectionBloc: Stopped', 'BLE');
-    } catch (e) {
+    } on Exception catch (e) {
       Logger.error('BleConnectionBloc: Stop failed', e, null, 'BLE');
     }
   }
@@ -445,7 +445,7 @@ class BleConnectionBloc extends Bloc<BleConnectionEvent, BleConnectionState> {
       try {
         await _bleService.startScanning();
         Logger.info('BleConnectionBloc: Resumed - triggered scan', 'BLE');
-      } catch (e) {
+      } on Exception catch (e) {
         Logger.warning('BleConnectionBloc: Resume scan failed: $e', 'BLE');
       }
     }

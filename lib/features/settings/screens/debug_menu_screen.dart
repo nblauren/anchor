@@ -396,7 +396,7 @@ class _DebugMenuScreenState extends State<DebugMenuScreen> {
       context.read<DiscoveryBloc>().add(const LoadMockPeers());
       _showSnackBar('Added mock peers');
       _appendLog('Added mock peers');
-    } catch (e) {
+    } on Exception {
       _showSnackBar('Failed to add mock peers');
     }
   }
@@ -545,7 +545,7 @@ Database Statistics:
       _messageController.clear();
       _showSnackBar('Broadcast sent');
       _appendLog('Sent broadcast: $message');
-    } catch (e) {
+    } on Exception catch (e) {
       _showSnackBar('Broadcast failed: $e');
     }
   }
